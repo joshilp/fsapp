@@ -1,14 +1,22 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
-	import type { PageServerData } from './$types';
+	import Logout from '$lib/components/logout/Logout.svelte';
+	import * as Card from '$lib/components/ui/card/index.js';
+	import type { PageData } from './$types';
 
-	let { data }: { data: PageServerData } = $props();
+	let { data }: { data: PageData } = $props();
 </script>
 
-<h1>Hi, {data.user.name}!</h1>
-<p>Your user ID is {data.user.id}.</p>
-<form method="post" action="?/signOut" use:enhance>
-	<button class="rounded-md bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700"
-		>Sign out</button
-	>
-</form>
+<div class="flex flex-1 items-center justify-center px-4 py-12">
+	<Card.Root class="w-full max-w-sm">
+		<Card.Header>
+			<Card.Title>Hello, {data.user.name}!</Card.Title>
+			<Card.Description>{data.user.email}</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			<p class="text-muted-foreground text-sm">You're successfully signed in.</p>
+		</Card.Content>
+		<Card.Footer>
+			<Logout />
+		</Card.Footer>
+	</Card.Root>
+</div>
