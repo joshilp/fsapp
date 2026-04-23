@@ -15,6 +15,13 @@
       "when": 1776955595526,
       "tag": "0001_windy_triton",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776977817958,
+      "tag": "0002_late_ozymandias",
+      "breakpoints": true
     }
   ]
 }
