@@ -232,6 +232,9 @@ export const bookings = sqliteTable(
 		vehiclePlate: text('vehicle_plate'),
 
 		otaConfirmationNumber: text('ota_confirmation_number'),
+		// Free-text clerk name for non-registered users (walk-ins helping at desk, etc.)
+		// Takes precedence over clerkId for display when set.
+		clerkName: text('clerk_name'),
 		notes: text('notes'),
 
 		// Timestamps for lifecycle events

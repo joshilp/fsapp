@@ -16,6 +16,7 @@
 
 		<nav class="flex items-center gap-2">
 			{#if user}
+				<Button href="/booking" variant="ghost" size="sm">Grid</Button>
 				<span class="text-muted-foreground hidden text-sm sm:inline">{user.name}</span>
 				<Logout size="sm" />
 			{:else}
