@@ -1,4 +1,4 @@
-import { and, eq, gt, lte, ne, sql } from 'drizzle-orm';
+import { and, eq, gt, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import { bookings, properties, rooms } from './db/schema';
 
@@ -194,5 +194,93 @@ export async function getGridData(
 		month,
 		daysInMonth: days,
 		rooms: gridRooms
+	};
+}
+
+// ─── Today data ───────────────────────────────────────────────────────────────
+
+export type TodayBooking = {
+	id: string;
+	propertyId: string;
+	propertyName: string;
+	roomNumber: string;
+	roomTypeCategory: string | null;
+	guestName: string | null;
+	channelName: string | null;
+	status: string;
+	checkInDate: string;
+	checkOutDate: string;
+	numAdults: number;
+	numChildren: number;
+	notes: string | null;
+};
+
+export async function getTodayData(today: string): Promise<{
+	arrivals: TodayBooking[];
+	departures: TodayBooking[];
+	inHouse: TodayBooking[];
+}> {
+	const rows = await db.query.bookings.findMany({
+		where: and(
+			or(
+				// Arriving today (confirmed or already checked in today)
+				eq(bookings.checkInDate, today),
+				// Departing today
+				eq(bookings.checkOutDate, today),
+				// Currently in house
+				and(lt(bookings.checkInDate, today), gt(bookings.checkOutDate, today))
+			),
+			ne(bookings.status, 'cancelled')
+		),
+		with: {
+			guest: { columns: { name: true } },
+			channel: { columns: { name: true } },
+			room: {
+				columns: { roomNumber: true },
+				with: {
+					roomType: { columns: { category: true } },
+					property: { columns: { id: true, name: true } }
+				}
+			}
+		},
+		columns: {
+			id: true,
+			propertyId: true,
+			status: true,
+			checkInDate: true,
+			checkOutDate: true,
+			numAdults: true,
+			numChildren: true,
+			notes: true
+		},
+		orderBy: (b, { asc }) => [asc(b.checkInDate)]
+	});
+
+	const toTodayBooking = (r: (typeof rows)[0]): TodayBooking => ({
+		id: r.id,
+		propertyId: r.propertyId,
+		propertyName: r.room?.property?.name ?? r.propertyId,
+		roomNumber: r.room?.roomNumber ?? '?',
+		roomTypeCategory: r.room?.roomType?.category ?? null,
+		guestName: r.guest?.name ?? null,
+		channelName: r.channel?.name ?? null,
+		status: r.status,
+		checkInDate: r.checkInDate,
+		checkOutDate: r.checkOutDate,
+		numAdults: r.numAdults,
+		numChildren: r.numChildren,
+		notes: r.notes
+	});
+
+	return {
+		arrivals: rows
+			.filter((r) => r.checkInDate === today && r.status === 'confirmed')
+			.map(toTodayBooking),
+		departures: rows
+			.filter((r) => r.checkOutDate === today && r.status === 'checked_in')
+			.map(toTodayBooking),
+		inHouse: rows
+			.filter((r) => r.checkInDate < today && r.checkOutDate > today && r.status === 'checked_in')
+			.map(toTodayBooking)
 	};
 }

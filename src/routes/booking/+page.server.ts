@@ -1,7 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { and, eq, gt, lt, ne } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
-import { getGridData } from '$lib/server/booking-queries';
+import { getGridData, getTodayData } from '$lib/server/booking-queries';
 import { db } from '$lib/server/db';
 import {
 	bookingChannels,
@@ -34,14 +34,19 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	month = Math.max(1, Math.min(12, month));
 
-	const [falcon, spanish, channels, users] = await Promise.all([
-		getGridData('prop-falcon', year, month),
-		getGridData('prop-spanish', year, month),
+	const todayIso = now.toISOString().slice(0, 10);
+	const rawView = url.searchParams.get('view');
+	const viewMode: 'grid' | 'today' = rawView === 'today' ? 'today' : 'grid';
+
+	const [falcon, spanish, channels, users, todayData] = await Promise.all([
+		viewMode === 'grid' ? getGridData('prop-falcon', year, month) : Promise.resolve(null),
+		viewMode === 'grid' ? getGridData('prop-spanish', year, month) : Promise.resolve(null),
 		db.query.bookingChannels.findMany({
 			where: eq(bookingChannels.isActive, true),
 			orderBy: (t, { asc }) => [asc(t.sortOrder)]
 		}),
-		db.select({ id: user.id, name: user.name }).from(user).orderBy(user.name)
+		db.select({ id: user.id, name: user.name }).from(user).orderBy(user.name),
+		viewMode === 'today' ? getTodayData(todayIso) : Promise.resolve(null)
 	]);
 
 	return {
@@ -49,10 +54,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		spanish,
 		year,
 		month,
-		today: now.toISOString().slice(0, 10),
+		today: todayIso,
+		viewMode,
 		channels: channels.map((c) => ({ id: c.id, name: c.name })),
 		users: users.map((u) => ({ id: u.id, name: u.name })),
-		currentUserId: locals.user.id
+		currentUserId: locals.user.id,
+		todayData
 	};
 };
 
@@ -189,6 +196,22 @@ export const actions: Actions = {
 		}
 
 		return { success: true, bookingId };
+	},
+
+	// Check out a booking
+	checkOutBooking: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+
+		const fd = await request.formData();
+		const bookingId = (fd.get('bookingId') as string)?.trim();
+		if (!bookingId) return fail(400, { error: 'Missing bookingId' });
+
+		await db
+			.update(bookings)
+			.set({ status: 'checked_out', checkedOutAt: new Date() })
+			.where(eq(bookings.id, bookingId));
+
+		return { success: true };
 	},
 
 	// Soft-cancel a booking

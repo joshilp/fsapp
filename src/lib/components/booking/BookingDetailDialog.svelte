@@ -25,7 +25,10 @@
 
 	function formatDate(iso: string): string {
 		return new Date(iso + 'T12:00:00').toLocaleDateString('en-CA', {
-			weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+			weekday: 'short',
+			month: 'short',
+			day: 'numeric',
+			year: 'numeric'
 		});
 	}
 
@@ -33,8 +36,14 @@
 		return Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
 	}
 
-	let cancelling = $state(false);
+	let confirmCheckOut = $state(false);
 	let confirmCancel = $state(false);
+	let processing = $state(false);
+
+	function resetConfirms() {
+		confirmCheckOut = false;
+		confirmCancel = false;
+	}
 </script>
 
 <CustomDialog
@@ -93,28 +102,20 @@
 			</dl>
 
 			<!-- Actions -->
-			<div class="border-border border-t pt-3">
-				{#if booking.status === 'confirmed' || booking.status === 'checked_in'}
+			<div class="border-border flex flex-col gap-2 border-t pt-3">
+				{#if booking.status === 'confirmed'}
 					<div class="flex flex-wrap gap-2">
-						{#if booking.status === 'confirmed'}
-							<Button variant="default" size="sm" disabled title="Coming soon">
-								Check In
-							</Button>
-						{/if}
-						{#if booking.status === 'checked_in'}
-							<Button variant="default" size="sm" disabled title="Coming soon">
-								Check Out
-							</Button>
-						{/if}
-						<Button variant="outline" size="sm" disabled title="Coming soon">Edit</Button>
+						<a href="/booking/{booking.id}/checkin" onclick={() => (open = false)}>
+							<Button variant="default" size="sm">Check In →</Button>
+						</a>
+						<Button variant="outline" size="sm" disabled>Edit</Button>
 
-						<!-- Cancel -->
 						{#if !confirmCancel}
 							<Button
 								variant="ghost"
 								size="sm"
 								class="text-destructive ml-auto"
-								onclick={() => (confirmCancel = true)}
+								onclick={() => { resetConfirms(); confirmCancel = true; }}
 							>
 								Cancel booking
 							</Button>
@@ -125,9 +126,9 @@
 									method="POST"
 									action="?/cancelBooking"
 									use:enhance={() => {
-										cancelling = true;
+										processing = true;
 										return async ({ update }) => {
-											cancelling = false;
+											processing = false;
 											confirmCancel = false;
 											open = false;
 											onClose?.();
@@ -136,19 +137,59 @@
 									}}
 								>
 									<input type="hidden" name="bookingId" value={booking.id} />
-									<Button type="submit" variant="destructive" size="sm" disabled={cancelling}>
-										{cancelling ? 'Cancelling…' : 'Yes, cancel'}
+									<Button type="submit" variant="destructive" size="sm" disabled={processing}>
+										{processing ? '…' : 'Yes, cancel'}
 									</Button>
 								</form>
-								<Button variant="ghost" size="sm" onclick={() => (confirmCancel = false)}>
-									No
-								</Button>
+								<Button variant="ghost" size="sm" onclick={resetConfirms}>No</Button>
 							</div>
 						{/if}
 					</div>
+
+				{:else if booking.status === 'checked_in'}
+					<div class="flex flex-wrap gap-2">
+						<a href="/booking/{booking.id}/checkin" onclick={() => (open = false)}>
+							<Button variant="outline" size="sm">Edit card</Button>
+						</a>
+
+						{#if !confirmCheckOut}
+							<Button
+								variant="default"
+								size="sm"
+								onclick={() => { resetConfirms(); confirmCheckOut = true; }}
+							>
+								Check Out
+							</Button>
+						{:else}
+							<div class="flex items-center gap-2">
+								<span class="text-muted-foreground text-xs">Confirm checkout?</span>
+								<form
+									method="POST"
+									action="?/checkOutBooking"
+									use:enhance={() => {
+										processing = true;
+										return async ({ update }) => {
+											processing = false;
+											confirmCheckOut = false;
+											open = false;
+											onClose?.();
+											await update();
+										};
+									}}
+								>
+									<input type="hidden" name="bookingId" value={booking.id} />
+									<Button type="submit" variant="default" size="sm" disabled={processing}>
+										{processing ? '…' : 'Yes, check out'}
+									</Button>
+								</form>
+								<Button variant="ghost" size="sm" onclick={resetConfirms}>No</Button>
+							</div>
+						{/if}
+					</div>
+
 				{:else}
 					<p class="text-muted-foreground text-xs">
-						{booking.status === 'cancelled' ? 'This booking was cancelled.' : 'This booking is complete.'}
+						{booking.status === 'cancelled' ? 'This booking was cancelled.' : 'This guest has checked out.'}
 					</p>
 				{/if}
 			</div>

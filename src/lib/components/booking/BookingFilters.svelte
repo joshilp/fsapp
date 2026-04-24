@@ -4,7 +4,7 @@
 	type Props = {
 		year: number;
 		month: number;
-		viewMode: 'grid' | 'date';
+		viewMode: 'grid' | 'today';
 	};
 
 	let { year, month, viewMode }: Props = $props();
@@ -19,8 +19,7 @@
 		let y = year;
 		while (m < 1) { m += 12; y--; }
 		while (m > 12) { m -= 12; y++; }
-		const vm = viewMode === 'date' ? '&view=date' : '';
-		return `/booking?month=${y}-${String(m).padStart(2, '0')}${vm}`;
+		return `/booking?month=${y}-${String(m).padStart(2, '0')}`;
 	}
 
 	function todayHref(): string {
@@ -66,8 +65,8 @@
 				Grid
 			</Button>
 			<Button
-				href={`/booking?month=${year}-${String(month).padStart(2, '0')}&view=date`}
-				variant={viewMode === 'date' ? 'default' : 'ghost'}
+				href={`/booking?month=${year}-${String(month).padStart(2, '0')}&view=today`}
+				variant={viewMode === 'today' ? 'default' : 'ghost'}
 				size="sm"
 				class="h-8 text-xs"
 			>
