@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { goto } from '$app/navigation';
 	import CustomDialog from '$lib/components/core/CustomDialog.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -36,7 +37,8 @@
 		onSuccess
 	}: Props = $props();
 
-	// Form state
+	// ─── Form state ───────────────────────────────────────────────────────────
+
 	let guestName = $state('');
 	let guestPhone = $state('');
 	let selectedChannelId = $state(channels.find((c) => c.name === 'Direct')?.id ?? channels[0]?.id ?? '');
@@ -51,14 +53,57 @@
 	let clerkMode = $state<'user' | 'other'>('user');
 	let clerkUserId = $state(currentUserId);
 	let clerkName = $state('');
+	let walkIn = $state(false);
 	let serverError = $state('');
 	let submitting = $state(false);
 
-	// Reset form when dialog opens
+	// ─── Guest autocomplete ───────────────────────────────────────────────────
+
+	type GuestHit = { id: string; name: string; phone: string | null; email: string | null; street: string | null; city: string | null; provinceState: string | null };
+	let suggestions = $state<GuestHit[]>([]);
+	let lookupTimer: ReturnType<typeof setTimeout> | null = null;
+
+	async function runLookup(params: string) {
+		if (!params) { suggestions = []; return; }
+		try {
+			const res = await fetch(`/api/guests?${params}`);
+			if (res.ok) suggestions = await res.json();
+		} catch { suggestions = []; }
+	}
+
+	function onPhoneInput() {
+		suggestions = [];
+		if (lookupTimer) clearTimeout(lookupTimer);
+		const digits = guestPhone.replace(/\D/g, '');
+		if (digits.length < 3) return;
+		lookupTimer = setTimeout(() => runLookup(`phone=${encodeURIComponent(digits)}`), 350);
+	}
+
+	function onNameInput() {
+		suggestions = [];
+		if (lookupTimer) clearTimeout(lookupTimer);
+		if (guestName.length < 2) return;
+		lookupTimer = setTimeout(() => runLookup(`name=${encodeURIComponent(guestName)}`), 350);
+	}
+
+	function applyGuest(hit: GuestHit) {
+		guestName = hit.name;
+		guestPhone = hit.phone ?? '';
+		suggestions = [];
+	}
+
+	function closeSuggestions() {
+		// Small delay so click on a suggestion registers first
+		setTimeout(() => { suggestions = []; }, 150);
+	}
+
+	// ─── Reset on open ────────────────────────────────────────────────────────
+
 	$effect(() => {
 		if (open) {
 			guestName = '';
 			guestPhone = '';
+			suggestions = [];
 			selectedChannelId = channels.find((c) => c.name === 'Direct')?.id ?? channels[0]?.id ?? '';
 			notes = '';
 			depositAmount = '';
@@ -71,6 +116,7 @@
 			clerkMode = 'user';
 			clerkUserId = currentUserId;
 			clerkName = '';
+			walkIn = false;
 			serverError = '';
 			submitting = false;
 		}
@@ -78,14 +124,13 @@
 
 	const nights = $derived(() => {
 		if (!checkIn || !checkOut) return 0;
-		const ms = new Date(checkOut).getTime() - new Date(checkIn).getTime();
-		return Math.round(ms / 86400000);
+		return Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
 	});
 </script>
 
 <CustomDialog
 	bind:open
-	title="New Booking"
+	title={walkIn ? 'Walk-In Check-In' : 'New Booking'}
 	description="{propertyName} — Room {roomNumber}"
 	dialogClass="sm:max-w-lg"
 >
@@ -100,9 +145,15 @@
 				return async ({ result, update }) => {
 					submitting = false;
 					if (result.type === 'success') {
-						open = false;
-						onSuccess?.();
-						await update();
+						const bookingId = (result.data as { bookingId?: string })?.bookingId;
+						if (walkIn && bookingId) {
+							open = false;
+							await goto(`/booking/${bookingId}/checkin`);
+						} else {
+							open = false;
+							onSuccess?.();
+							await update();
+						}
 					} else if (result.type === 'failure') {
 						serverError = (result.data?.error as string) ?? 'Something went wrong';
 						await update({ reset: false });
@@ -122,6 +173,31 @@
 				</div>
 			{/if}
 
+			<!-- Walk-in toggle -->
+			<!-- svelte-ignore a11y_label_has_associated_control -->
+			<label class="flex cursor-pointer items-center gap-2.5">
+				<div
+					role="checkbox"
+					aria-checked={walkIn}
+					tabindex="0"
+					class={[
+						'relative h-5 w-9 rounded-full transition-colors',
+						walkIn ? 'bg-primary' : 'bg-muted-foreground/30'
+					].join(' ')}
+					onclick={() => (walkIn = !walkIn)}
+					onkeydown={(e) => e.key === ' ' && (walkIn = !walkIn)}
+				>
+					<span
+						class={[
+							'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
+							walkIn ? 'translate-x-4' : 'translate-x-0.5'
+						].join(' ')}
+					></span>
+				</div>
+				<span class="text-sm font-medium">Walk-in</span>
+				<span class="text-muted-foreground text-xs">(skip straight to check-in form)</span>
+			</label>
+
 			<!-- Dates -->
 			<div class="grid grid-cols-2 gap-3">
 				<div class="flex flex-col gap-1.5">
@@ -139,29 +215,60 @@
 				</div>
 			</div>
 
-			<!-- Guest -->
-			<div class="grid grid-cols-2 gap-3">
-				<div class="col-span-2 flex flex-col gap-1.5 sm:col-span-1">
-					<Label for="guestName">Guest name <span class="text-destructive">*</span></Label>
-					<Input
-						id="guestName"
-						name="guestName"
-						bind:value={guestName}
-						placeholder="Full name"
-						required
-						autocomplete="off"
-					/>
+			<!-- Guest — name + phone with shared floating autocomplete -->
+			<div class="relative">
+				<div class="grid grid-cols-2 gap-3">
+					<div class="col-span-2 flex flex-col gap-1.5 sm:col-span-1">
+						<Label for="guestName">Guest name <span class="text-destructive">*</span></Label>
+						<Input
+							id="guestName"
+							name="guestName"
+							bind:value={guestName}
+							placeholder="Full name"
+							required
+							autocomplete="off"
+							oninput={onNameInput}
+							onblur={closeSuggestions}
+						/>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<Label for="guestPhone">Phone</Label>
+						<Input
+							id="guestPhone"
+							name="guestPhone"
+							type="tel"
+							bind:value={guestPhone}
+							placeholder="555-000-0000"
+							autocomplete="off"
+							oninput={onPhoneInput}
+							onblur={closeSuggestions}
+						/>
+					</div>
 				</div>
-				<div class="flex flex-col gap-1.5">
-					<Label for="guestPhone">Phone</Label>
-					<Input
-						id="guestPhone"
-						name="guestPhone"
-						type="tel"
-						bind:value={guestPhone}
-						placeholder="555-000-0000"
-					/>
-				</div>
+
+				<!-- Floating autocomplete dropdown — does NOT affect form height -->
+				{#if suggestions.length > 0}
+					<div
+						class="border-border bg-background absolute left-0 top-full z-50 mt-1 w-full overflow-hidden rounded-md border shadow-lg"
+						role="listbox"
+					>
+						{#each suggestions as hit}
+							<button
+								type="button"
+								class="hover:bg-muted flex w-full items-center gap-3 px-3 py-2 text-left text-sm"
+								onmousedown={() => applyGuest(hit)}
+							>
+								<span class="flex-1 font-medium">{hit.name}</span>
+								{#if hit.phone}
+									<span class="text-muted-foreground shrink-0 font-mono text-xs">{hit.phone}</span>
+								{/if}
+								{#if hit.city}
+									<span class="text-muted-foreground shrink-0 text-xs">{hit.city}</span>
+								{/if}
+							</button>
+						{/each}
+					</div>
+				{/if}
 			</div>
 
 			<!-- Channel -->
@@ -199,96 +306,97 @@
 				></textarea>
 			</div>
 
-			<!-- Deposit (toggle) -->
-			<div class="flex flex-col gap-2">
-				<button
-					type="button"
-					class="text-primary flex items-center gap-1 text-sm font-medium"
-					onclick={() => (showDeposit = !showDeposit)}
-				>
-					<span class="text-base leading-none">{showDeposit ? '▾' : '▸'}</span>
-					Deposit
-				</button>
-				{#if showDeposit}
-					<div class="flex gap-3">
-						<div class="flex flex-col gap-1.5">
-							<Label for="depositAmount">Amount ($)</Label>
-							<Input
-								id="depositAmount"
-								name="depositAmount"
-								type="number"
-								min="0"
-								step="0.01"
-								bind:value={depositAmount}
-								placeholder="0.00"
-								class="w-28"
-							/>
-						</div>
-						<div class="flex flex-col gap-1.5">
-							<Label>Method</Label>
-							<div class="flex gap-1.5">
-								{#each ['card', 'cash', 'cheque'] as method}
-									<button
-										type="button"
-										class={[
-											'rounded-md border px-2.5 py-1.5 text-sm capitalize transition-colors',
-											depositMethod === method
-												? 'bg-primary text-primary-foreground border-primary'
-												: 'border-border hover:bg-muted'
-										].join(' ')}
-										onclick={() => (depositMethod = method)}
-									>
-										{method}
-									</button>
-								{/each}
+			<!-- Deposit (toggle, hidden for walk-in since it's done at check-in) -->
+			{#if !walkIn}
+				<div class="flex flex-col gap-2">
+					<button
+						type="button"
+						class="text-primary flex items-center gap-1 text-sm font-medium"
+						onclick={() => (showDeposit = !showDeposit)}
+					>
+						<span class="text-base leading-none">{showDeposit ? '▾' : '▸'}</span>
+						Deposit
+					</button>
+					{#if showDeposit}
+						<div class="flex gap-3">
+							<div class="flex flex-col gap-1.5">
+								<Label for="depositAmount">Amount ($)</Label>
+								<Input
+									id="depositAmount"
+									name="depositAmount"
+									type="number"
+									min="0"
+									step="0.01"
+									bind:value={depositAmount}
+									placeholder="0.00"
+									class="w-28"
+								/>
 							</div>
-							<input type="hidden" name="depositMethod" value={depositMethod} />
+							<div class="flex flex-col gap-1.5">
+								<Label>Method</Label>
+								<div class="flex gap-1.5">
+									{#each ['card', 'cash', 'cheque'] as method}
+										<button
+											type="button"
+											class={[
+												'rounded-md border px-2.5 py-1.5 text-sm capitalize transition-colors',
+												depositMethod === method
+													? 'bg-primary text-primary-foreground border-primary'
+													: 'border-border hover:bg-muted'
+											].join(' ')}
+											onclick={() => (depositMethod = method)}
+										>{method}</button>
+									{/each}
+								</div>
+								<input type="hidden" name="depositMethod" value={depositMethod} />
+							</div>
 						</div>
-					</div>
-				{/if}
-			</div>
+					{/if}
+				</div>
 
-			<!-- CC (toggle) -->
-			<div class="flex flex-col gap-2">
-				<button
-					type="button"
-					class="text-primary flex items-center gap-1 text-sm font-medium"
-					onclick={() => (showCc = !showCc)}
-				>
-					<span class="text-base leading-none">{showCc ? '▾' : '▸'}</span>
-					Credit card
-					<span class="text-muted-foreground font-normal">(stored encrypted, cleared after charge)</span>
-				</button>
-				{#if showCc}
-					<div class="grid grid-cols-2 gap-3">
-						<div class="col-span-2 flex flex-col gap-1.5">
-							<Label for="ccNumber">Card number</Label>
-							<Input
-								id="ccNumber"
-								name="ccNumber"
-								inputmode="numeric"
-								bind:value={ccNumber}
-								placeholder="•••• •••• •••• ••••"
-								autocomplete="off"
-							/>
+				<!-- CC (toggle) -->
+				<div class="flex flex-col gap-2">
+					<button
+						type="button"
+						class="text-primary flex items-center gap-1 text-sm font-medium"
+						onclick={() => (showCc = !showCc)}
+					>
+						<span class="text-base leading-none">{showCc ? '▾' : '▸'}</span>
+						Credit card
+						<span class="text-muted-foreground font-normal">(stored encrypted, cleared after charge)</span>
+					</button>
+					{#if showCc}
+						<div class="grid grid-cols-2 gap-3">
+							<div class="col-span-2 flex flex-col gap-1.5">
+								<Label for="ccNumber">Card number</Label>
+								<Input
+									id="ccNumber"
+									name="ccNumber"
+									inputmode="numeric"
+									bind:value={ccNumber}
+									placeholder="•••• •••• •••• ••••"
+									autocomplete="off"
+								/>
+							</div>
+							<div class="flex flex-col gap-1.5">
+								<Label for="ccExpiry">Expiry (MM/YY)</Label>
+								<Input id="ccExpiry" name="ccExpiry" bind:value={ccExpiry} placeholder="MM/YY" class="w-24" />
+							</div>
+							<div class="flex flex-col gap-1.5">
+								<Label for="ccCardName">Name on card</Label>
+								<Input id="ccCardName" name="ccCardName" bind:value={ccCardName} autocomplete="off" />
+							</div>
 						</div>
-						<div class="flex flex-col gap-1.5">
-							<Label for="ccExpiry">Expiry (MM/YY)</Label>
-							<Input id="ccExpiry" name="ccExpiry" bind:value={ccExpiry} placeholder="MM/YY" class="w-24" />
-						</div>
-						<div class="flex flex-col gap-1.5">
-							<Label for="ccCardName">Name on card</Label>
-							<Input id="ccCardName" name="ccCardName" bind:value={ccCardName} autocomplete="off" />
-						</div>
-					</div>
-				{/if}
-			</div>
+					{/if}
+				</div>
+			{/if}
 
 			<!-- Clerk -->
 			<div class="flex flex-col gap-1.5">
-				<Label>Clerk</Label>
+				<Label for="clerkSelect">Clerk</Label>
 				<div class="flex items-center gap-2">
 					<select
+						id="clerkSelect"
 						class="border-input bg-background focus-visible:ring-ring rounded-md border px-2 py-1.5 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
 						onchange={(e) => {
 							const val = (e.target as HTMLSelectElement).value;
@@ -318,7 +426,13 @@
 			<div class="mt-1 flex justify-end gap-2">
 				<Button type="button" variant="ghost" onclick={() => (open = false)}>Cancel</Button>
 				<Button type="submit" disabled={submitting}>
-					{submitting ? 'Saving…' : 'Create Booking'}
+					{#if submitting}
+						Saving…
+					{:else if walkIn}
+						Walk In → Check In
+					{:else}
+						Create Booking
+					{/if}
 				</Button>
 			</div>
 		</form>

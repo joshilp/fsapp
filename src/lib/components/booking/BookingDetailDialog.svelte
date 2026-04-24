@@ -108,7 +108,12 @@
 						<a href="/booking/{booking.id}/checkin" onclick={() => (open = false)}>
 							<Button variant="default" size="sm">Check In →</Button>
 						</a>
-						<Button variant="outline" size="sm" disabled>Edit</Button>
+						<a href="/booking/{booking.id}/edit" onclick={() => (open = false)}>
+							<Button variant="outline" size="sm">Edit</Button>
+						</a>
+						<a href="/booking/{booking.id}/print" target="_blank" onclick={() => (open = false)}>
+							<Button variant="ghost" size="sm">Print slip</Button>
+						</a>
 
 						{#if !confirmCancel}
 							<Button
@@ -150,6 +155,9 @@
 					<div class="flex flex-wrap gap-2">
 						<a href="/booking/{booking.id}/checkin" onclick={() => (open = false)}>
 							<Button variant="outline" size="sm">Edit card</Button>
+						</a>
+						<a href="/booking/{booking.id}/print" target="_blank" onclick={() => (open = false)}>
+							<Button variant="ghost" size="sm">Print card</Button>
 						</a>
 
 						{#if !confirmCheckOut}

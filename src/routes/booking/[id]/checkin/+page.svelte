@@ -169,10 +169,20 @@
 </svelte:head>
 
 <div class="mx-auto max-w-2xl px-4 py-6">
-	<!-- Back link -->
-	<a href={backHref()} class="text-muted-foreground hover:text-foreground mb-4 flex items-center gap-1 text-sm">
-		← Back to grid
-	</a>
+	<!-- Back link + quick actions -->
+	<div class="mb-4 flex items-center gap-3">
+		<a href={backHref()} class="text-muted-foreground hover:text-foreground flex items-center gap-1 text-sm">
+			← Back
+		</a>
+		<div class="ml-auto flex gap-2">
+			<a href="/booking/{booking.id}/edit">
+				<Button variant="ghost" size="sm">Edit dates/room</Button>
+			</a>
+			<a href="/booking/{booking.id}/print" target="_blank">
+				<Button variant="outline" size="sm">🖨 Print</Button>
+			</a>
+		</div>
+	</div>
 
 	<!-- Header card -->
 	<div class="bg-card border-border mb-6 rounded-lg border p-4 shadow-sm">
