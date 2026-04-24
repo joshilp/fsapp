@@ -125,11 +125,11 @@
 		<Tabs.Content value="taxes">
 			<div class="space-y-6">
 				{#each data.propertiesList as prop}
+					{@const presets = data.taxPresetsList.filter((p) => p.propertyId === prop.id)}
 					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
 						<h2 class="mb-3 font-semibold">{prop.name}</h2>
 
 						<!-- Existing presets -->
-						{@const presets = data.taxPresetsList.filter((p) => p.propertyId === prop.id)}
 						{#if presets.length > 0}
 							<div class="mb-4 space-y-2">
 								{#each presets as preset}
@@ -210,11 +210,10 @@
 		<Tabs.Content value="rooms">
 			<div class="space-y-6">
 				{#each data.propertiesList as prop}
+					{@const propRooms = data.roomsList.filter((r) => r.propertyId === prop.id)}
+					{@const propRoomTypes = data.roomTypesList.filter((rt) => rt.propertyId === prop.id)}
 					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
 						<h2 class="mb-3 font-semibold">{prop.name}</h2>
-
-						{@const propRooms = data.roomsList.filter((r) => r.propertyId === prop.id)}
-						{@const propRoomTypes = data.roomTypesList.filter((rt) => rt.propertyId === prop.id)}
 
 						<!-- Room list -->
 						{#if propRooms.length > 0}
