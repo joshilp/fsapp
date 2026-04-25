@@ -297,7 +297,7 @@
 									await update({ reset: false });
 								};
 							}}
-							class="flex items-end gap-2"
+							class="grid grid-cols-2 sm:grid-cols-3 gap-2"
 						>
 							<input type="hidden" name="propertyId" value={prop.id} />
 							<div class="flex flex-col gap-1">
@@ -317,7 +317,38 @@
 									{/each}
 								</select>
 							</div>
-							<Button type="submit" size="sm" class="h-8" disabled={addingRoom}>
+							<div class="flex flex-col gap-1">
+								<Label class="text-xs">King beds</Label>
+								<Input name="kingBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+							</div>
+							<div class="flex flex-col gap-1">
+								<Label class="text-xs">Queen beds</Label>
+								<Input name="queenBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+							</div>
+							<div class="flex flex-col gap-1">
+								<Label class="text-xs">Double beds</Label>
+								<Input name="doubleBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+							</div>
+							<div class="flex flex-col gap-1">
+								<Label class="text-xs">Extras</Label>
+								<div class="flex gap-2 items-center h-8">
+									<label class="flex items-center gap-1 text-xs cursor-pointer">
+										<input type="checkbox" name="hasKitchen" value="1" class="rounded" />
+										✦ Kitchen
+									</label>
+									<label class="flex items-center gap-1 text-xs cursor-pointer">
+										<input type="checkbox" name="hasHideabed" value="1" class="rounded" />
+										Sofa bed
+									</label>
+								</div>
+							</div>
+							<div class="flex flex-col gap-1 col-span-2 sm:col-span-3">
+								<Label class="text-xs">Configs (one per line, for dual-config rooms — e.g. "1Q Sleeping")</Label>
+								<textarea name="configs" rows="2"
+									placeholder={"Leave blank for single config\n1Q Sleeping\n1Q+1D Sleeping"}
+									class="border-input bg-background rounded-md border px-2 py-1 text-xs w-full resize-none" />
+							</div>
+							<Button type="submit" size="sm" class="h-8 col-span-2 sm:col-span-3" disabled={addingRoom}>
 								{addingRoom ? '…' : '+ Add room'}
 							</Button>
 						</form>

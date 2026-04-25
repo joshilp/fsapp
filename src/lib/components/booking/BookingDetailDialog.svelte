@@ -18,7 +18,8 @@
 		confirmed: { label: 'Confirmed', class: 'bg-blue-100 text-blue-800' },
 		checked_in: { label: 'Checked In', class: 'bg-green-100 text-green-800' },
 		checked_out: { label: 'Checked Out', class: 'bg-gray-100 text-gray-600' },
-		cancelled: { label: 'Cancelled', class: 'bg-red-100 text-red-700' }
+		cancelled: { label: 'Cancelled', class: 'bg-red-100 text-red-700' },
+		blocked: { label: 'Maintenance', class: 'bg-slate-100 text-slate-700' }
 	};
 
 	const statusInfo = $derived(STATUS_LABELS[booking.status] ?? { label: booking.status, class: 'bg-muted' });
@@ -43,6 +44,48 @@
 	function resetConfirms() {
 		confirmCheckOut = false;
 		confirmCancel = false;
+	}
+
+	// ─── CC on file ───────────────────────────────────────────────────────────
+
+	let ccData = $state<{ number: string; expiry: string; name: string } | null>(null);
+	let ccLastFour = $state<string | null>(booking.ccLastFour ?? null);
+	let ccLoading = $state(false);
+	let ccError = $state('');
+	let confirmClearCc = $state(false);
+
+	async function viewCard() {
+		ccLoading = true;
+		ccError = '';
+		try {
+			const res = await fetch('/api/cc', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ bookingId: booking.id })
+			});
+			if (!res.ok) { ccError = 'Could not decrypt card'; return; }
+			ccData = await res.json();
+		} catch {
+			ccError = 'Network error';
+		} finally {
+			ccLoading = false;
+		}
+	}
+
+	async function clearCard() {
+		ccLoading = true;
+		try {
+			await fetch('/api/cc', {
+				method: 'DELETE',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ bookingId: booking.id })
+			});
+			ccLastFour = null;
+			ccData = null;
+			confirmClearCc = false;
+		} finally {
+			ccLoading = false;
+		}
 	}
 </script>
 
@@ -100,6 +143,53 @@
 					<dd class="italic">{booking.notes}</dd>
 				{/if}
 			</dl>
+
+			<!-- CC on file -->
+			{#if ccLastFour}
+				<div class="border-border rounded-md border bg-muted/30 p-3 text-sm space-y-2">
+					<div class="flex items-center justify-between">
+						<span class="font-medium text-xs text-muted-foreground uppercase tracking-wide">Card on File</span>
+					</div>
+					<div class="flex items-center gap-2">
+						<span class="font-mono font-semibold">•••• {ccLastFour}</span>
+					</div>
+
+					{#if ccData}
+						<div class="rounded bg-amber-50 border border-amber-200 p-2 font-mono text-xs space-y-0.5">
+							<div class="font-semibold">Card #: {ccData.number}</div>
+							<div>Exp: {ccData.expiry}</div>
+							{#if ccData.name}<div>Name: {ccData.name}</div>{/if}
+							<p class="text-amber-700 mt-1 text-[10px] font-sans">Charge the card, then clear it below.</p>
+						</div>
+					{/if}
+
+					{#if ccError}<p class="text-destructive text-xs">{ccError}</p>{/if}
+
+					<div class="flex gap-2 flex-wrap">
+						{#if !ccData}
+							<button onclick={viewCard} disabled={ccLoading}
+								class="rounded border border-input px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50">
+								{ccLoading ? '…' : 'View full card'}
+							</button>
+						{/if}
+
+						{#if !confirmClearCc}
+							<button onclick={() => { confirmClearCc = true; }}
+								class="rounded border border-destructive/40 text-destructive px-2.5 py-1 text-xs hover:bg-destructive/5">
+								Clear card
+							</button>
+						{:else}
+							<span class="text-xs text-muted-foreground self-center">Confirm clear?</span>
+							<button onclick={clearCard} disabled={ccLoading}
+								class="rounded bg-destructive text-white px-2.5 py-1 text-xs hover:bg-destructive/80 disabled:opacity-50">
+								{ccLoading ? '…' : 'Yes, clear'}
+							</button>
+							<button onclick={() => { confirmClearCc = false; }}
+								class="rounded border px-2 py-1 text-xs hover:bg-muted">No</button>
+						{/if}
+					</div>
+				</div>
+			{/if}
 
 			<!-- Actions -->
 			<div class="border-border flex flex-col gap-2 border-t pt-3">
@@ -195,10 +285,42 @@
 						{/if}
 					</div>
 
+				{:else if booking.status === 'cancelled'}
+					<div class="space-y-2">
+						<p class="text-muted-foreground text-xs">This booking was cancelled.</p>
+						<form
+							method="POST"
+							action="?/restoreBooking"
+							use:enhance={() => {
+								processing = true;
+								return async ({ result, update }) => {
+									processing = false;
+									if (result.type === 'failure') {
+										alert((result.data as { error?: string })?.error ?? 'Could not restore');
+									} else {
+										open = false;
+										onClose?.();
+										await update();
+									}
+								};
+							}}
+						>
+							<input type="hidden" name="bookingId" value={booking.id} />
+							<Button type="submit" variant="outline" size="sm" disabled={processing}>
+								{processing ? '…' : '↩ Restore booking'}
+							</Button>
+						</form>
+					</div>
+
 				{:else}
 					<p class="text-muted-foreground text-xs">
-						{booking.status === 'cancelled' ? 'This booking was cancelled.' : 'This guest has checked out.'}
+						{booking.status === 'blocked' ? 'Maintenance block — edit dates via the Edit Booking page.' : 'This guest has checked out.'}
 					</p>
+					{#if booking.status !== 'blocked'}
+						<a href="/booking/{booking.id}/print" target="_blank" onclick={() => (open = false)}>
+							<Button variant="ghost" size="sm">Print card</Button>
+						</a>
+					{/if}
 				{/if}
 			</div>
 		</div>

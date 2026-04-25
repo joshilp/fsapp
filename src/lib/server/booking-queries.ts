@@ -1,6 +1,6 @@
-import { and, eq, gt, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from './db/index';
-import { bookings, properties, rooms } from './db/schema';
+import { bookings, ccStaging, properties, rooms } from './db/schema';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,6 +15,7 @@ export type BookingSummary = {
 	numAdults: number;
 	numChildren: number;
 	notes: string | null;
+	ccLastFour: string | null; // non-null means a card is staged for this booking
 };
 
 export type FreeSpan = { type: 'free'; day: number };
@@ -33,6 +34,13 @@ export type GridRoom = {
 	roomNumber: string;
 	roomTypeCategory: string | null;
 	roomTypeName: string | null;
+	kingBeds: number;
+	queenBeds: number;
+	doubleBeds: number;
+	hasHideabed: boolean;
+	hasKitchen: boolean;
+	housekeepingStatus: string;
+	configs: string[] | null; // parsed from JSON, null = single fixed config
 	spans: DaySpan[];
 };
 
@@ -105,6 +113,17 @@ export async function getGridData(
 		}
 	});
 
+	// CC staging — fetch lastFour for all bookings in this batch
+	const bookingIds = monthBookings.map((b) => b.id);
+	const ccRows =
+		bookingIds.length > 0
+			? await db.query.ccStaging.findMany({
+					where: inArray(ccStaging.bookingId, bookingIds),
+					columns: { bookingId: true, lastFour: true }
+				})
+			: [];
+	const ccByBooking = new Map(ccRows.map((r) => [r.bookingId, r.lastFour]));
+
 	// Group by room
 	const byRoom = new Map<string, typeof monthBookings>();
 	for (const b of monthBookings) {
@@ -172,7 +191,8 @@ export async function getGridData(
 					checkOutDate: b.checkOutDate,
 					numAdults: b.numAdults,
 					numChildren: b.numChildren,
-					notes: b.notes
+					notes: b.notes,
+					ccLastFour: ccByBooking.get(b.id) ?? null
 				}
 			});
 			day += length;
@@ -183,6 +203,13 @@ export async function getGridData(
 			roomNumber: room.roomNumber,
 			roomTypeCategory: room.roomType?.category ?? null,
 			roomTypeName: room.roomType?.name ?? null,
+			kingBeds: room.kingBeds,
+			queenBeds: room.queenBeds,
+			doubleBeds: room.doubleBeds,
+			hasHideabed: room.hasHideabed,
+			hasKitchen: room.hasKitchen,
+			housekeepingStatus: room.housekeepingStatus,
+			configs: room.configs ? (JSON.parse(room.configs) as string[]) : null,
 			spans
 		};
 	});

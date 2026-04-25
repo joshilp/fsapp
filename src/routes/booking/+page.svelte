@@ -3,15 +3,38 @@
 	import BookingGrid from '$lib/components/booking/BookingGrid.svelte';
 	import BookingFilters from '$lib/components/booking/BookingFilters.svelte';
 	import TodayView from '$lib/components/booking/TodayView.svelte';
+	import FindRoomDialog from '$lib/components/booking/FindRoomDialog.svelte';
+	import OtaImportDialog from '$lib/components/booking/OtaImportDialog.svelte';
 
 	let { data }: { data: PageData } = $props();
+
+	let findRoomOpen = $state(false);
+	let otaImportOpen = $state(false);
 </script>
 
 <svelte:head>
 	<title>Booking Grid</title>
 </svelte:head>
 
-<BookingFilters year={data.year} month={data.month} viewMode={data.viewMode as 'grid' | 'today'} />
+<div class="flex flex-col min-h-0">
+	<BookingFilters year={data.year} month={data.month} viewMode={data.viewMode as 'grid' | 'today'} />
+
+	<!-- Quick-action toolbar -->
+	<div class="border-border bg-background flex items-center gap-2 border-b px-4 py-2">
+		<button
+			onclick={() => { findRoomOpen = true; }}
+			class="rounded-md border border-input px-3 py-1.5 text-sm font-medium hover:bg-muted flex items-center gap-1.5"
+		>
+			🔍 Find Room
+		</button>
+		<button
+			onclick={() => { otaImportOpen = true; }}
+			class="rounded-md border border-input px-3 py-1.5 text-sm font-medium hover:bg-muted flex items-center gap-1.5"
+		>
+			📥 OTA Import
+		</button>
+	</div>
+</div>
 
 {#if data.viewMode === 'today' && data.todayData}
 	<TodayView
@@ -44,3 +67,19 @@
 		</div>
 	</div>
 {/if}
+
+<FindRoomDialog
+	bind:open={findRoomOpen}
+	channels={data.channels}
+	users={data.users}
+	currentUserId={data.currentUserId}
+	today={data.today}
+/>
+
+<OtaImportDialog
+	bind:open={otaImportOpen}
+	channels={data.channels}
+	users={data.users}
+	currentUserId={data.currentUserId}
+	today={data.today}
+/>

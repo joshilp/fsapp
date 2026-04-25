@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { BookingSummary, BookingSpan as BookingSpanType, GridData } from '$lib/server/booking-queries';
+	import { enhance } from '$app/forms';
+	import type { BookingSummary, BookingSpan as BookingSpanType, GridData, GridRoom } from '$lib/server/booking-queries';
 	import BookingDetailDialog from './BookingDetailDialog.svelte';
 	import SlipFormDialog from './SlipFormDialog.svelte';
 
@@ -16,8 +17,81 @@
 
 	let { grid, today, channels, users, currentUserId }: Props = $props();
 
-	const { year, month, daysInMonth, rooms, propertyName, propertyId } = $derived(grid);
+	const { year, month, daysInMonth, rooms: allRooms, propertyName, propertyId } = $derived(grid);
 	const days = $derived(Array.from({ length: daysInMonth }, (_, i) => i + 1));
+
+	// ─── Housekeeping status dot ───────────────────────────────────────────────
+
+	// Track statuses locally so dot updates feel instant
+	let hkStatuses = $state<Map<string, string>>(new Map());
+	$effect(() => {
+		const m = new Map<string, string>();
+		for (const r of allRooms) m.set(r.id, r.housekeepingStatus);
+		hkStatuses = m;
+	});
+
+	const HK_CYCLE = ['clean', 'dirty', 'in_progress', 'out_of_order'] as const;
+	type HkStatus = (typeof HK_CYCLE)[number];
+
+	const HK_COLORS: Record<HkStatus, string> = {
+		clean: '#22c55e',
+		dirty: '#ef4444',
+		in_progress: '#eab308',
+		out_of_order: '#94a3b8'
+	};
+	const HK_LABELS: Record<HkStatus, string> = {
+		clean: 'Clean',
+		dirty: 'Dirty',
+		in_progress: 'In progress',
+		out_of_order: 'Out of order'
+	};
+
+	async function cycleHkStatus(roomId: string, current: string) {
+		const idx = HK_CYCLE.indexOf(current as HkStatus);
+		const next = HK_CYCLE[(idx + 1) % HK_CYCLE.length];
+		hkStatuses = new Map(hkStatuses).set(roomId, next);
+		await fetch(`/api/rooms/${roomId}/status`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ status: next })
+		});
+	}
+
+	// ─── Compact room info ─────────────────────────────────────────────────────
+
+	function roomCompact(room: GridRoom): string {
+		const parts: string[] = [];
+		if (room.kingBeds > 0) parts.push(room.kingBeds === 1 ? '1K' : `${room.kingBeds}K`);
+		if (room.queenBeds > 0) parts.push(room.queenBeds === 1 ? '1Q' : `${room.queenBeds}Q`);
+		if (room.doubleBeds > 0) parts.push(room.doubleBeds === 1 ? '1D' : `${room.doubleBeds}D`);
+		if (room.hasHideabed) parts.push('Sb');
+		const beds = parts.join('+');
+		return room.hasKitchen ? `${beds || '—'} ✦` : beds || '—';
+	}
+
+	function totalBeds(room: GridRoom): number {
+		return room.kingBeds + room.queenBeds + room.doubleBeds + (room.hasHideabed ? 1 : 0);
+	}
+
+	// ─── Chip filters ─────────────────────────────────────────────────────────
+
+	let filterKitchen = $state(false);
+	let filterBeds = $state<0 | 1 | 2 | 3>(0); // 0=all, 1=1 bed, 2=2 beds, 3=3+
+	let filterAvailable = $state(false);
+
+	const rooms = $derived(
+		allRooms.filter((r) => {
+			if (filterKitchen && !r.hasKitchen) return false;
+			if (filterBeds === 1 && totalBeds(r) !== 1) return false;
+			if (filterBeds === 2 && totalBeds(r) !== 2) return false;
+			if (filterBeds === 3 && totalBeds(r) < 3) return false;
+			if (filterAvailable) {
+				const hasBooking = r.spans.some((s) => s.type === 'booking' && (s as BookingSpanType).booking.status !== 'blocked');
+				if (hasBooking) return false;
+			}
+			return true;
+		})
+	);
 
 	// ─── Today highlight ──────────────────────────────────────────────────────
 
@@ -50,7 +124,7 @@
 
 	const occupiedByRoom = $derived(
 		new Map(
-			rooms.map((r) => [
+			allRooms.map((r) => [
 				r.id,
 				new Set(
 					r.spans
@@ -141,13 +215,13 @@
 			return;
 		}
 
-		const room = rooms.find((r) => r.id === dragRange!.roomId);
+		const room = allRooms.find((r) => r.id === dragRange!.roomId);
 		if (!room) { drag = null; return; }
 
-		// checkOut = day AFTER the last selected night
 		slipDialog = {
 			roomId: room.id,
 			roomNumber: room.roomNumber,
+			configs: room.configs,
 			checkIn: dayToIso(dragRange.min),
 			checkOut: dayToIso(dragRange.max + 1)
 		};
@@ -158,11 +232,12 @@
 	// ─── Touch: single-tap on a free cell ────────────────────────────────────
 
 	function onCellTap(roomId: string, day: number) {
-		const room = rooms.find((r) => r.id === roomId);
+		const room = allRooms.find((r) => r.id === roomId);
 		if (!room) return;
 		slipDialog = {
 			roomId: room.id,
 			roomNumber: room.roomNumber,
+			configs: room.configs,
 			checkIn: dayToIso(day),
 			checkOut: dayToIso(day + 1)
 		};
@@ -191,10 +266,29 @@
 	let slipDialog = $state<{
 		roomId: string;
 		roomNumber: string;
+		configs: string[] | null;
 		checkIn: string;
 		checkOut: string;
 	} | null>(null);
 	let slipOpen = $state(false);
+
+	// ─── Block dialog ─────────────────────────────────────────────────────────
+
+	let blockDialog = $state<{ roomId: string; roomNumber: string } | null>(null);
+	let blockOpen = $state(false);
+	let blockCheckIn = $state(today);
+	let blockCheckOut = $state(today);
+	let blockNotes = $state('');
+	let blockError = $state('');
+
+	function openBlock(room: GridRoom) {
+		blockDialog = { roomId: room.id, roomNumber: room.roomNumber };
+		blockCheckIn = String(today);
+		blockCheckOut = String(today);
+		blockNotes = '';
+		blockError = '';
+		blockOpen = true;
+	}
 </script>
 
 <!-- Global mouseup listener for drag release -->
@@ -208,10 +302,68 @@
 {/if}
 
 <div class="flex min-w-0 flex-1 flex-col" class:select-none={drag !== null}>
-	<!-- Property label -->
-	<div class="bg-muted/40 border-border border-b px-3 py-1.5">
-		<span class="text-sm font-semibold">{propertyName}</span>
-		<span class="text-muted-foreground ml-2 text-xs">{rooms.length} rooms</span>
+	<!-- Property label + chip filters -->
+	<div class="bg-muted/40 border-border border-b px-3 py-2 space-y-2">
+		<div class="flex items-center gap-2">
+			<span class="text-sm font-semibold">{propertyName}</span>
+			<span class="text-muted-foreground text-xs">{rooms.length}/{allRooms.length} rooms</span>
+		</div>
+
+		<!-- Filter chips -->
+		<div class="flex flex-wrap gap-1.5">
+			<!-- Bed count chips -->
+			{#each ([0, 1, 2, 3] as const) as n}
+				<button
+					onclick={() => { filterBeds = n; }}
+					class={[
+						'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+						filterBeds === n
+							? 'bg-foreground text-background border-foreground'
+							: 'bg-background text-muted-foreground border-border hover:border-foreground/40'
+					].join(' ')}
+				>
+					{n === 0 ? 'All beds' : n === 3 ? '3+ beds' : `${n} bed`}
+				</button>
+			{/each}
+
+			<!-- Kitchen chip -->
+			<button
+				onclick={() => { filterKitchen = !filterKitchen; }}
+				class={[
+					'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+					filterKitchen
+						? 'bg-amber-500 text-white border-amber-500'
+						: 'bg-background text-muted-foreground border-border hover:border-amber-400'
+				].join(' ')}
+			>
+				✦ Kitchen
+			</button>
+
+			<!-- Available chip -->
+			<button
+				onclick={() => { filterAvailable = !filterAvailable; }}
+				class={[
+					'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+					filterAvailable
+						? 'bg-teal-500 text-white border-teal-500'
+						: 'bg-background text-muted-foreground border-border hover:border-teal-400'
+				].join(' ')}
+			>
+				Available only
+			</button>
+		</div>
+	</div>
+
+	<!-- Housekeeping legend -->
+	<div class="border-border flex items-center gap-3 border-b px-3 py-1 text-[10px] text-muted-foreground">
+		<span class="font-medium">HK:</span>
+		{#each HK_CYCLE as s}
+			<span class="flex items-center gap-1">
+				<span class="inline-block h-2 w-2 rounded-full" style="background:{HK_COLORS[s]}"></span>
+				{HK_LABELS[s]}
+			</span>
+		{/each}
+		<span class="ml-auto opacity-60">Click dot to cycle</span>
 	</div>
 
 	<div class="overflow-x-auto">
@@ -224,8 +376,8 @@
 					>Room</th>
 					<th
 						class="border-border bg-background sticky z-20 border-b border-r px-1.5 py-1.5 text-left font-medium"
-						style="left:52px; min-width:28px"
-					>T</th>
+						style="left:52px; min-width:60px"
+					>Beds</th>
 					{#each days as day}
 						<th
 							class={[
@@ -246,18 +398,37 @@
 
 			<tbody>
 				{#each rooms as room (room.id)}
+					{@const hkStatus = (hkStatuses.get(room.id) ?? room.housekeepingStatus) as HkStatus}
 					<tr class="group">
+						<!-- Room number + HK dot + block button -->
 						<td
-							class="border-border bg-background group-hover:bg-muted/30 sticky left-0 z-10 border-b border-r px-2 py-0 font-mono font-medium whitespace-nowrap"
+							class="border-border bg-background group-hover:bg-muted/30 sticky left-0 z-10 border-b border-r px-2 py-0 whitespace-nowrap"
 							style="min-width:52px; height:32px"
-						>{room.roomNumber}</td>
-						<td
-							class="border-border bg-background group-hover:bg-muted/30 sticky z-10 border-b border-r px-1 py-0 text-center"
-							style="left:52px; min-width:28px"
 						>
-							{#if room.roomTypeCategory}
-								<span class="text-muted-foreground font-medium">{room.roomTypeCategory}</span>
-							{/if}
+							<div class="flex items-center gap-1">
+								<span class="font-mono font-medium">{room.roomNumber}</span>
+								<button
+									title={HK_LABELS[hkStatus]}
+									onclick={(e) => { e.stopPropagation(); cycleHkStatus(room.id, hkStatus); }}
+									class="h-2.5 w-2.5 flex-shrink-0 rounded-full ring-1 ring-white/50 hover:scale-125 transition-transform"
+									style="background:{HK_COLORS[hkStatus]}"
+								></button>
+							</div>
+						</td>
+
+						<!-- Compact room info + block button -->
+						<td
+							class="border-border bg-background group-hover:bg-muted/30 sticky z-10 border-b border-r px-1 py-0"
+							style="left:52px; min-width:60px"
+						>
+							<div class="flex items-center justify-between gap-1">
+								<span class="text-[10px] font-mono text-muted-foreground leading-none">{roomCompact(room)}</span>
+								<button
+									title="Block room for maintenance"
+									onclick={(e) => { e.stopPropagation(); openBlock(room); }}
+									class="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[10px] leading-none px-0.5 rounded hover:bg-muted transition-opacity"
+								>🔧</button>
+							</div>
 						</td>
 
 						{#each room.spans as span (span.day)}
@@ -280,54 +451,67 @@
 							{:else}
 								{@const s = span as BookingSpanType}
 								{@const inConflict = spanInDragConflict(room.id, s.day, s.length)}
+								{@const isBlocked = s.booking.status === 'blocked'}
 								<td
 									colspan={s.length}
 									class="border-border relative cursor-pointer border-b border-r p-0"
 									style="min-width:{s.length * 36}px; height:32px"
 									onmouseenter={() => updateDrag(room.id, s.day)}
-									onclick={() => !drag && openDetail(s.booking, room.roomNumber)}
+									onclick={() => !drag && !isBlocked && openDetail(s.booking, room.roomNumber)}
 								>
-									<!-- Conflict overlay during drag -->
 									{#if inConflict}
 										<div class="absolute inset-0 z-10 rounded bg-red-400/60"></div>
 									{/if}
 
-									<div
-										class={[
-											'relative flex h-full items-center overflow-hidden px-1.5',
-											channelColour(s.booking.channelName),
-											'text-white'
-										].join(' ')}
-										style={s.overflowStart
-											? 'border-radius:0 4px 4px 0'
-											: s.overflowEnd
-												? 'border-radius:4px 0 0 4px'
-												: 'border-radius:4px'}
-									>
-										{#if !s.overflowStart}
-											<span class="mr-0.5 shrink-0 opacity-70">›</span>
-										{/if}
-
-										<span class="min-w-0 truncate text-[11px] font-medium leading-none">
-											{s.booking.guestName ?? '—'}
-										</span>
-
-										{#if s.booking.channelName && s.booking.channelName !== 'Direct'}
-											<span class="ml-1 shrink-0 rounded bg-black/20 px-1 py-0.5 text-[9px] font-bold uppercase leading-none">
-												{s.booking.channelName === 'Expedia' ? 'E' : 'B'}
+									{#if isBlocked}
+										<!-- Maintenance block: gray hatched -->
+										<div
+											class="relative flex h-full items-center overflow-hidden px-1.5 bg-slate-400 text-white opacity-80"
+											style="border-radius:4px; background-image:repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(0,0,0,.08) 4px,rgba(0,0,0,.08) 8px)"
+										>
+											<span class="mr-1 text-[11px]">🔧</span>
+											<span class="min-w-0 truncate text-[11px] font-medium leading-none">
+												{s.booking.notes ?? 'Maintenance'}
 											</span>
-										{/if}
+										</div>
+									{:else}
+										<div
+											class={[
+												'relative flex h-full items-center overflow-hidden px-1.5',
+												channelColour(s.booking.channelName),
+												'text-white'
+											].join(' ')}
+											style={s.overflowStart
+												? 'border-radius:0 4px 4px 0'
+												: s.overflowEnd
+													? 'border-radius:4px 0 0 4px'
+													: 'border-radius:4px'}
+										>
+											{#if !s.overflowStart}
+												<span class="mr-0.5 shrink-0 opacity-70">›</span>
+											{/if}
 
-										{#if s.booking.status === 'checked_in'}
-											<span class="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-green-300"></span>
-										{/if}
+											<span class="min-w-0 truncate text-[11px] font-medium leading-none">
+												{s.booking.guestName ?? '—'}
+											</span>
 
-										{#if s.overflowEnd}
-											<span class="ml-auto shrink-0 text-[9px] font-semibold opacity-80">over›</span>
-										{:else}
-											<span class="ml-0.5 shrink-0 opacity-70">‹</span>
-										{/if}
-									</div>
+											{#if s.booking.channelName && s.booking.channelName !== 'Direct'}
+												<span class="ml-1 shrink-0 rounded bg-black/20 px-1 py-0.5 text-[9px] font-bold uppercase leading-none">
+													{s.booking.channelName === 'Expedia' ? 'E' : 'B'}
+												</span>
+											{/if}
+
+											{#if s.booking.status === 'checked_in'}
+												<span class="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-green-300"></span>
+											{/if}
+
+											{#if s.overflowEnd}
+												<span class="ml-auto shrink-0 text-[9px] font-semibold opacity-80">over›</span>
+											{:else}
+												<span class="ml-0.5 shrink-0 opacity-70">‹</span>
+											{/if}
+										</div>
+									{/if}
 								</td>
 							{/if}
 						{/each}
@@ -357,10 +541,74 @@
 		{propertyName}
 		roomId={slipDialog.roomId}
 		roomNumber={slipDialog.roomNumber}
+		roomConfigs={slipDialog.configs}
 		bind:checkIn={slipDialog.checkIn}
 		bind:checkOut={slipDialog.checkOut}
 		{channels}
 		{users}
 		{currentUserId}
 	/>
+{/if}
+
+<!-- Block dialog -->
+{#if blockOpen && blockDialog}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
+		<div class="bg-background rounded-lg shadow-xl p-5 w-80 space-y-4">
+			<div class="flex items-center justify-between">
+				<h3 class="font-semibold text-sm">Block Room {blockDialog.roomNumber}</h3>
+				<button onclick={() => { blockOpen = false; blockDialog = null; }} class="text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
+			</div>
+
+			<form
+				method="POST"
+				action="?/createBlock"
+				use:enhance={() => {
+					return ({ result }) => {
+						if (result.type === 'success') {
+							blockOpen = false;
+							blockDialog = null;
+							location.reload();
+						} else if (result.type === 'failure') {
+							blockError = (result.data as { error?: string })?.error ?? 'Error';
+						}
+					};
+				}}
+				class="space-y-3"
+			>
+				<input type="hidden" name="propertyId" value={propertyId} />
+				<input type="hidden" name="roomId" value={blockDialog.roomId} />
+
+				<div class="grid grid-cols-2 gap-2">
+					<div>
+						<label class="block text-xs text-muted-foreground mb-0.5" for="blockCheckIn">From</label>
+						<input id="blockCheckIn" type="date" name="checkIn" bind:value={blockCheckIn}
+							class="w-full border rounded px-2 py-1 text-sm border-input bg-background" />
+					</div>
+					<div>
+						<label class="block text-xs text-muted-foreground mb-0.5" for="blockCheckOut">To</label>
+						<input id="blockCheckOut" type="date" name="checkOut" bind:value={blockCheckOut}
+							class="w-full border rounded px-2 py-1 text-sm border-input bg-background" />
+					</div>
+				</div>
+
+				<div>
+					<label class="block text-xs text-muted-foreground mb-0.5" for="blockNotes">Reason (optional)</label>
+					<input id="blockNotes" type="text" name="notes" bind:value={blockNotes}
+						placeholder="e.g. Plumbing repair"
+						class="w-full border rounded px-2 py-1 text-sm border-input bg-background" />
+				</div>
+
+				{#if blockError}
+					<p class="text-destructive text-xs">{blockError}</p>
+				{/if}
+
+				<div class="flex justify-end gap-2 pt-1">
+					<button type="button" onclick={() => { blockOpen = false; blockDialog = null; }}
+						class="rounded border px-3 py-1.5 text-xs hover:bg-muted">Cancel</button>
+					<button type="submit"
+						class="rounded bg-slate-600 text-white px-3 py-1.5 text-xs hover:bg-slate-700">Block Room</button>
+				</div>
+			</form>
+		</div>
+	</div>
 {/if}

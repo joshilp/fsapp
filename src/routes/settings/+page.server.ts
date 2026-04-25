@@ -124,6 +124,16 @@ export const actions: Actions = {
 		const propertyId = g('propertyId');
 		const roomNumber = g('roomNumber');
 		const roomTypeId = g('roomTypeId') || null;
+		const kingBeds = parseInt(fd.get('kingBeds') as string || '0', 10) || 0;
+		const queenBeds = parseInt(fd.get('queenBeds') as string || '0', 10) || 0;
+		const doubleBeds = parseInt(fd.get('doubleBeds') as string || '0', 10) || 0;
+		const hasKitchen = fd.get('hasKitchen') === '1';
+		const hasHideabed = fd.get('hasHideabed') === '1';
+		const configsRaw = g('configs');
+		const configLines = configsRaw
+			? configsRaw.split('\n').map((s) => s.trim()).filter(Boolean)
+			: [];
+		const configs = configLines.length > 1 ? JSON.stringify(configLines) : null;
 
 		if (!propertyId || !roomNumber) return fail(400, { error: 'Missing required fields' });
 
@@ -139,6 +149,12 @@ export const actions: Actions = {
 			propertyId,
 			roomNumber,
 			roomTypeId,
+			kingBeds,
+			queenBeds,
+			doubleBeds,
+			hasKitchen,
+			hasHideabed,
+			configs,
 			isActive: true
 		});
 		return { success: true };

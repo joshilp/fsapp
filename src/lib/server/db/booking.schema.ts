@@ -74,9 +74,15 @@ export const rooms = sqliteTable(
 		roomNumber: text('room_number').notNull(), // display value e.g. "32"
 		numRooms: integer('num_rooms').notNull().default(1), // rooms-within-a-unit
 		hasKitchen: integer('has_kitchen', { mode: 'boolean' }).notNull().default(false),
+		kingBeds: integer('king_beds').notNull().default(0),
 		queenBeds: integer('queen_beds').notNull().default(0),
 		doubleBeds: integer('double_beds').notNull().default(0),
 		hasHideabed: integer('has_hideabed', { mode: 'boolean' }).notNull().default(false),
+		// JSON array of config names, e.g. '["1Q Sleeping","1Q+1D Sleeping"]'
+		// null = single fixed config; operators pick at booking time when set
+		configs: text('configs'),
+		// Housekeeping status: clean | dirty | in_progress | out_of_order
+		housekeepingStatus: text('housekeeping_status').notNull().default('clean'),
 		// 1 (low) → 10 (high). Suggestions only — operator always has final say.
 		desirabilityWeight: integer('desirability_weight').notNull().default(5),
 		cleaningEaseWeight: integer('cleaning_ease_weight').notNull().default(5),
@@ -235,6 +241,8 @@ export const bookings = sqliteTable(
 		// Free-text clerk name for non-registered users (walk-ins helping at desk, etc.)
 		// Takes precedence over clerkId for display when set.
 		clerkName: text('clerk_name'),
+		// Selected room configuration when room has multiple configs (e.g. "1Q+1D Sleeping")
+		roomConfig: text('room_config'),
 		notes: text('notes'),
 
 		// Timestamps for lifecycle events

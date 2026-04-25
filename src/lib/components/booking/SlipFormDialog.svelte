@@ -15,11 +15,18 @@
 		propertyName: string;
 		roomId: string;
 		roomNumber: string;
+		roomConfigs?: string[] | null;
 		checkIn: string;
 		checkOut: string;
 		channels: Channel[];
 		users: User[];
 		currentUserId: string;
+		// Optional pre-fill from OTA import
+		prefilledGuestName?: string;
+		prefilledGuestPhone?: string;
+		prefilledChannelId?: string;
+		prefilledOtaConfirmation?: string;
+		prefilledNotes?: string;
 		onSuccess?: () => void;
 	};
 
@@ -29,20 +36,34 @@
 		propertyName,
 		roomId,
 		roomNumber,
+		roomConfigs = null,
 		checkIn = $bindable(),
 		checkOut = $bindable(),
 		channels,
 		users,
 		currentUserId,
+		prefilledGuestName = '',
+		prefilledGuestPhone = '',
+		prefilledChannelId,
+		prefilledOtaConfirmation = '',
+		prefilledNotes = '',
 		onSuccess
 	}: Props = $props();
 
+	let selectedRoomConfig = $state(roomConfigs?.[0] ?? '');
+
 	// ─── Form state ───────────────────────────────────────────────────────────
 
-	let guestName = $state('');
-	let guestPhone = $state('');
-	let selectedChannelId = $state(channels.find((c) => c.name === 'Direct')?.id ?? channels[0]?.id ?? '');
-	let notes = $state('');
+	let guestName = $state(prefilledGuestName);
+	let guestPhone = $state(prefilledGuestPhone);
+	let selectedChannelId = $state(
+		prefilledChannelId
+			?? channels.find((c) => c.name === 'Direct')?.id
+			?? channels[0]?.id
+			?? ''
+	);
+	let notes = $state(prefilledNotes);
+	let otaConfirmationNumber = $state(prefilledOtaConfirmation);
 	let depositAmount = $state('');
 	let depositMethod = $state('card');
 	let showDeposit = $state(false);
@@ -166,6 +187,25 @@
 			<!-- Hidden fields -->
 			<input type="hidden" name="propertyId" value={propertyId} />
 			<input type="hidden" name="roomId" value={roomId} />
+			{#if selectedRoomConfig}
+				<input type="hidden" name="roomConfig" value={selectedRoomConfig} />
+			{/if}
+
+			<!-- Room config picker (only shown for dual-config rooms) -->
+			{#if roomConfigs && roomConfigs.length > 1}
+				<div class="flex flex-col gap-1.5">
+					<Label for="roomConfigSelect">Room Configuration</Label>
+					<select
+						id="roomConfigSelect"
+						bind:value={selectedRoomConfig}
+						class="border-input bg-background rounded-md border px-3 py-2 text-sm"
+					>
+						{#each roomConfigs as cfg}
+							<option value={cfg}>{cfg}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
 
 			{#if serverError}
 				<div class="bg-destructive/10 text-destructive rounded-md px-3 py-2 text-sm">
@@ -293,6 +333,17 @@
 				<input type="hidden" name="channelId" value={selectedChannelId} />
 			</div>
 
+			<!-- OTA confirmation # (shown when non-Direct channel) -->
+			{#if channels.find((c) => c.id === selectedChannelId)?.name !== 'Direct'}
+				<div class="flex flex-col gap-1.5">
+					<Label for="otaConf">OTA Confirmation #</Label>
+					<input id="otaConf" name="otaConfirmationNumber" type="text"
+						bind:value={otaConfirmationNumber}
+						placeholder="e.g. BDC-12345678"
+						class="border-input bg-background rounded-md border px-3 py-2 text-sm shadow-sm" />
+				</div>
+			{/if}
+
 			<!-- Notes -->
 			<div class="flex flex-col gap-1.5">
 				<Label for="notes">Notes</Label>
@@ -301,7 +352,7 @@
 					name="notes"
 					bind:value={notes}
 					rows="2"
-					placeholder="Special requests, OTA confirmation #, etc."
+					placeholder="Special requests, etc."
 					class="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
 				></textarea>
 			</div>

@@ -9,7 +9,8 @@ import {
 	bookings,
 	ccStaging,
 	guests,
-	paymentEvents
+	paymentEvents,
+	rooms
 } from '$lib/server/db/schema';
 import { user } from '$lib/server/db/auth.schema';
 import { encryptCc } from '$lib/server/cc';
@@ -83,6 +84,7 @@ export const actions: Actions = {
 		const clerkUserId = g('clerkUserId');
 		const clerkName = g('clerkName');
 		const notes = g('notes');
+		const otaConfirmationNumber = g('otaConfirmationNumber');
 		const depositAmountStr = g('depositAmount');
 		const depositMethod = g('depositMethod');
 		const ccNumber = g('ccNumber');
@@ -136,6 +138,7 @@ export const actions: Actions = {
 		}
 
 		// Create booking
+		const roomConfig = g('roomConfig');
 		const bookingId = crypto.randomUUID();
 		await db.insert(bookings).values({
 			id: bookingId,
@@ -148,6 +151,8 @@ export const actions: Actions = {
 			status: 'confirmed',
 			checkInDate: checkIn,
 			checkOutDate: checkOut,
+			roomConfig: roomConfig || null,
+			otaConfirmationNumber: otaConfirmationNumber || null,
 			notes
 		});
 
@@ -198,7 +203,7 @@ export const actions: Actions = {
 		return { success: true, bookingId };
 	},
 
-	// Check out a booking
+	// Check out a booking — auto-marks room dirty
 	checkOutBooking: async ({ request, locals }) => {
 		if (!locals.user) return fail(401, { error: 'Unauthorized' });
 
@@ -206,10 +211,22 @@ export const actions: Actions = {
 		const bookingId = (fd.get('bookingId') as string)?.trim();
 		if (!bookingId) return fail(400, { error: 'Missing bookingId' });
 
+		const booking = await db.query.bookings.findFirst({
+			where: eq(bookings.id, bookingId),
+			columns: { roomId: true }
+		});
+
 		await db
 			.update(bookings)
 			.set({ status: 'checked_out', checkedOutAt: new Date() })
 			.where(eq(bookings.id, bookingId));
+
+		if (booking?.roomId) {
+			await db
+				.update(rooms)
+				.set({ housekeepingStatus: 'dirty' })
+				.where(eq(rooms.id, booking.roomId));
+		}
 
 		return { success: true };
 	},
@@ -227,6 +244,104 @@ export const actions: Actions = {
 			.update(bookings)
 			.set({ status: 'cancelled', cancelledAt: new Date() })
 			.where(eq(bookings.id, bookingId));
+
+		return { success: true };
+	},
+
+	// Restore a cancelled booking — re-checks conflicts first
+	restoreBooking: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+
+		const fd = await request.formData();
+		const bookingId = (fd.get('bookingId') as string)?.trim();
+		if (!bookingId) return fail(400, { error: 'Missing bookingId' });
+
+		const booking = await db.query.bookings.findFirst({
+			where: eq(bookings.id, bookingId),
+			columns: { roomId: true, checkInDate: true, checkOutDate: true }
+		});
+		if (!booking) return fail(404, { error: 'Booking not found' });
+
+		const conflict = await db.query.bookings.findFirst({
+			where: and(
+				eq(bookings.roomId, booking.roomId),
+				lt(bookings.checkInDate, booking.checkOutDate),
+				gt(bookings.checkOutDate, booking.checkInDate),
+				ne(bookings.status, 'cancelled'),
+				ne(bookings.id, bookingId)
+			)
+		});
+		if (conflict) {
+			return fail(400, {
+				error: `Cannot restore — room already booked ${conflict.checkInDate} → ${conflict.checkOutDate}`
+			});
+		}
+
+		await db
+			.update(bookings)
+			.set({ status: 'confirmed', cancelledAt: null })
+			.where(eq(bookings.id, bookingId));
+
+		return { success: true };
+	},
+
+	// Create a maintenance block on a room for a date range
+	createBlock: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+
+		const propertyId = g('propertyId');
+		const roomId = g('roomId');
+		const checkIn = g('checkIn');
+		const checkOut = g('checkOut');
+		const notes = g('notes');
+
+		if (!propertyId || !roomId || !checkIn || !checkOut) {
+			return fail(400, { error: 'Missing required fields' });
+		}
+		if (checkIn >= checkOut) return fail(400, { error: 'End must be after start' });
+
+		const conflict = await db.query.bookings.findFirst({
+			where: and(
+				eq(bookings.roomId, roomId),
+				lt(bookings.checkInDate, checkOut),
+				gt(bookings.checkOutDate, checkIn),
+				ne(bookings.status, 'cancelled')
+			),
+			with: { guest: { columns: { name: true } } }
+		});
+		if (conflict) {
+			return fail(400, {
+				error: `Conflict with existing booking ${conflict.checkInDate} → ${conflict.checkOutDate}${conflict.guest ? ` (${conflict.guest.name})` : ''}`
+			});
+		}
+
+		// Use a placeholder guest record for blocks
+		let blockGuestId: string;
+		const blockGuest = await db.query.guests.findFirst({
+			where: eq(guests.name, '__maintenance__')
+		});
+		if (blockGuest) {
+			blockGuestId = blockGuest.id;
+		} else {
+			blockGuestId = crypto.randomUUID();
+			await db.insert(guests).values({ id: blockGuestId, name: '__maintenance__' });
+		}
+
+		await db.insert(bookings).values({
+			id: crypto.randomUUID(),
+			propertyId,
+			roomId,
+			guestId: blockGuestId,
+			channelId: null,
+			clerkId: locals.user.id,
+			status: 'blocked',
+			checkInDate: checkIn,
+			checkOutDate: checkOut,
+			notes: notes || 'Maintenance block'
+		});
 
 		return { success: true };
 	}

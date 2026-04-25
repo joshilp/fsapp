@@ -1,7 +1,13 @@
 import type { Handle } from '@sveltejs/kit';
 import { building } from '$app/environment';
+import { eq } from 'drizzle-orm';
 import { auth } from '$lib/server/auth';
+import { db } from '$lib/server/db';
+import { user } from '$lib/server/db/auth.schema';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
+
+const UNPROTECTED = ['/auth/', '/api/'];
+const PENDING_PATH = '/pending';
 
 const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	const session = await auth.api.getSession({ headers: event.request.headers });
@@ -9,6 +15,21 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	if (session) {
 		event.locals.session = session.session;
 		event.locals.user = session.user;
+
+		// Approval check for authenticated routes
+		const path = event.url.pathname;
+		const isUnprotected = UNPROTECTED.some((p) => path.startsWith(p)) || path === PENDING_PATH;
+
+		if (!isUnprotected) {
+			const dbUser = await db.query.user.findFirst({
+				where: eq(user.id, session.user.id),
+				columns: { isApproved: true, isAdmin: true }
+			});
+
+			if (dbUser && !dbUser.isApproved) {
+				return new Response(null, { status: 302, headers: { Location: PENDING_PATH } });
+			}
+		}
 	}
 
 	return svelteKitHandler({ event, resolve, auth, building });
