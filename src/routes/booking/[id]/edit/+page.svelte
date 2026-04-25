@@ -24,6 +24,17 @@
 		return n > 0 ? n : 0;
 	});
 
+	// ─── Quoted rate ──────────────────────────────────────────────────────────
+
+	const existingRateTotal = $derived(
+		(booking.lineItems ?? [])
+			.filter((li) => li.type === 'rate' || li.type === 'extra')
+			.reduce((s, li) => s + li.totalAmount, 0)
+	);
+	// Dollar string for the editable input
+	let quotedTotal = $state(existingRateTotal > 0 ? (existingRateTotal / 100).toFixed(2) : '');
+	let rateOverridden = $state(false);
+
 	const backHref = $derived(() => {
 		const [y, m] = booking.checkInDate.split('-');
 		return `/booking?month=${y}-${m}`;
@@ -147,6 +158,40 @@
 				rows="2"
 				class="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
 			></textarea>
+		</div>
+
+		<!-- Quoted rate -->
+		<div class="flex flex-col gap-1.5">
+			<div class="flex items-center justify-between">
+				<Label for="quotedTotal">
+					Quoted total (before tax)
+				</Label>
+				{#if existingRateTotal > 0 && rateOverridden}
+					<button type="button" class="text-[10px] text-primary underline"
+						onclick={() => { rateOverridden = false; quotedTotal = (existingRateTotal / 100).toFixed(2); }}>
+						Reset to current (${(existingRateTotal / 100).toFixed(2)})
+					</button>
+				{/if}
+			</div>
+			<div class="relative">
+				<span class="text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 text-sm">$</span>
+				<Input
+					id="quotedTotal"
+					name="quotedTotal"
+					type="number"
+					min="0"
+					step="0.01"
+					bind:value={quotedTotal}
+					oninput={() => { rateOverridden = true; }}
+					placeholder="0.00"
+					class="pl-6"
+				/>
+			</div>
+			{#if existingRateTotal === 0}
+				<p class="text-muted-foreground text-xs">No rate saved yet. Enter a total to set it.</p>
+			{:else if !rateOverridden}
+				<p class="text-muted-foreground text-xs">Current: ${(existingRateTotal / 100).toFixed(2)} — edit to change.</p>
+			{/if}
 		</div>
 
 		<div class="flex justify-between pt-2">

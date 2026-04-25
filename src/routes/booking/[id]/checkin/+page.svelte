@@ -89,11 +89,26 @@
 		rateLines.reduce((sum, l) => sum + (parseFloat(l.total) || 0), 0)
 	);
 	const taxTotal = $derived(taxLines.reduce((sum, l) => sum + (parseFloat(l.total) || 0), 0));
-	const depositTotal = $derived(
-		existingDeposit.reduce((sum, li) => sum + li.totalAmount / 100, 0) // negative
+	const depositLineTotal = $derived(
+		existingDeposit.reduce((sum, li) => sum + li.totalAmount / 100, 0) // negative cents stored as negative
+	);
+	// Sum of all recorded payment events (deposits + charges)
+	const paymentsReceived = $derived(
+		(booking.paymentEvents ?? []).reduce((sum, pe) => sum + pe.amount / 100, 0)
 	);
 	const grandTotal = $derived(rateSubtotal + taxTotal);
-	const balanceDue = $derived(grandTotal + depositTotal);
+	// Balance = total charges minus all money actually received
+	const balanceDue = $derived(Math.max(0, grandTotal - paymentsReceived));
+
+	// ─── Payment recording ────────────────────────────────────────────────────
+
+	let paymentAmount = $state(balanceDue > 0 ? fmt(balanceDue) : '');
+	let paymentMethod = $state('card');
+
+	// Keep payment amount in sync with balance when charges change
+	$effect(() => {
+		if (balanceDue > 0 && !paymentAmount) paymentAmount = fmt(balanceDue);
+	});
 
 	function fmt(n: number) {
 		return n.toFixed(2);
@@ -132,7 +147,6 @@
 		if (!isNaN(q) && !isNaN(u)) line.total = fmt(q * u);
 	}
 
-	let paymentMethod = $state('card');
 	let submitting = $state(false);
 
 	// Guest fields (bindable, pre-filled)
@@ -446,56 +460,89 @@
 				+ Add tax
 			</Button>
 
-			<!-- Deposit deduction -->
-			{#if existingDeposit.length > 0}
-				<div class="text-muted-foreground mb-2 flex justify-between text-sm">
-					<span>Less deposit paid</span>
-					<span>${fmt(depositTotal)}</span>
-				</div>
-			{/if}
-
-			<!-- Grand total & balance -->
-			<div class="bg-muted/40 border-border rounded-md border p-3">
-				<div class="mb-1 flex justify-between text-sm">
+		<!-- Grand total & balance summary -->
+		<div class="bg-muted/40 border-border rounded-md border p-3 space-y-1.5">
+			<div class="flex justify-between text-sm">
+				<span class="text-muted-foreground">Subtotal</span>
+				<span>${fmt(rateSubtotal)}</span>
+			</div>
+			{#if taxTotal > 0}
+				<div class="flex justify-between text-sm">
 					<span class="text-muted-foreground">Taxes</span>
 					<span>${fmt(taxTotal)}</span>
 				</div>
-				<div class="mb-1 flex justify-between text-sm font-medium">
-					<span>Grand total</span>
-					<span>${fmt(grandTotal)}</span>
-				</div>
-				{#if existingDeposit.length > 0}
-					<div class="border-border mt-1 border-t pt-1 text-sm">
-						<div class="flex justify-between font-semibold">
-							<span>Balance due</span>
-							<span class={balanceDue <= 0 ? 'text-green-600' : ''}>${fmt(Math.max(0, balanceDue))}</span>
-						</div>
-					</div>
-				{/if}
+			{/if}
+			<div class="flex justify-between text-sm font-semibold border-t border-border pt-1.5 mt-1">
+				<span>Total</span>
+				<span>${fmt(grandTotal)}</span>
 			</div>
-		</section>
 
-		<!-- ── Payment ───────────────────────────────────────────────────── -->
-		<section class="mb-6">
-			<h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Payment</h2>
-			<input type="hidden" name="balanceAmount" value={fmt(Math.max(0, balanceDue))} />
-			<div class="flex flex-wrap items-center gap-3">
-				<span class="text-sm">Method:</span>
-				{#each ['card', 'cash', 'cheque'] as method}
-					<button
-						type="button"
-						class={[
-							'rounded-md border px-3 py-1.5 text-sm capitalize transition-colors',
-							paymentMethod === method
-								? 'bg-primary text-primary-foreground border-primary'
-								: 'border-border hover:bg-muted'
-						].join(' ')}
-						onclick={() => (paymentMethod = method)}
-					>{method}</button>
-				{/each}
-				<input type="hidden" name="paymentMethod" value={paymentMethod} />
+			<!-- Payments received -->
+			{#if (booking.paymentEvents ?? []).length > 0}
+				<div class="border-t border-border pt-1.5 space-y-1">
+					{#each booking.paymentEvents ?? [] as pe}
+						<div class="flex justify-between text-xs text-green-700">
+							<span class="flex items-center gap-1">
+								<span class="font-medium">✓ Paid</span>
+								<span class="text-muted-foreground capitalize">({pe.paymentMethod})</span>
+								{#if pe.chargedAt}
+									<span class="text-muted-foreground">{new Date(pe.chargedAt).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}</span>
+								{/if}
+							</span>
+							<span class="font-mono font-medium">${fmt(pe.amount / 100)}</span>
+						</div>
+					{/each}
+				</div>
+				<div class="flex justify-between text-sm font-bold border-t border-border pt-1.5">
+					<span class={balanceDue <= 0 ? 'text-green-700' : ''}>
+						{balanceDue <= 0 ? '✓ Paid in full' : 'Balance due'}
+					</span>
+					<span class={balanceDue <= 0 ? 'text-green-700' : ''}>${fmt(balanceDue)}</span>
+				</div>
+			{/if}
+		</div>
+	</section>
+
+	<!-- ── Payment ───────────────────────────────────────────────────── -->
+	<section class="mb-6">
+		<h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
+			{(booking.paymentEvents ?? []).length > 0 ? 'Record additional payment' : 'Collect payment'}
+		</h2>
+
+		{#if balanceDue <= 0 && (booking.paymentEvents ?? []).length > 0}
+			<p class="text-green-700 text-sm">Booking is paid in full. Record an additional payment if needed.</p>
+		{/if}
+
+		<div class="flex flex-wrap items-center gap-3 mt-2">
+			<div class="relative">
+				<span class="text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 text-sm">$</span>
+				<input
+					name="paymentAmount"
+					type="number"
+					min="0"
+					step="0.01"
+					bind:value={paymentAmount}
+					placeholder="0.00"
+					class="border-input bg-background rounded-md border pl-6 pr-3 py-2 text-sm w-28 shadow-sm"
+				/>
 			</div>
-		</section>
+			<span class="text-muted-foreground text-sm">via</span>
+			{#each ['card', 'cash', 'cheque'] as method}
+				<button
+					type="button"
+					class={[
+						'rounded-md border px-3 py-1.5 text-sm capitalize transition-colors',
+						paymentMethod === method
+							? 'bg-primary text-primary-foreground border-primary'
+							: 'border-border hover:bg-muted'
+					].join(' ')}
+					onclick={() => (paymentMethod = method)}
+				>{method}</button>
+			{/each}
+			<input type="hidden" name="paymentMethod" value={paymentMethod} />
+		</div>
+		<p class="text-muted-foreground mt-1.5 text-xs">Leave amount as 0 to save without recording a payment.</p>
+	</section>
 
 		<!-- Submit -->
 		<div class="flex items-center justify-between">

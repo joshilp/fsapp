@@ -1,5 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, asc, eq, ne } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import {
@@ -25,6 +25,9 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 			},
 			lineItems: {
 				orderBy: (li, { asc }) => [asc(li.sortOrder)]
+			},
+			paymentEvents: {
+				orderBy: (pe, { asc }) => [asc(pe.chargedAt)]
 			},
 			channel: { columns: { name: true } }
 		}
@@ -172,16 +175,16 @@ export const actions: Actions = {
 			await db.insert(bookingLineItems).values(newItems);
 		}
 
-		// Record balance charge if provided
-		const balanceStr = g('balanceAmount');
+		// Record an explicit payment only if the operator entered an amount
+		const paymentAmountStr = g('paymentAmount');
 		const paymentMethod = g('paymentMethod');
-		if (balanceStr && paymentMethod) {
-			const amount = Math.round(parseFloat(balanceStr) * 100);
+		if (paymentAmountStr && paymentMethod) {
+			const amount = Math.round(parseFloat(paymentAmountStr) * 100);
 			if (amount > 0) {
 				await db.insert(paymentEvents).values({
 					id: crypto.randomUUID(),
 					bookingId,
-					type: 'final_charge',
+					type: booking.status === 'checked_in' ? 'final_charge' : 'deposit',
 					amount,
 					paymentMethod,
 					chargedAt: new Date()

@@ -75,10 +75,12 @@
 		}
 	});
 
-	// ─── Line items ───────────────────────────────────────────────────────────
+	// ─── Line items + payments ────────────────────────────────────────────────
 
 	type LineItem = { id: string; type: string; label: string; quantity: number | null; unitAmount: number | null; totalAmount: number };
+	type PaymentEvent = { id: string; type: string; amount: number; paymentMethod: string; chargedAt: string | null };
 	let lineItems = $state<LineItem[] | null>(null);
+	let payments = $state<PaymentEvent[]>([]);
 	let lineItemsLoaded = $state(false);
 
 	$effect(() => {
@@ -88,19 +90,35 @@
 				.then(async (r) => {
 					if (!r.ok) { lineItemsLoaded = true; return; }
 					const data = await r.json();
-					lineItems = Array.isArray(data) ? data : [];
+					// Handle both old (array) and new (object) response shapes
+					if (Array.isArray(data)) {
+						lineItems = data;
+					} else {
+						lineItems = Array.isArray(data.lineItems) ? data.lineItems : [];
+						payments = Array.isArray(data.payments) ? data.payments : [];
+					}
 					lineItemsLoaded = true;
 				})
 				.catch(() => { lineItems = []; lineItemsLoaded = true; });
 		}
 	});
 
-	const lineItemsTotal = $derived(
+	const chargesTotal = $derived(
 		lineItems?.filter((li) => li.type !== 'deposit').reduce((s, li) => s + li.totalAmount, 0) ?? 0
 	);
+	const depositsTotal = $derived(
+		lineItems?.filter((li) => li.type === 'deposit').reduce((s, li) => s + li.totalAmount, 0) ?? 0
+	);
+	const paymentsTotal = $derived(payments.reduce((s, pe) => s + pe.amount, 0));
+	const balanceDue = $derived(Math.max(0, chargesTotal - paymentsTotal));
 
 	function fmtMoney(cents: number) {
 		return '$' + (cents / 100).toFixed(2);
+	}
+
+	function fmtPayDate(iso: string | null): string {
+		if (!iso) return '';
+		return new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
 	}
 
 	// ─── Housekeeping status ──────────────────────────────────────────────────
@@ -245,33 +263,61 @@
 			{/if}
 		</dl>
 
-		<!-- Quoted rate / line items -->
+		<!-- Charges + payments -->
 		{#if !lineItemsLoaded}
 			<p class="text-muted-foreground text-xs">Loading charges…</p>
-		{:else if lineItems && lineItems.filter(li => li.type !== 'deposit').length > 0}
+		{:else if booking.status !== 'blocked'}
 			<div class="rounded-md border border-border bg-muted/20 px-3 py-2 space-y-1.5">
-				<p class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Quoted charges</p>
-				{#each lineItems.filter(li => li.type !== 'deposit') as li}
-					<div class="flex items-center justify-between text-sm gap-2">
-						<span class="text-muted-foreground text-xs flex-1 min-w-0 truncate">{li.label}</span>
-						<span class="font-mono text-xs shrink-0">{fmtMoney(li.totalAmount)}</span>
-					</div>
-				{/each}
-				{#each lineItems.filter(li => li.type === 'deposit') as li}
-					<div class="flex items-center justify-between text-sm gap-2 border-t border-border/50 pt-1">
-						<span class="text-muted-foreground text-xs flex-1">Deposit paid</span>
-						<span class="font-mono text-xs text-green-600 shrink-0">{fmtMoney(Math.abs(li.totalAmount))}</span>
-					</div>
-				{/each}
-				{#if lineItems.length > 1}
+				<p class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Charges</p>
+
+				{#if lineItems && lineItems.filter(li => li.type !== 'deposit').length > 0}
+					{#each lineItems.filter(li => li.type !== 'deposit') as li}
+						<div class="flex items-center justify-between gap-2">
+							<span class="text-muted-foreground text-xs flex-1 min-w-0 truncate">{li.label}</span>
+							<span class="font-mono text-xs shrink-0">{fmtMoney(li.totalAmount)}</span>
+						</div>
+					{/each}
 					<div class="flex items-center justify-between border-t border-border pt-1 mt-0.5">
-						<span class="text-xs font-medium">Total (before tax)</span>
-						<span class="font-mono text-sm font-semibold">{fmtMoney(lineItemsTotal)}</span>
+						<span class="text-xs font-medium">Total</span>
+						<span class="font-mono text-sm font-semibold">{fmtMoney(chargesTotal)}</span>
+					</div>
+				{:else}
+					<p class="text-muted-foreground text-xs italic">No charges set yet.</p>
+				{/if}
+
+				<!-- Payment events -->
+				{#if payments.length > 0}
+					<div class="border-t border-border pt-1.5 space-y-1 mt-1">
+						<p class="text-[10px] font-medium uppercase tracking-wide text-green-700">Payments received</p>
+						{#each payments as pe}
+							<div class="flex items-center justify-between text-xs gap-2">
+								<span class="text-green-700 flex items-center gap-1.5">
+									<span>✓</span>
+									<span class="capitalize">{pe.paymentMethod}</span>
+									{#if pe.chargedAt}
+										<span class="text-muted-foreground">{fmtPayDate(pe.chargedAt)}</span>
+									{/if}
+								</span>
+								<span class="font-mono font-medium text-green-700">{fmtMoney(pe.amount)}</span>
+							</div>
+						{/each}
+					</div>
+					<div class="flex items-center justify-between border-t border-border pt-1 text-sm font-semibold">
+						<span class={balanceDue <= 0 ? 'text-green-700' : ''}>
+							{balanceDue <= 0 ? '✓ Paid in full' : 'Balance due'}
+						</span>
+						<span class={[
+							'font-mono',
+							balanceDue <= 0 ? 'text-green-700' : ''
+						].join(' ')}>{fmtMoney(balanceDue)}</span>
+					</div>
+				{:else if chargesTotal > 0}
+					<div class="flex items-center justify-between border-t border-border pt-1 text-xs text-amber-600">
+						<span>No payment recorded yet</span>
+						<span class="font-mono">{fmtMoney(chargesTotal)} due</span>
 					</div>
 				{/if}
 			</div>
-		{:else if booking.status !== 'blocked'}
-			<p class="text-muted-foreground text-xs italic">No charges recorded yet.</p>
 		{/if}
 
 		<!-- Room-move chain banners -->

@@ -2,7 +2,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import { and, eq, gt, lt, ne, sql } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { bookingChannels, bookings, rooms } from '$lib/server/db/schema';
+import { bookingChannels, bookingLineItems, bookings, rooms } from '$lib/server/db/schema';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
 	if (!locals.user) redirect(303, '/auth/login');
@@ -15,7 +15,10 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 				with: { property: { columns: { id: true, name: true } } },
 				columns: { propertyId: true, roomNumber: true }
 			},
-			channel: { columns: { id: true, name: true } }
+			channel: { columns: { id: true, name: true } },
+			lineItems: {
+				orderBy: (li, { asc }) => [asc(li.sortOrder)]
+			}
 		},
 		columns: {
 			id: true,
@@ -96,6 +99,33 @@ export const actions: Actions = {
 				otaConfirmationNumber
 			})
 			.where(eq(bookings.id, bookingId));
+
+		// Update quoted total if operator changed it (only for confirmed bookings with no payments)
+		const quotedTotalStr = g('quotedTotal');
+		if (quotedTotalStr) {
+			const totalCents = Math.round(parseFloat(quotedTotalStr) * 100);
+			if (!isNaN(totalCents) && totalCents >= 0) {
+				const nightCount = Math.round(
+					(new Date(checkOut + 'T12:00:00').getTime() - new Date(checkIn + 'T12:00:00').getTime()) / 86400000
+				);
+				// Delete existing rate lines and replace
+				await db
+					.delete(bookingLineItems)
+					.where(and(eq(bookingLineItems.bookingId, bookingId), eq(bookingLineItems.type, 'rate')));
+				if (totalCents > 0) {
+					await db.insert(bookingLineItems).values({
+						id: crypto.randomUUID(),
+						bookingId,
+						type: 'rate',
+						label: `Room rate · ${nightCount} night${nightCount === 1 ? '' : 's'}`,
+						quantity: nightCount,
+						unitAmount: nightCount > 0 ? Math.round(totalCents / nightCount) : totalCents,
+						totalAmount: totalCents,
+						sortOrder: 0
+					});
+				}
+			}
+		}
 
 		const [y, m] = checkIn.split('-');
 		redirect(303, `/booking?month=${y}-${m}`);
