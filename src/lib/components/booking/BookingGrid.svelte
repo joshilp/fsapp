@@ -433,9 +433,9 @@
 					<!-- Line 1: number · type name · HK dot · ··· -->
 					<div class="flex items-center gap-1 leading-none">
 						<span class="font-mono font-bold text-sm">{room.roomNumber}</span>
-						<span class="text-muted-foreground/70 text-[10px] truncate flex-1 leading-none">
-							{room.roomTypeName ?? ''}
-						</span>
+					<span class="text-muted-foreground/70 text-[11px] truncate flex-1 leading-none">
+						{room.roomTypeName ?? ''}
+					</span>
 						<button
 							title="{HK_LABELS[hkStatus]} — click to cycle"
 							onclick={(e) => { e.stopPropagation(); cycleHkStatus(room.id, hkStatus); }}
@@ -450,9 +450,9 @@
 					</div>
 					<!-- Line 2: fixed 6-slot bed grid [BR · K · Q · D · HB · Kit] -->
 					<div class="mt-0.5 grid leading-none" style="grid-template-columns:repeat(6,1fr)">
-						{#each bedSlots(room) as slot}
-							<span class="text-[9px] font-mono text-muted-foreground/55">{slot}</span>
-						{/each}
+					{#each bedSlots(room) as slot}
+						<span class="text-[11px] font-mono text-muted-foreground/70">{slot}</span>
+					{/each}
 					</div>
 				</td>
 
