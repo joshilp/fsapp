@@ -35,6 +35,12 @@
 		typeFilter ? results.filter((r) => r.category === typeFilter) : results
 	);
 
+	function advanceDay(iso: string): string {
+		const d = new Date(iso + 'T12:00:00');
+		d.setDate(d.getDate() + 1);
+		return d.toISOString().slice(0, 10);
+	}
+
 	async function search() {
 		if (checkIn >= checkOut) { searchError = 'Check-out must be after check-in'; return; }
 		searchError = '';
@@ -76,8 +82,9 @@
 			<div class="grid grid-cols-2 gap-3">
 				<div>
 					<label class="block text-xs text-muted-foreground mb-0.5" for="findCheckIn">Check-in</label>
-					<input id="findCheckIn" type="date" bind:value={checkIn}
-						class="w-full border border-input rounded px-2 py-1.5 text-sm bg-background" />
+				<input id="findCheckIn" type="date" bind:value={checkIn}
+					oninput={() => { if (checkOut <= checkIn) checkOut = advanceDay(checkIn); }}
+					class="w-full border border-input rounded px-2 py-1.5 text-sm bg-background" />
 				</div>
 				<div>
 					<label class="block text-xs text-muted-foreground mb-0.5" for="findCheckOut">Check-out</label>

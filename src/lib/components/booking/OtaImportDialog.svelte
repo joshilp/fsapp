@@ -102,6 +102,12 @@
 		return Math.max(0, Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000));
 	}
 
+	function advanceDay(iso: string): string {
+		const d = new Date(iso + 'T12:00:00');
+		d.setDate(d.getDate() + 1);
+		return d.toISOString().slice(0, 10);
+	}
+
 	function formatDate(iso: string): string {
 		return new Date(iso + 'T12:00:00').toLocaleDateString('en-CA', {
 			weekday: 'short', month: 'short', day: 'numeric'
@@ -181,13 +187,14 @@
 				<div class="grid grid-cols-2 gap-3">
 					<div>
 						<label class="block text-xs text-muted-foreground mb-0.5" for="otaCI">Check-in *</label>
-						<input id="otaCI" type="date" bind:value={checkIn}
-							class="w-full border border-input rounded px-3 py-2 text-sm bg-background" />
-					</div>
-					<div>
-						<label class="block text-xs text-muted-foreground mb-0.5" for="otaCO">Check-out *</label>
-						<input id="otaCO" type="date" bind:value={checkOut}
-							class="w-full border border-input rounded px-3 py-2 text-sm bg-background" />
+					<input id="otaCI" type="date" bind:value={checkIn}
+						oninput={() => { if (checkOut <= checkIn) checkOut = advanceDay(checkIn); }}
+						class="w-full border border-input rounded px-3 py-2 text-sm bg-background" />
+				</div>
+				<div>
+					<label class="block text-xs text-muted-foreground mb-0.5" for="otaCO">Check-out *</label>
+					<input id="otaCO" type="date" bind:value={checkOut}
+						class="w-full border border-input rounded px-3 py-2 text-sm bg-background" />
 					</div>
 				</div>
 

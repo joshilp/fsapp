@@ -34,16 +34,30 @@
 	type HkStatus = (typeof HK_CYCLE)[number];
 
 	const HK_COLORS: Record<HkStatus, string> = {
-		clean: '#22c55e',
-		dirty: '#ef4444',
-		in_progress: '#eab308',
-		out_of_order: '#94a3b8'
+		clean:        '#22c55e', // green
+		dirty:        '#92400e', // dark amber-brown
+		in_progress:  '#d97706', // amber
+		out_of_order: '#7f1d1d'  // near-black dark red
 	};
 	const HK_LABELS: Record<HkStatus, string> = {
-		clean: 'Clean',
-		dirty: 'Dirty',
-		in_progress: 'In progress',
+		clean:        'Clean',
+		dirty:        'Dirty',
+		in_progress:  'In progress',
 		out_of_order: 'Out of order'
+	};
+	// Opaque pastel bg for sticky cells — makes rows scannable at a glance
+	const HK_ROW_BG: Record<HkStatus, string> = {
+		clean:        '#f0fdf4', // green-50
+		dirty:        '#fdf4e4', // warm buff
+		in_progress:  '#fefce8', // yellow-50
+		out_of_order: '#fff1f2'  // rose-50 — clearly unavailable
+	};
+	// Faint tint on the full row so data cells carry the colour too
+	const HK_ROW_TINT: Record<HkStatus, string> = {
+		clean:        'rgba(34,  197, 94,  0.05)',
+		dirty:        'rgba(146, 64,  14,  0.06)',
+		in_progress:  'rgba(217, 119, 6,   0.06)',
+		out_of_order: 'rgba(127, 29,  29,  0.08)'
 	};
 
 	async function cycleHkStatus(roomId: string, current: string) {
@@ -284,10 +298,22 @@
 	function openBlock(room: GridRoom) {
 		blockDialog = { roomId: room.id, roomNumber: room.roomNumber };
 		blockCheckIn = String(today);
-		blockCheckOut = String(today);
+		blockCheckOut = advanceDay(String(today));
 		blockNotes = '';
 		blockError = '';
 		blockOpen = true;
+	}
+
+	function advanceDay(iso: string): string {
+		const d = new Date(iso + 'T12:00:00');
+		d.setDate(d.getDate() + 1);
+		return d.toISOString().slice(0, 10);
+	}
+
+	function onBlockCheckInChange() {
+		if (blockCheckOut <= blockCheckIn) {
+			blockCheckOut = advanceDay(blockCheckIn);
+		}
 	}
 </script>
 
@@ -355,10 +381,11 @@
 	</div>
 
 	<!-- Housekeeping legend -->
-	<div class="border-border flex items-center gap-3 border-b px-3 py-1 text-[10px] text-muted-foreground">
-		<span class="font-medium">HK:</span>
+	<div class="border-border flex items-center gap-3 border-b px-3 py-1 text-[10px] text-muted-foreground flex-wrap">
+		<span class="font-medium">Housekeeping:</span>
 		{#each HK_CYCLE as s}
-			<span class="flex items-center gap-1">
+			<span class="flex items-center gap-1.5">
+				<span class="inline-block h-3.5 w-3 rounded-sm border border-black/10" style="background:{HK_ROW_BG[s]}"></span>
 				<span class="inline-block h-2 w-2 rounded-full" style="background:{HK_COLORS[s]}"></span>
 				{HK_LABELS[s]}
 			</span>
@@ -397,57 +424,57 @@
 			</thead>
 
 			<tbody>
-				{#each rooms as room (room.id)}
-					{@const hkStatus = (hkStatuses.get(room.id) ?? room.housekeepingStatus) as HkStatus}
-					<tr class="group">
-						<!-- Room number + HK dot + block button -->
-						<td
-							class="border-border bg-background group-hover:bg-muted/30 sticky left-0 z-10 border-b border-r px-2 py-0 whitespace-nowrap"
-							style="min-width:52px; height:32px"
-						>
-							<div class="flex items-center gap-1">
-								<span class="font-mono font-medium">{room.roomNumber}</span>
-								<button
-									title={HK_LABELS[hkStatus]}
-									onclick={(e) => { e.stopPropagation(); cycleHkStatus(room.id, hkStatus); }}
-									class="h-2.5 w-2.5 flex-shrink-0 rounded-full ring-1 ring-white/50 hover:scale-125 transition-transform"
-									style="background:{HK_COLORS[hkStatus]}"
-								></button>
-							</div>
-						</td>
+			{#each rooms as room (room.id)}
+				{@const hkStatus = (hkStatuses.get(room.id) ?? room.housekeepingStatus) as HkStatus}
+				<tr class="group" style="background:{HK_ROW_TINT[hkStatus]}">
+					<!-- Room number + HK dot -->
+					<td
+						class="border-border sticky left-0 z-10 border-b border-r px-2 py-0 whitespace-nowrap transition-colors"
+						style="min-width:52px; height:32px; background:{HK_ROW_BG[hkStatus]}"
+					>
+						<div class="flex items-center gap-1">
+							<span class="font-mono font-medium">{room.roomNumber}</span>
+							<button
+								title="{HK_LABELS[hkStatus]} — click to cycle"
+								onclick={(e) => { e.stopPropagation(); cycleHkStatus(room.id, hkStatus); }}
+								class="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10 hover:scale-125 transition-transform"
+								style="background:{HK_COLORS[hkStatus]}"
+							></button>
+						</div>
+					</td>
 
-						<!-- Compact room info + block button -->
-						<td
-							class="border-border bg-background group-hover:bg-muted/30 sticky z-10 border-b border-r px-1 py-0"
-							style="left:52px; min-width:60px"
-						>
-							<div class="flex items-center justify-between gap-1">
-								<span class="text-[10px] font-mono text-muted-foreground leading-none">{roomCompact(room)}</span>
-								<button
-									title="Block room for maintenance"
-									onclick={(e) => { e.stopPropagation(); openBlock(room); }}
-									class="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[10px] leading-none px-0.5 rounded hover:bg-muted transition-opacity"
-								>🔧</button>
-							</div>
-						</td>
+					<!-- Compact room info + block button -->
+					<td
+						class="border-border sticky z-10 border-b border-r px-1 py-0 transition-colors"
+						style="left:52px; min-width:60px; background:{HK_ROW_BG[hkStatus]}"
+					>
+						<div class="flex items-center justify-between gap-1">
+							<span class="text-[10px] font-mono text-muted-foreground leading-none">{roomCompact(room)}</span>
+							<button
+								title="Block room for maintenance"
+								onclick={(e) => { e.stopPropagation(); openBlock(room); }}
+								class="opacity-25 hover:opacity-100 text-[10px] leading-none px-0.5 rounded hover:bg-muted transition-opacity"
+							>🔧</button>
+						</div>
+					</td>
 
-						{#each room.spans as span (span.day)}
-							{#if span.type === 'free'}
-								{@const state = cellInDrag(room.id, span.day)}
-								<td
-									class={[
-										'border-border cursor-pointer border-b border-r p-0 transition-colors',
-										isWeekend(span.day) ? 'bg-muted/20' : '',
-										todayDay() === span.day ? 'bg-primary/5' : '',
-										state === 'selected' ? 'bg-teal-100' : '',
-										state === 'conflict' ? 'bg-red-100' : '',
-										!state ? 'hover:bg-muted/40' : ''
-									].join(' ')}
-									style="min-width:36px; width:36px; height:32px"
-									onmousedown={(e) => startDrag(e, room.id, span.day)}
-									onmouseenter={() => updateDrag(room.id, span.day)}
-									ontouchend={(e) => { e.preventDefault(); onCellTap(room.id, span.day); }}
-								></td>
+					{#each room.spans as span (span.day)}
+						{#if span.type === 'free'}
+							{@const state = cellInDrag(room.id, span.day)}
+							<td
+								class={[
+									'border-border cursor-pointer border-b border-r p-0 transition-colors',
+									isWeekend(span.day) ? 'bg-muted/20' : '',
+									todayDay() === span.day ? 'bg-primary/5' : '',
+									state === 'selected' ? 'bg-teal-100!' : '',
+									state === 'conflict' ? 'bg-red-100!' : '',
+									!state ? 'hover:brightness-95' : ''
+								].join(' ')}
+								style="min-width:36px; width:36px; height:32px"
+								onmousedown={(e) => startDrag(e, room.id, span.day)}
+								onmouseenter={() => updateDrag(room.id, span.day)}
+								ontouchend={(e) => { e.preventDefault(); onCellTap(room.id, span.day); }}
+							></td>
 							{:else}
 								{@const s = span as BookingSpanType}
 								{@const inConflict = spanInDragConflict(room.id, s.day, s.length)}
@@ -581,8 +608,9 @@
 				<div class="grid grid-cols-2 gap-2">
 					<div>
 						<label class="block text-xs text-muted-foreground mb-0.5" for="blockCheckIn">From</label>
-						<input id="blockCheckIn" type="date" name="checkIn" bind:value={blockCheckIn}
-							class="w-full border rounded px-2 py-1 text-sm border-input bg-background" />
+					<input id="blockCheckIn" type="date" name="checkIn" bind:value={blockCheckIn}
+						oninput={onBlockCheckInChange}
+						class="w-full border rounded px-2 py-1 text-sm border-input bg-background" />
 					</div>
 					<div>
 						<label class="block text-xs text-muted-foreground mb-0.5" for="blockCheckOut">To</label>

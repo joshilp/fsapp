@@ -147,6 +147,12 @@
 		if (!checkIn || !checkOut) return 0;
 		return Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
 	});
+
+	function advanceDay(iso: string): string {
+		const d = new Date(iso + 'T12:00:00');
+		d.setDate(d.getDate() + 1);
+		return d.toISOString().slice(0, 10);
+	}
 </script>
 
 <CustomDialog
@@ -242,7 +248,14 @@
 			<div class="grid grid-cols-2 gap-3">
 				<div class="flex flex-col gap-1.5">
 					<Label for="checkIn">Check-in</Label>
-					<Input id="checkIn" name="checkIn" type="date" bind:value={checkIn} required />
+					<Input
+						id="checkIn"
+						name="checkIn"
+						type="date"
+						bind:value={checkIn}
+						oninput={() => { if (checkOut <= checkIn) checkOut = advanceDay(checkIn); }}
+						required
+					/>
 				</div>
 				<div class="flex flex-col gap-1.5">
 					<Label for="checkOut">
