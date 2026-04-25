@@ -28,6 +28,16 @@
 		const [y, m] = booking.checkInDate.split('-');
 		return `/booking?month=${y}-${m}`;
 	});
+
+	function advanceDay(iso: string): string {
+		const d = new Date(iso + 'T12:00:00');
+		d.setDate(d.getDate() + 1);
+		return d.toISOString().slice(0, 10);
+	}
+
+	function onCheckInChange() {
+		if (checkOut <= checkIn) checkOut = advanceDay(checkIn);
+	}
 </script>
 
 <svelte:head>
@@ -69,7 +79,7 @@
 		<div class="grid grid-cols-2 gap-3">
 			<div class="flex flex-col gap-1.5">
 				<Label for="checkIn">Check-in</Label>
-				<Input id="checkIn" name="checkIn" type="date" bind:value={checkIn} required />
+				<Input id="checkIn" name="checkIn" type="date" bind:value={checkIn} oninput={onCheckInChange} required />
 			</div>
 			<div class="flex flex-col gap-1.5">
 				<Label for="checkOut">

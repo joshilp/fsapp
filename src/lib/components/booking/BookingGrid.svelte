@@ -45,20 +45,34 @@
 		in_progress:  'In progress',
 		out_of_order: 'Out of order'
 	};
-	// Opaque pastel bg for sticky cells — makes rows scannable at a glance
-	const HK_ROW_BG: Record<HkStatus, string> = {
-		clean:        '#f0fdf4', // green-50
-		dirty:        '#fdf4e4', // warm buff
-		in_progress:  '#fefce8', // yellow-50
-		out_of_order: '#fff1f2'  // rose-50 — clearly unavailable
-	};
-	// Faint tint on the full row so data cells carry the colour too
-	const HK_ROW_TINT: Record<HkStatus, string> = {
-		clean:        'rgba(34,  197, 94,  0.05)',
-		dirty:        'rgba(146, 64,  14,  0.06)',
-		in_progress:  'rgba(217, 119, 6,   0.06)',
-		out_of_order: 'rgba(127, 29,  29,  0.08)'
-	};
+	// Convert a hex colour to an rgba tint for cell backgrounds
+	function hexTint(hex: string, alpha: number): string {
+		if (!hex || !hex.startsWith('#') || hex.length < 7) return '';
+		const r = parseInt(hex.slice(1, 3), 16);
+		const g = parseInt(hex.slice(3, 5), 16);
+		const b = parseInt(hex.slice(5, 7), 16);
+		return `rgba(${r},${g},${b},${alpha})`;
+	}
+
+	// Background for a free cell: drag state overrides pricing tint
+	function freeCellBg(
+		roomTypeId: string | null,
+		day: number,
+		dragState: 'selected' | 'conflict' | null
+	): string {
+		if (dragState === 'selected') return 'rgb(204 251 241)'; // teal-100
+		if (dragState === 'conflict') return 'rgb(254 202 202)'; // red-100
+		const dr = grid.dayRates[day];
+		if (!dr) return isWeekend(day) ? 'rgba(0,0,0,0.04)' : '';
+		const alpha = isWeekend(day) ? 0.22 : 0.15;
+		return hexTint(dr.colour, alpha);
+	}
+
+	// Nightly rate in cents for a room type on a given day
+	function dayRate(roomTypeId: string | null, day: number): number | null {
+		if (!roomTypeId) return null;
+		return grid.dayRates[day]?.rateByTypeId[roomTypeId] ?? null;
+	}
 
 	async function cycleHkStatus(roomId: string, current: string) {
 		const idx = HK_CYCLE.indexOf(current as HkStatus);
@@ -385,12 +399,11 @@
 		<span class="font-medium">Housekeeping:</span>
 		{#each HK_CYCLE as s}
 			<span class="flex items-center gap-1.5">
-				<span class="inline-block h-3.5 w-3 rounded-sm border border-black/10" style="background:{HK_ROW_BG[s]}"></span>
-				<span class="inline-block h-2 w-2 rounded-full" style="background:{HK_COLORS[s]}"></span>
+				<span class="inline-block h-[5px] w-[5px] rounded-full" style="background:{HK_COLORS[s]}"></span>
 				{HK_LABELS[s]}
 			</span>
 		{/each}
-		<span class="ml-auto opacity-60">Click dot to cycle</span>
+		<span class="ml-auto opacity-60">Dot in cell corner · click room dot to cycle</span>
 	</div>
 
 	<div class="overflow-x-auto">
@@ -424,57 +437,67 @@
 			</thead>
 
 			<tbody>
-			{#each rooms as room (room.id)}
-				{@const hkStatus = (hkStatuses.get(room.id) ?? room.housekeepingStatus) as HkStatus}
-				<tr class="group" style="background:{HK_ROW_TINT[hkStatus]}">
-					<!-- Room number + HK dot -->
-					<td
-						class="border-border sticky left-0 z-10 border-b border-r px-2 py-0 whitespace-nowrap transition-colors"
-						style="min-width:52px; height:32px; background:{HK_ROW_BG[hkStatus]}"
-					>
-						<div class="flex items-center gap-1">
-							<span class="font-mono font-medium">{room.roomNumber}</span>
-							<button
-								title="{HK_LABELS[hkStatus]} — click to cycle"
-								onclick={(e) => { e.stopPropagation(); cycleHkStatus(room.id, hkStatus); }}
-								class="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10 hover:scale-125 transition-transform"
+		{#each rooms as room (room.id)}
+			{@const hkStatus = (hkStatuses.get(room.id) ?? room.housekeepingStatus) as HkStatus}
+			<tr class="group">
+				<!-- Room number + HK dot (click to cycle) -->
+				<td
+					class="border-border bg-background sticky left-0 z-10 border-b border-r px-2 py-0 whitespace-nowrap"
+					style="min-width:52px; height:32px"
+				>
+					<div class="flex items-center gap-1">
+						<span class="font-mono font-medium">{room.roomNumber}</span>
+						<button
+							title="{HK_LABELS[hkStatus]} — click to cycle"
+							onclick={(e) => { e.stopPropagation(); cycleHkStatus(room.id, hkStatus); }}
+							class="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10 hover:scale-125 transition-transform"
+							style="background:{HK_COLORS[hkStatus]}"
+						></button>
+					</div>
+				</td>
+
+				<!-- Compact room info + block button -->
+				<td
+					class="border-border bg-background sticky z-10 border-b border-r px-1 py-0"
+					style="left:52px; min-width:60px"
+				>
+					<div class="flex items-center justify-between gap-1">
+						<span class="text-[10px] font-mono text-muted-foreground leading-none">{roomCompact(room)}</span>
+						<button
+							title="Block room for maintenance"
+							onclick={(e) => { e.stopPropagation(); openBlock(room); }}
+							class="opacity-25 hover:opacity-100 text-[10px] leading-none px-0.5 rounded hover:bg-muted transition-opacity"
+						>🔧</button>
+					</div>
+				</td>
+
+				{#each room.spans as span (span.day)}
+					{#if span.type === 'free'}
+						{@const state = cellInDrag(room.id, span.day)}
+						{@const rate = dayRate(room.roomTypeId, span.day)}
+						<td
+							class={[
+								'border-border relative cursor-pointer border-b border-r p-0 transition-[filter]',
+								todayDay() === span.day && !state ? 'ring-1 ring-inset ring-primary/30' : '',
+								!state ? 'hover:brightness-90' : ''
+							].join(' ')}
+							style="min-width:36px; width:36px; height:32px; background:{freeCellBg(room.roomTypeId, span.day, state)}"
+							onmousedown={(e) => startDrag(e, room.id, span.day)}
+							onmouseenter={() => updateDrag(room.id, span.day)}
+							ontouchend={(e) => { e.preventDefault(); onCellTap(room.id, span.day); }}
+						>
+							<!-- HK status dot — top-right corner -->
+							<span
+								class="pointer-events-none absolute top-0.5 right-0.5 h-[5px] w-[5px] rounded-full opacity-70"
 								style="background:{HK_COLORS[hkStatus]}"
-							></button>
-						</div>
-					</td>
-
-					<!-- Compact room info + block button -->
-					<td
-						class="border-border sticky z-10 border-b border-r px-1 py-0 transition-colors"
-						style="left:52px; min-width:60px; background:{HK_ROW_BG[hkStatus]}"
-					>
-						<div class="flex items-center justify-between gap-1">
-							<span class="text-[10px] font-mono text-muted-foreground leading-none">{roomCompact(room)}</span>
-							<button
-								title="Block room for maintenance"
-								onclick={(e) => { e.stopPropagation(); openBlock(room); }}
-								class="opacity-25 hover:opacity-100 text-[10px] leading-none px-0.5 rounded hover:bg-muted transition-opacity"
-							>🔧</button>
-						</div>
-					</td>
-
-					{#each room.spans as span (span.day)}
-						{#if span.type === 'free'}
-							{@const state = cellInDrag(room.id, span.day)}
-							<td
-								class={[
-									'border-border cursor-pointer border-b border-r p-0 transition-colors',
-									isWeekend(span.day) ? 'bg-muted/20' : '',
-									todayDay() === span.day ? 'bg-primary/5' : '',
-									state === 'selected' ? 'bg-teal-100!' : '',
-									state === 'conflict' ? 'bg-red-100!' : '',
-									!state ? 'hover:brightness-95' : ''
-								].join(' ')}
-								style="min-width:36px; width:36px; height:32px"
-								onmousedown={(e) => startDrag(e, room.id, span.day)}
-								onmouseenter={() => updateDrag(room.id, span.day)}
-								ontouchend={(e) => { e.preventDefault(); onCellTap(room.id, span.day); }}
-							></td>
+							></span>
+							<!-- Nightly rate — centered, tinted to season colour -->
+							{#if rate !== null}
+								<span class="pointer-events-none absolute inset-0 flex items-center justify-center text-[8px] font-medium leading-none select-none text-foreground/45">
+									${Math.round(rate / 100)}
+								</span>
+							{/if}
+						</td>
 							{:else}
 								{@const s = span as BookingSpanType}
 								{@const inConflict = spanInDragConflict(room.id, s.day, s.length)}

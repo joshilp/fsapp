@@ -1,6 +1,6 @@
-import { and, eq, gt, inArray, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gt, gte, inArray, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from './db/index';
-import { bookings, ccStaging, properties, rooms } from './db/schema';
+import { bookings, ccStaging, properties, rateSeasons, rooms } from './db/schema';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +32,7 @@ export type DaySpan = FreeSpan | BookingSpan;
 export type GridRoom = {
 	id: string;
 	roomNumber: string;
+	roomTypeId: string | null;
 	roomTypeCategory: string | null;
 	roomTypeName: string | null;
 	kingBeds: number;
@@ -44,6 +45,13 @@ export type GridRoom = {
 	spans: DaySpan[];
 };
 
+// Per-day pricing info for empty cell display
+export type DayRate = {
+	colour: string;
+	minNights: number;
+	rateByTypeId: Record<string, number>; // roomTypeId → nightly rate cents
+};
+
 export type GridData = {
 	propertyId: string;
 	propertyName: string;
@@ -51,6 +59,7 @@ export type GridData = {
 	month: number;
 	daysInMonth: number;
 	rooms: GridRoom[];
+	dayRates: Array<DayRate | null>; // index 1..daysInMonth, index 0 unused
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -123,6 +132,31 @@ export async function getGridData(
 				})
 			: [];
 	const ccByBooking = new Map(ccRows.map((r) => [r.bookingId, r.lastFour]));
+
+	// Rate seasons overlapping this month (for grid cell pricing colours)
+	const monthSeasons = await db.query.rateSeasons.findMany({
+		where: and(
+			eq(rateSeasons.propertyId, propertyId),
+			lte(rateSeasons.startDate, monthEnd),
+			gte(rateSeasons.endDate, monthStart)
+		),
+		with: { tiers: true },
+		orderBy: (s, { asc }) => [asc(s.startDate)]
+	});
+
+	// Build day → DayRate lookup (later seasons overwrite earlier for same day)
+	const dayRatesArr: Array<DayRate | null> = new Array(days + 1).fill(null);
+	for (const season of monthSeasons) {
+		const startDay = season.startDate < monthStart ? 1 : Number(season.startDate.slice(8));
+		const endDay = season.endDate > monthEnd ? days : Number(season.endDate.slice(8));
+		const rateByTypeId: Record<string, number> = {};
+		for (const tier of season.tiers) {
+			rateByTypeId[tier.roomTypeId] = tier.nightlyRate;
+		}
+		for (let d = startDay; d <= endDay; d++) {
+			dayRatesArr[d] = { colour: season.colour, minNights: season.minNights, rateByTypeId };
+		}
+	}
 
 	// Group by room
 	const byRoom = new Map<string, typeof monthBookings>();
@@ -201,6 +235,7 @@ export async function getGridData(
 		return {
 			id: room.id,
 			roomNumber: room.roomNumber,
+			roomTypeId: room.roomTypeId ?? null,
 			roomTypeCategory: room.roomType?.category ?? null,
 			roomTypeName: room.roomType?.name ?? null,
 			kingBeds: room.kingBeds,
@@ -220,7 +255,8 @@ export async function getGridData(
 		year,
 		month,
 		daysInMonth: days,
-		rooms: gridRooms
+		rooms: gridRooms,
+		dayRates: dayRatesArr
 	};
 }
 
