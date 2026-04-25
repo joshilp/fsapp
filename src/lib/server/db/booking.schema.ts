@@ -251,6 +251,14 @@ export const bookings = sqliteTable(
 		checkedInAt: integer('checked_in_at', { mode: 'timestamp_ms' }),
 		checkedOutAt: integer('checked_out_at', { mode: 'timestamp_ms' }),
 		cancelledAt: integer('cancelled_at', { mode: 'timestamp_ms' }),
+
+		// Room-move chain: set when a booking is split mid-stay.
+		// movedFromBookingId: on the NEW room booking (points back to the prior room).
+		// movedToBookingId:   on the ORIGINAL booking  (points forward to the new room).
+		// Stored as plain text (no FK) to avoid self-referential DDL issues.
+		movedFromBookingId: text('moved_from_booking_id'),
+		movedToBookingId:   text('moved_to_booking_id'),
+
 		...timestamps
 	},
 	(t) => [

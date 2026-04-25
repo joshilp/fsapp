@@ -16,6 +16,9 @@ export type BookingSummary = {
 	numChildren: number;
 	notes: string | null;
 	ccLastFour: string | null; // non-null means a card is staged for this booking
+	// Room-move chain (null when booking was not part of a move)
+	movedFromBookingId: string | null;
+	movedToBookingId: string | null;
 };
 
 export type FreeSpan = { type: 'free'; day: number };
@@ -118,7 +121,9 @@ export async function getGridData(
 			clerkName: true,
 			numAdults: true,
 			numChildren: true,
-			notes: true
+			notes: true,
+			movedFromBookingId: true,
+			movedToBookingId: true
 		}
 	});
 
@@ -226,7 +231,9 @@ export async function getGridData(
 					numAdults: b.numAdults,
 					numChildren: b.numChildren,
 					notes: b.notes,
-					ccLastFour: ccByBooking.get(b.id) ?? null
+					ccLastFour: ccByBooking.get(b.id) ?? null,
+					movedFromBookingId: b.movedFromBookingId ?? null,
+					movedToBookingId: b.movedToBookingId ?? null
 				}
 			});
 			day += length;

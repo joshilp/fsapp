@@ -7,7 +7,7 @@
 
 	let { data }: { data: PageData } = $props();
 
-	const { booking, taxPresets } = $derived(data);
+	const { booking, taxPresets, priorStay } = $derived(data);
 	const guest = $derived(booking.guest);
 	const room = $derived(booking.room);
 	const property = $derived(room?.property);
@@ -183,6 +183,23 @@
 			</a>
 		</div>
 	</div>
+
+	<!-- Prior stay banner (room move continuation) -->
+	{#if priorStay}
+		<div class="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-1">
+			<p class="font-semibold">↩ Continuation stay — guest moved from Room {priorStay.roomNumber}</p>
+			<p class="text-amber-800">
+				Prior room: <strong>Rm {priorStay.roomNumber}</strong>
+				· {priorStay.checkInDate} → {priorStay.checkOutDate}
+				{#if priorStay.chargesCents > 0}
+					· Prior charges: <strong>${(priorStay.chargesCents / 100).toFixed(2)}</strong>
+				{:else}
+					· <span class="italic">No charges recorded for prior room yet</span>
+				{/if}
+			</p>
+			<p class="text-xs text-amber-700">Set rates below for the remaining nights in this room. Remember to account for both rooms when charging the guest at checkout.</p>
+		</div>
+	{/if}
 
 	<!-- Header card -->
 	<div class="bg-card border-border mb-6 rounded-lg border p-4 shadow-sm">

@@ -40,7 +40,36 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 		orderBy: (t, { asc }) => [asc(t.sortOrder)]
 	});
 
-	return { booking, taxPresets: presets };
+	// If this is a continuation booking (room move), load prior room summary for context
+	let priorStay: {
+		roomNumber: string | null;
+		checkInDate: string;
+		checkOutDate: string;
+		chargesCents: number;
+	} | null = null;
+
+	if (booking.movedFromBookingId) {
+		const prior = await db.query.bookings.findFirst({
+			where: eq(bookings.id, booking.movedFromBookingId),
+			columns: { checkInDate: true, checkOutDate: true },
+			with: {
+				room: { columns: { roomNumber: true } },
+				lineItems: { columns: { type: true, totalAmount: true } }
+			}
+		});
+		if (prior) {
+			priorStay = {
+				roomNumber: prior.room?.roomNumber ?? null,
+				checkInDate: prior.checkInDate,
+				checkOutDate: prior.checkOutDate,
+				chargesCents: (prior.lineItems ?? [])
+					.filter((li) => li.type !== 'deposit')
+					.reduce((sum, li) => sum + li.totalAmount, 0)
+			};
+		}
+	}
+
+	return { booking, taxPresets: presets, priorStay };
 };
 
 export const actions: Actions = {

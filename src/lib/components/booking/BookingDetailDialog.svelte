@@ -46,6 +46,33 @@
 		confirmCancel = false;
 	}
 
+	// ─── Room-move chain ──────────────────────────────────────────────────────
+
+	type PriorStay = {
+		bookingId: string;
+		roomNumber: string | null;
+		checkInDate: string;
+		checkOutDate: string;
+		chargesCents: number;
+		chargesFormatted: string;
+	};
+
+	let priorStay = $state<PriorStay | null>(null);
+	let priorStayLoaded = $state(false);
+
+	$effect(() => {
+		// Fetch prior stay info whenever this booking changes and has a movedFromBookingId
+		if (booking.movedFromBookingId && !priorStayLoaded) {
+			fetch(`/api/booking/${booking.id}/prior-stay`)
+				.then((r) => r.json())
+				.then((data) => {
+					priorStay = data.prior ?? null;
+					priorStayLoaded = true;
+				})
+				.catch(() => { priorStayLoaded = true; });
+		}
+	});
+
 	// ─── CC on file ───────────────────────────────────────────────────────────
 
 	let ccData = $state<{ number: string; expiry: string; name: string } | null>(null);
@@ -144,8 +171,40 @@
 				{/if}
 			</dl>
 
-			<!-- CC on file -->
-			{#if ccLastFour}
+		<!-- Room-move chain banners -->
+		{#if booking.movedFromBookingId}
+			<div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs space-y-0.5">
+				<p class="font-semibold text-amber-900">↩ Continuation stay</p>
+				{#if priorStay}
+					<p class="text-amber-800">
+						Prior room: <strong>Rm {priorStay.roomNumber}</strong>
+						· {priorStay.checkInDate} → {priorStay.checkOutDate}
+					</p>
+					{#if priorStay.chargesCents > 0}
+						<p class="text-amber-800">Prior charges: <strong>{priorStay.chargesFormatted}</strong></p>
+					{:else}
+						<p class="text-amber-700 italic">Prior room has no charges recorded yet.</p>
+					{/if}
+				{:else if !priorStayLoaded}
+					<p class="text-amber-700 italic">Loading prior stay…</p>
+				{/if}
+			</div>
+		{/if}
+
+		{#if booking.movedToBookingId}
+			<div class="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs">
+				<p class="font-semibold text-blue-900">→ Guest moved rooms mid-stay</p>
+				<p class="text-blue-800">
+					This booking ended early at {booking.checkOutDate}.
+					<a href="/booking/{booking.movedToBookingId}/checkin"
+						onclick={() => (open = false)}
+						class="underline font-medium">View new room booking →</a>
+				</p>
+			</div>
+		{/if}
+
+		<!-- CC on file -->
+		{#if ccLastFour}
 				<div class="border-border rounded-md border bg-muted/30 p-3 text-sm space-y-2">
 					<div class="flex items-center justify-between">
 						<span class="font-medium text-xs text-muted-foreground uppercase tracking-wide">Card on File</span>
@@ -241,51 +300,63 @@
 						{/if}
 					</div>
 
-				{:else if booking.status === 'checked_in'}
-					<div class="flex flex-wrap gap-2">
-						<a href="/booking/{booking.id}/checkin" onclick={() => (open = false)}>
-							<Button variant="outline" size="sm">Edit card</Button>
-						</a>
-						<a href="/booking/{booking.id}/print" target="_blank" onclick={() => (open = false)}>
-							<Button variant="ghost" size="sm">Print card</Button>
-						</a>
+			{:else if booking.status === 'checked_in'}
+				<div class="flex flex-wrap gap-2">
+					<a href="/booking/{booking.id}/checkin" onclick={() => (open = false)}>
+						<Button variant="outline" size="sm">Edit card</Button>
+					</a>
+					<a href="/booking/{booking.id}/move" onclick={() => (open = false)}>
+						<Button variant="outline" size="sm">Move Room</Button>
+					</a>
+					<a href="/booking/{booking.id}/print" target="_blank" onclick={() => (open = false)}>
+						<Button variant="ghost" size="sm">Print card</Button>
+					</a>
 
-						{#if !confirmCheckOut}
-							<Button
-								variant="default"
-								size="sm"
-								onclick={() => { resetConfirms(); confirmCheckOut = true; }}
+					{#if !confirmCheckOut}
+						<Button
+							variant="default"
+							size="sm"
+							onclick={() => { resetConfirms(); confirmCheckOut = true; }}
+						>
+							Check Out
+						</Button>
+					{:else}
+						<div class="flex flex-col gap-2 w-full">
+							{#if booking.movedFromBookingId && priorStay}
+								<div class="rounded bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs text-amber-900 space-y-0.5">
+									<p class="font-semibold">Combined stay charges:</p>
+									<p>Rm {priorStay.roomNumber} ({priorStay.checkInDate} → {priorStay.checkOutDate}): {priorStay.chargesFormatted}</p>
+									<p>This room ({booking.checkInDate} → {booking.checkOutDate}): check card for total</p>
+								</div>
+							{/if}
+						<div class="flex items-center gap-2">
+							<span class="text-muted-foreground text-xs">Confirm checkout?</span>
+							<form
+								method="POST"
+								action="?/checkOutBooking"
+								use:enhance={() => {
+									processing = true;
+									return async ({ update }) => {
+										processing = false;
+										confirmCheckOut = false;
+										open = false;
+										onClose?.();
+										await update();
+									};
+								}}
 							>
-								Check Out
-							</Button>
-						{:else}
-							<div class="flex items-center gap-2">
-								<span class="text-muted-foreground text-xs">Confirm checkout?</span>
-								<form
-									method="POST"
-									action="?/checkOutBooking"
-									use:enhance={() => {
-										processing = true;
-										return async ({ update }) => {
-											processing = false;
-											confirmCheckOut = false;
-											open = false;
-											onClose?.();
-											await update();
-										};
-									}}
-								>
-									<input type="hidden" name="bookingId" value={booking.id} />
-									<Button type="submit" variant="default" size="sm" disabled={processing}>
-										{processing ? '…' : 'Yes, check out'}
-									</Button>
-								</form>
-								<Button variant="ghost" size="sm" onclick={resetConfirms}>No</Button>
-							</div>
-						{/if}
-					</div>
+								<input type="hidden" name="bookingId" value={booking.id} />
+								<Button type="submit" variant="default" size="sm" disabled={processing}>
+									{processing ? '…' : 'Yes, check out'}
+								</Button>
+							</form>
+							<Button variant="ghost" size="sm" onclick={resetConfirms}>No</Button>
+						</div>
+					</div><!-- /flex-col combined checkout -->
+					{/if}
+				</div><!-- /flex-wrap checked_in actions -->
 
-				{:else if booking.status === 'cancelled'}
+			{:else if booking.status === 'cancelled'}
 					<div class="space-y-2">
 						<p class="text-muted-foreground text-xs">This booking was cancelled.</p>
 						<form
