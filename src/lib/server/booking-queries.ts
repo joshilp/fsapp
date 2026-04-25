@@ -9,6 +9,7 @@ export type BookingSummary = {
 	guestName: string | null;
 	clerkLabel: string | null;
 	channelName: string | null;
+	otaConfirmationNumber: string | null;
 	status: string;
 	checkInDate: string;
 	checkOutDate: string;
@@ -123,6 +124,7 @@ export async function getGridData(
 			numAdults: true,
 			numChildren: true,
 			notes: true,
+			otaConfirmationNumber: true,
 			movedFromBookingId: true,
 			movedToBookingId: true
 		}
@@ -226,6 +228,7 @@ export async function getGridData(
 					guestName: b.guest?.name ?? null,
 					clerkLabel: b.clerkName ?? b.clerk?.name ?? null,
 					channelName: b.channel?.name ?? null,
+					otaConfirmationNumber: b.otaConfirmationNumber ?? null,
 					status: b.status,
 					checkInDate: b.checkInDate,
 					checkOutDate: b.checkOutDate,

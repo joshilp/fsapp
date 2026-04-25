@@ -270,11 +270,12 @@
 	let detailDialog = $state<{
 		booking: BookingSummary;
 		roomNumber: string;
+		room: GridRoom;
 	} | null>(null);
 	let detailOpen = $state(false);
 
-	function openDetail(booking: BookingSummary, roomNumber: string) {
-		detailDialog = { booking, roomNumber };
+	function openDetail(booking: BookingSummary, room: GridRoom) {
+		detailDialog = { booking, roomNumber: room.roomNumber, room };
 		detailOpen = true;
 	}
 
@@ -383,11 +384,35 @@
 		</div>
 	</div>
 
-	<!-- Housekeeping legend -->
-	<div class="border-border flex items-center gap-3 border-b px-3 py-1 text-[10px] text-muted-foreground flex-wrap">
+	<!-- Legend bar -->
+	<div class="border-border flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-3 py-1 text-[10px] text-muted-foreground">
+		<!-- Channel colours -->
+		<span class="font-medium">Booking source:</span>
+		<span class="flex items-center gap-1">
+			<span class="inline-block h-2 w-3 rounded-sm bg-teal-500"></span>Direct
+		</span>
+		<span class="flex items-center gap-1">
+			<span class="inline-block h-2 w-3 rounded-sm bg-amber-500"></span>Expedia
+		</span>
+		<span class="flex items-center gap-1">
+			<span class="inline-block h-2 w-3 rounded-sm bg-blue-600"></span>Booking.com
+		</span>
+		<span class="flex items-center gap-1">
+			<span class="inline-block h-2 w-3 rounded-sm bg-purple-500"></span>Other OTA
+		</span>
+		<span class="flex items-center gap-1">
+			<span class="inline-block h-1.5 w-1.5 rounded-full bg-green-300 ring-1 ring-green-600/30"></span>Checked in
+		</span>
+		<span class="flex items-center gap-1">
+			<span class="inline-block h-2 w-3 rounded-sm bg-gray-400 opacity-60" style="background-image:repeating-linear-gradient(45deg,transparent,transparent 2px,rgba(0,0,0,.2) 2px,rgba(0,0,0,.2) 4px)"></span>Block
+		</span>
+
+		<span class="mx-2 text-border">|</span>
+
+		<!-- Housekeeping -->
 		<span class="font-medium">Housekeeping:</span>
 		{#each HK_CYCLE as s}
-			<span class="flex items-center gap-1.5">
+			<span class="flex items-center gap-1">
 				<span class="inline-block h-[5px] w-[5px] rounded-full" style="background:{HK_COLORS[s]}"></span>
 				{HK_LABELS[s]}
 			</span>
@@ -492,7 +517,7 @@
 									class="border-border relative cursor-pointer border-b border-r p-0"
 									style="min-width:{s.length * 36}px; height:32px"
 									onmouseenter={() => updateDrag(room.id, s.day)}
-									onclick={() => !drag && !isBlocked && openDetail(s.booking, room.roomNumber)}
+									onclick={() => !drag && !isBlocked && openDetail(s.booking, room)}
 								>
 									{#if inConflict}
 										<div class="absolute inset-0 z-10 rounded bg-red-400/60"></div>
@@ -510,42 +535,44 @@
 											</span>
 										</div>
 									{:else}
-										<div
-											class={[
-												'relative flex h-full items-center overflow-hidden px-1.5',
-												channelColour(s.booking.channelName),
-												'text-white'
-											].join(' ')}
-											style={s.overflowStart
-												? 'border-radius:0 4px 4px 0'
-												: s.overflowEnd
-													? 'border-radius:4px 0 0 4px'
-													: 'border-radius:4px'}
-										>
-											{#if !s.overflowStart}
-												<span class="mr-0.5 shrink-0 opacity-70">›</span>
-											{/if}
+									<div
+										class={[
+											'relative flex h-full items-center overflow-hidden pl-1.5',
+											s.overflowEnd ? 'pr-4' : 'pr-3',
+											channelColour(s.booking.channelName),
+											'text-white'
+										].join(' ')}
+										style={s.overflowStart
+											? 'border-radius:0 4px 4px 0'
+											: s.overflowEnd
+												? 'border-radius:4px 0 0 4px'
+												: 'border-radius:4px'}
+									>
+										{#if !s.overflowStart}
+											<span class="mr-0.5 shrink-0 opacity-70">›</span>
+										{/if}
 
-											<span class="min-w-0 truncate text-[11px] font-medium leading-none">
-												{s.booking.guestName ?? '—'}
+										<span class="min-w-0 truncate text-[11px] font-medium leading-none">
+											{s.booking.guestName ?? '—'}
+										</span>
+
+										{#if s.booking.channelName && s.booking.channelName !== 'Direct'}
+											<span class="ml-1 shrink-0 rounded bg-black/20 px-1 py-0.5 text-[9px] font-bold uppercase leading-none">
+												{s.booking.channelName === 'Expedia' ? 'E' : 'B'}
 											</span>
+										{/if}
 
-											{#if s.booking.channelName && s.booking.channelName !== 'Direct'}
-												<span class="ml-1 shrink-0 rounded bg-black/20 px-1 py-0.5 text-[9px] font-bold uppercase leading-none">
-													{s.booking.channelName === 'Expedia' ? 'E' : 'B'}
-												</span>
-											{/if}
+										{#if s.booking.status === 'checked_in'}
+											<span class="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-green-300"></span>
+										{/if}
 
-											{#if s.booking.status === 'checked_in'}
-												<span class="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-green-300"></span>
-											{/if}
-
-											{#if s.overflowEnd}
-												<span class="ml-auto shrink-0 text-[9px] font-semibold opacity-80">over›</span>
-											{:else}
-												<span class="ml-0.5 shrink-0 opacity-70">‹</span>
-											{/if}
-										</div>
+										<!-- End-cap always visible via absolute position so overflow-hidden can't clip it -->
+										{#if s.overflowEnd}
+											<span class="absolute right-0.5 top-1/2 -translate-y-1/2 text-[9px] font-semibold opacity-80">›</span>
+										{:else}
+											<span class="absolute right-0.5 top-1/2 -translate-y-1/2 opacity-70">‹</span>
+										{/if}
+									</div>
 									{/if}
 								</td>
 							{/if}
@@ -563,6 +590,7 @@
 		bind:open={detailOpen}
 		booking={detailDialog.booking}
 		roomNumber={detailDialog.roomNumber}
+		room={detailDialog.room}
 		{propertyName}
 		onClose={() => { detailDialog = null; }}
 	/>

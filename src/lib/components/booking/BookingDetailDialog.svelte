@@ -2,17 +2,19 @@
 	import { enhance } from '$app/forms';
 	import CustomDialog from '$lib/components/core/CustomDialog.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import type { BookingSummary } from '$lib/server/booking-queries';
+	import type { BookingSummary, GridRoom } from '$lib/server/booking-queries';
+	import { bedCompact } from '$lib/utils/room';
 
 	type Props = {
 		open: boolean;
 		booking: BookingSummary;
 		roomNumber: string;
 		propertyName: string;
+		room?: GridRoom;
 		onClose?: () => void;
 	};
 
-	let { open = $bindable(false), booking, roomNumber, propertyName, onClose }: Props = $props();
+	let { open = $bindable(false), booking, roomNumber, propertyName, room, onClose }: Props = $props();
 
 	const STATUS_LABELS: Record<string, { label: string; class: string }> = {
 		confirmed: { label: 'Confirmed', class: 'bg-blue-100 text-blue-800' },
@@ -73,6 +75,49 @@
 		}
 	});
 
+	// ─── Line items ───────────────────────────────────────────────────────────
+
+	type LineItem = { id: string; type: string; label: string; quantity: number | null; unitAmount: number | null; totalAmount: number };
+	let lineItems = $state<LineItem[] | null>(null);
+	let lineItemsLoaded = $state(false);
+
+	$effect(() => {
+		if (open && !lineItemsLoaded) {
+			const id = booking.id;
+			fetch(`/api/booking/${id}/line-items`)
+				.then(async (r) => {
+					if (!r.ok) { lineItemsLoaded = true; return; }
+					const data = await r.json();
+					lineItems = Array.isArray(data) ? data : [];
+					lineItemsLoaded = true;
+				})
+				.catch(() => { lineItems = []; lineItemsLoaded = true; });
+		}
+	});
+
+	const lineItemsTotal = $derived(
+		lineItems?.filter((li) => li.type !== 'deposit').reduce((s, li) => s + li.totalAmount, 0) ?? 0
+	);
+
+	function fmtMoney(cents: number) {
+		return '$' + (cents / 100).toFixed(2);
+	}
+
+	// ─── Housekeeping status ──────────────────────────────────────────────────
+
+	const HK_COLORS: Record<string, string> = {
+		clean: '#22c55e',
+		dirty: '#92400e',
+		in_progress: '#f59e0b',
+		out_of_order: '#ef4444'
+	};
+	const HK_LABELS: Record<string, string> = {
+		clean: 'Clean',
+		dirty: 'Dirty',
+		in_progress: 'In Progress',
+		out_of_order: 'Out of Order'
+	};
+
 	// ─── CC on file ───────────────────────────────────────────────────────────
 
 	let ccData = $state<{ number: string; expiry: string; name: string } | null>(null);
@@ -120,7 +165,7 @@
 	bind:open
 	title="Booking — Room {roomNumber}"
 	description={propertyName}
-	dialogClass="sm:max-w-md"
+	dialogClass="sm:max-w-lg"
 >
 	{#snippet content()}
 		<div class="flex flex-col gap-4 p-1">
@@ -134,42 +179,100 @@
 				{/if}
 			</div>
 
-			<!-- Key details grid -->
-			<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-				<dt class="text-muted-foreground font-medium">Guest</dt>
-				<dd class="font-semibold">{booking.guestName ?? '—'}</dd>
-
-				<dt class="text-muted-foreground font-medium">Check-in</dt>
-				<dd>{formatDate(booking.checkInDate)}</dd>
-
-				<dt class="text-muted-foreground font-medium">Check-out</dt>
-				<dd>
-					{formatDate(booking.checkOutDate)}
-					<span class="text-muted-foreground ml-1 text-xs">
-						({nights(booking.checkInDate, booking.checkOutDate)} night{nights(booking.checkInDate, booking.checkOutDate) === 1 ? '' : 's'})
-					</span>
-				</dd>
-
-				{#if booking.numAdults || booking.numChildren}
-					<dt class="text-muted-foreground font-medium">Guests</dt>
-					<dd>
-						{booking.numAdults} adult{booking.numAdults === 1 ? '' : 's'}
-						{#if booking.numChildren}
-							, {booking.numChildren} child{booking.numChildren === 1 ? '' : 'ren'}
+		<!-- Room info panel -->
+		{#if room}
+			<div class="rounded-md border border-border bg-muted/20 px-3 py-2 text-sm flex items-start justify-between gap-3">
+				<div class="flex flex-col gap-0.5 min-w-0">
+					<div class="flex items-center gap-1.5 flex-wrap">
+						<span class="font-semibold font-mono">Rm {room.roomNumber}</span>
+						{#if room.roomTypeName}
+							<span class="text-muted-foreground text-xs">{room.roomTypeName}</span>
 						{/if}
-					</dd>
-				{/if}
+					</div>
+					<div class="text-muted-foreground text-xs font-mono">{bedCompact(room) || '—'}</div>
+				</div>
+				<div class="flex items-center gap-1.5 shrink-0 text-xs">
+					<span class="h-2 w-2 rounded-full" style="background:{HK_COLORS[room.housekeepingStatus] ?? '#ccc'}"></span>
+					<span class="text-muted-foreground">{HK_LABELS[room.housekeepingStatus] ?? room.housekeepingStatus}</span>
+				</div>
+			</div>
+		{/if}
 
-				{#if booking.clerkLabel}
-					<dt class="text-muted-foreground font-medium">Clerk</dt>
-					<dd>{booking.clerkLabel}</dd>
-				{/if}
+		<!-- Key details grid -->
+		<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+			<dt class="text-muted-foreground font-medium">Guest</dt>
+			<dd class="font-semibold">{booking.guestName ?? '—'}</dd>
 
-				{#if booking.notes}
-					<dt class="text-muted-foreground font-medium">Notes</dt>
-					<dd class="italic">{booking.notes}</dd>
+			<dt class="text-muted-foreground font-medium">Check-in</dt>
+			<dd>{formatDate(booking.checkInDate)}</dd>
+
+			<dt class="text-muted-foreground font-medium">Check-out</dt>
+			<dd>
+				{formatDate(booking.checkOutDate)}
+				<span class="text-muted-foreground ml-1 text-xs">
+					({nights(booking.checkInDate, booking.checkOutDate)} night{nights(booking.checkInDate, booking.checkOutDate) === 1 ? '' : 's'})
+				</span>
+			</dd>
+
+			{#if booking.numAdults || booking.numChildren}
+				<dt class="text-muted-foreground font-medium">Guests</dt>
+				<dd>
+					{booking.numAdults} adult{booking.numAdults === 1 ? '' : 's'}
+					{#if booking.numChildren}
+						, {booking.numChildren} child{booking.numChildren === 1 ? '' : 'ren'}
+					{/if}
+				</dd>
+			{/if}
+
+			{#if booking.channelName && booking.channelName !== 'Direct'}
+				<dt class="text-muted-foreground font-medium">Channel</dt>
+				<dd>{booking.channelName}</dd>
+			{/if}
+
+			{#if booking.otaConfirmationNumber}
+				<dt class="text-muted-foreground font-medium">OTA Ref</dt>
+				<dd class="font-mono text-xs">{booking.otaConfirmationNumber}</dd>
+			{/if}
+
+			{#if booking.clerkLabel}
+				<dt class="text-muted-foreground font-medium">Clerk</dt>
+				<dd>{booking.clerkLabel}</dd>
+			{/if}
+
+			{#if booking.notes}
+				<dt class="text-muted-foreground font-medium">Notes</dt>
+				<dd class="italic text-amber-700">{booking.notes}</dd>
+			{/if}
+		</dl>
+
+		<!-- Quoted rate / line items -->
+		{#if !lineItemsLoaded}
+			<p class="text-muted-foreground text-xs">Loading charges…</p>
+		{:else if lineItems && lineItems.filter(li => li.type !== 'deposit').length > 0}
+			<div class="rounded-md border border-border bg-muted/20 px-3 py-2 space-y-1.5">
+				<p class="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Quoted charges</p>
+				{#each lineItems.filter(li => li.type !== 'deposit') as li}
+					<div class="flex items-center justify-between text-sm gap-2">
+						<span class="text-muted-foreground text-xs flex-1 min-w-0 truncate">{li.label}</span>
+						<span class="font-mono text-xs shrink-0">{fmtMoney(li.totalAmount)}</span>
+					</div>
+				{/each}
+				{#each lineItems.filter(li => li.type === 'deposit') as li}
+					<div class="flex items-center justify-between text-sm gap-2 border-t border-border/50 pt-1">
+						<span class="text-muted-foreground text-xs flex-1">Deposit paid</span>
+						<span class="font-mono text-xs text-green-600 shrink-0">{fmtMoney(Math.abs(li.totalAmount))}</span>
+					</div>
+				{/each}
+				{#if lineItems.length > 1}
+					<div class="flex items-center justify-between border-t border-border pt-1 mt-0.5">
+						<span class="text-xs font-medium">Total (before tax)</span>
+						<span class="font-mono text-sm font-semibold">{fmtMoney(lineItemsTotal)}</span>
+					</div>
 				{/if}
-			</dl>
+			</div>
+		{:else if booking.status !== 'blocked'}
+			<p class="text-muted-foreground text-xs italic">No charges recorded yet.</p>
+		{/if}
 
 		<!-- Room-move chain banners -->
 		{#if booking.movedFromBookingId}
