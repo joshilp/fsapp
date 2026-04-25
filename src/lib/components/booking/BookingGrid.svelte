@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import type { BookingSummary, BookingSpan as BookingSpanType, GridData, GridRoom } from '$lib/server/booking-queries';
+	import { bedSlots, totalBeds } from '$lib/utils/room';
 	import BookingDetailDialog from './BookingDetailDialog.svelte';
 	import SlipFormDialog from './SlipFormDialog.svelte';
 
@@ -85,21 +86,9 @@
 		});
 	}
 
-	// ─── Compact room info ─────────────────────────────────────────────────────
-
-	function roomCompact(room: GridRoom): string {
-		const parts: string[] = [];
-		if (room.kingBeds > 0) parts.push(room.kingBeds === 1 ? '1K' : `${room.kingBeds}K`);
-		if (room.queenBeds > 0) parts.push(room.queenBeds === 1 ? '1Q' : `${room.queenBeds}Q`);
-		if (room.doubleBeds > 0) parts.push(room.doubleBeds === 1 ? '1D' : `${room.doubleBeds}D`);
-		if (room.hasHideabed) parts.push('Sb');
-		const beds = parts.join('+');
-		return room.hasKitchen ? `${beds || '—'} ✦` : beds || '—';
-	}
-
-	function totalBeds(room: GridRoom): number {
-		return room.kingBeds + room.queenBeds + room.doubleBeds + (room.hasHideabed ? 1 : 0);
-	}
+	// ─── Room bed slots (imported from $lib/utils/room) ───────────────────────
+	// bedSlots(room) → 6 fixed slots [BR, K, Q, D, HB, Kit]
+	// totalBeds(room) → sleeping capacity for filter logic
 
 	// ─── Chip filters ─────────────────────────────────────────────────────────
 
@@ -376,7 +365,7 @@
 						: 'bg-background text-muted-foreground border-border hover:border-amber-400'
 				].join(' ')}
 			>
-				✦ Kitchen
+				Kit
 			</button>
 
 			<!-- Available chip -->
@@ -410,14 +399,10 @@
 		<table class="border-separate border-spacing-0 text-xs">
 			<thead>
 				<tr>
-					<th
-						class="border-border bg-background sticky left-0 z-20 border-b border-r px-2 py-1.5 text-left font-medium whitespace-nowrap"
-						style="min-width:52px"
-					>Room</th>
-					<th
-						class="border-border bg-background sticky z-20 border-b border-r px-1.5 py-1.5 text-left font-medium"
-						style="left:52px; min-width:60px"
-					>Beds</th>
+				<th
+					class="border-border bg-background sticky left-0 z-20 border-b border-r px-2 py-1.5 text-left font-medium whitespace-nowrap"
+					style="min-width:144px; width:144px"
+				>Room</th>
 					{#each days as day}
 						<th
 							class={[
@@ -440,34 +425,34 @@
 		{#each rooms as room (room.id)}
 			{@const hkStatus = (hkStatuses.get(room.id) ?? room.housekeepingStatus) as HkStatus}
 			<tr class="group">
-				<!-- Room number + HK dot (click to cycle) -->
+				<!-- Room info: number + type name + HK dot + ··· block; bed slots below -->
 				<td
-					class="border-border bg-background sticky left-0 z-10 border-b border-r px-2 py-0 whitespace-nowrap"
-					style="min-width:52px; height:32px"
+					class="border-border bg-background sticky left-0 z-10 border-b border-r px-2 py-0.5"
+					style="min-width:144px; width:144px"
 				>
-					<div class="flex items-center gap-1">
-						<span class="font-mono font-medium">{room.roomNumber}</span>
+					<!-- Line 1: number · type name · HK dot · ··· -->
+					<div class="flex items-center gap-1 leading-none">
+						<span class="font-mono font-bold text-sm">{room.roomNumber}</span>
+						<span class="text-muted-foreground/70 text-[10px] truncate flex-1 leading-none">
+							{room.roomTypeName ?? ''}
+						</span>
 						<button
 							title="{HK_LABELS[hkStatus]} — click to cycle"
 							onclick={(e) => { e.stopPropagation(); cycleHkStatus(room.id, hkStatus); }}
-							class="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10 hover:scale-125 transition-transform"
+							class="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10 hover:scale-125 transition-transform"
 							style="background:{HK_COLORS[hkStatus]}"
 						></button>
-					</div>
-				</td>
-
-				<!-- Compact room info + block button -->
-				<td
-					class="border-border bg-background sticky z-10 border-b border-r px-1 py-0"
-					style="left:52px; min-width:60px"
-				>
-					<div class="flex items-center justify-between gap-1">
-						<span class="text-[10px] font-mono text-muted-foreground leading-none">{roomCompact(room)}</span>
 						<button
 							title="Block room for maintenance"
 							onclick={(e) => { e.stopPropagation(); openBlock(room); }}
-							class="opacity-25 hover:opacity-100 text-[10px] leading-none px-0.5 rounded hover:bg-muted transition-opacity"
-						>🔧</button>
+							class="shrink-0 text-[11px] leading-none px-0.5 rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors"
+						>···</button>
+					</div>
+					<!-- Line 2: fixed 6-slot bed grid [BR · K · Q · D · HB · Kit] -->
+					<div class="mt-0.5 grid leading-none" style="grid-template-columns:repeat(6,1fr)">
+						{#each bedSlots(room) as slot}
+							<span class="text-[9px] font-mono text-muted-foreground/55">{slot}</span>
+						{/each}
 					</div>
 				</td>
 

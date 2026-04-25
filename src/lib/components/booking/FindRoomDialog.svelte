@@ -105,7 +105,7 @@
 				</div>
 				<label class="flex items-center gap-2 cursor-pointer pt-4">
 					<input type="checkbox" bind:checked={needKitchen} class="rounded" />
-					<span class="text-sm">✦ Kitchen required</span>
+					<span class="text-sm">Kit required</span>
 				</label>
 			</div>
 

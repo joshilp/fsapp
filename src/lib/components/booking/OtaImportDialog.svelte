@@ -9,6 +9,7 @@
 	 */
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
+	import { bedCompact } from '$lib/utils/room';
 	import CustomDialog from '$lib/components/core/CustomDialog.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import RoomStripCard, { type AvailableRoom } from './RoomStripCard.svelte';
@@ -89,13 +90,7 @@
 	}
 
 	function bedLabel(r: AvailableRoom): string {
-		const parts: string[] = [];
-		if (r.kingBeds > 0) parts.push(`${r.kingBeds}K`);
-		if (r.queenBeds > 0) parts.push(`${r.queenBeds}Q`);
-		if (r.doubleBeds > 0) parts.push(`${r.doubleBeds}D`);
-		if (r.hasHideabed) parts.push('Sb');
-		const beds = parts.join('+') || '—';
-		return r.hasKitchen ? `${beds} ✦` : beds;
+		return bedCompact(r);
 	}
 
 	function nightCount(): number {

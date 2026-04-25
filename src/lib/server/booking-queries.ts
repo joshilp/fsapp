@@ -38,6 +38,7 @@ export type GridRoom = {
 	roomTypeId: string | null;
 	roomTypeCategory: string | null;
 	roomTypeName: string | null;
+	numRooms: number; // bedrooms — 1BR, 2BR, etc.
 	kingBeds: number;
 	queenBeds: number;
 	doubleBeds: number;
@@ -245,6 +246,7 @@ export async function getGridData(
 			roomTypeId: room.roomTypeId ?? null,
 			roomTypeCategory: room.roomType?.category ?? null,
 			roomTypeName: room.roomType?.name ?? null,
+			numRooms: room.numRooms,
 			kingBeds: room.kingBeds,
 			queenBeds: room.queenBeds,
 			doubleBeds: room.doubleBeds,

@@ -8,6 +8,7 @@
 	 *  - Gap summary: "Before: Xd free · After: Yd free" to help with gap-filling decisions
 	 *  - An Assign / Book button
 	 */
+	import { bedCompact } from '$lib/utils/room';
 	import { Button } from '$lib/components/ui/button/index.js';
 
 	export type NearbyBooking = {
@@ -23,6 +24,7 @@
 		roomNumber: string;
 		propertyId: string;
 		propertyName: string;
+		numRooms: number;
 		kingBeds: number;
 		queenBeds: number;
 		doubleBeds: number;
@@ -44,17 +46,9 @@
 
 	let { room, checkIn, checkOut, actionLabel = 'Assign →', onAssign }: Props = $props();
 
-	// ─── Bed label ────────────────────────────────────────────────────────────
+	// ─── Bed label (from shared utility) ─────────────────────────────────────
 
-	const bedLabel = $derived(() => {
-		const parts: string[] = [];
-		if (room.kingBeds > 0) parts.push(`${room.kingBeds}K`);
-		if (room.queenBeds > 0) parts.push(`${room.queenBeds}Q`);
-		if (room.doubleBeds > 0) parts.push(`${room.doubleBeds}D`);
-		if (room.hasHideabed) parts.push('Sb');
-		const beds = parts.join('+') || '—';
-		return room.hasKitchen ? `${beds} ✦` : beds;
-	});
+	const bedLabel = $derived(() => bedCompact(room));
 
 	// ─── Strip helpers ────────────────────────────────────────────────────────
 
@@ -108,7 +102,7 @@
 	});
 
 	// Gap calculation — how many free days on each side of the proposed stay
-	const gaps = $derived(() => {
+	const gaps = $derived.by(() => {
 		const nearby = room.nearbyBookings;
 		const before = nearby
 			.filter((b) => b.checkOutDate <= checkIn)
@@ -197,26 +191,26 @@
 	<div class="flex items-center gap-4 text-[11px] text-muted-foreground">
 		<span>
 			Before:
-			{#if gaps().before === null}
+			{#if gaps.before === null}
 				<span class="text-green-600 font-medium">8d+ free</span>
-			{:else if gaps().before >= 5}
-				<span class="text-green-600 font-medium">{gaps().before}d free</span>
-			{:else if gaps().before >= 2}
-				<span class="text-amber-600 font-medium">{gaps().before}d free</span>
+			{:else if gaps.before >= 5}
+				<span class="text-green-600 font-medium">{gaps.before}d free</span>
+			{:else if gaps.before >= 2}
+				<span class="text-amber-600 font-medium">{gaps.before}d free</span>
 			{:else}
-				<span class="text-muted-foreground">{gaps().before}d</span>
+				<span class="text-muted-foreground">{gaps.before}d</span>
 			{/if}
 		</span>
 		<span>
 			After:
-			{#if gaps().after === null}
+			{#if gaps.after === null}
 				<span class="text-green-600 font-medium">16d+ free</span>
-			{:else if gaps().after >= 5}
-				<span class="text-green-600 font-medium">{gaps().after}d free</span>
-			{:else if gaps().after >= 2}
-				<span class="text-amber-600 font-medium">{gaps().after}d free</span>
+			{:else if gaps.after >= 5}
+				<span class="text-green-600 font-medium">{gaps.after}d free</span>
+			{:else if gaps.after >= 2}
+				<span class="text-amber-600 font-medium">{gaps.after}d free</span>
 			{:else}
-				<span class="text-muted-foreground">{gaps().after}d</span>
+				<span class="text-muted-foreground">{gaps.after}d</span>
 			{/if}
 		</span>
 		<span class="ml-auto opacity-60">

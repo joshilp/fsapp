@@ -95,6 +95,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		roomNumber: r.roomNumber,
 		propertyId: r.property?.id ?? r.propertyId,
 		propertyName: r.property?.name ?? r.propertyId,
+		numRooms: r.numRooms,
 		kingBeds: r.kingBeds ?? 0,
 		queenBeds: r.queenBeds,
 		doubleBeds: r.doubleBeds,

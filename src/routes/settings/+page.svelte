@@ -341,31 +341,35 @@
 									{/each}
 								</select>
 							</div>
-							<div class="flex flex-col gap-1">
-								<Label class="text-xs">King beds</Label>
-								<Input name="kingBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+						<div class="flex flex-col gap-1">
+							<Label class="text-xs">Bedrooms (BR)</Label>
+							<Input name="numRooms" type="number" min="1" placeholder="1" class="h-8 w-16" />
+						</div>
+						<div class="flex flex-col gap-1">
+							<Label class="text-xs">King (K)</Label>
+							<Input name="kingBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+						</div>
+						<div class="flex flex-col gap-1">
+							<Label class="text-xs">Queen (Q)</Label>
+							<Input name="queenBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+						</div>
+						<div class="flex flex-col gap-1">
+							<Label class="text-xs">Double (D)</Label>
+							<Input name="doubleBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+						</div>
+						<div class="flex flex-col gap-1">
+							<Label class="text-xs">Extras</Label>
+							<div class="flex gap-2 items-center h-8">
+								<label class="flex items-center gap-1 text-xs cursor-pointer">
+									<input type="checkbox" name="hasKitchen" value="1" class="rounded" />
+									Kit
+								</label>
+								<label class="flex items-center gap-1 text-xs cursor-pointer">
+									<input type="checkbox" name="hasHideabed" value="1" class="rounded" />
+									HB
+								</label>
 							</div>
-							<div class="flex flex-col gap-1">
-								<Label class="text-xs">Queen beds</Label>
-								<Input name="queenBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
-							</div>
-							<div class="flex flex-col gap-1">
-								<Label class="text-xs">Double beds</Label>
-								<Input name="doubleBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
-							</div>
-							<div class="flex flex-col gap-1">
-								<Label class="text-xs">Extras</Label>
-								<div class="flex gap-2 items-center h-8">
-									<label class="flex items-center gap-1 text-xs cursor-pointer">
-										<input type="checkbox" name="hasKitchen" value="1" class="rounded" />
-										✦ Kitchen
-									</label>
-									<label class="flex items-center gap-1 text-xs cursor-pointer">
-										<input type="checkbox" name="hasHideabed" value="1" class="rounded" />
-										Sofa bed
-									</label>
-								</div>
-							</div>
+						</div>
 							<div class="flex flex-col gap-1 col-span-2 sm:col-span-3">
 								<Label class="text-xs">Configs (one per line, for dual-config rooms — e.g. "1Q Sleeping")</Label>
 								<textarea name="configs" rows="2"

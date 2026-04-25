@@ -136,6 +136,7 @@ export const actions: Actions = {
 		const propertyId = g('propertyId');
 		const roomNumber = g('roomNumber');
 		const roomTypeId = g('roomTypeId') || null;
+		const numRooms = Math.max(1, parseInt(fd.get('numRooms') as string || '1', 10) || 1);
 		const kingBeds = parseInt(fd.get('kingBeds') as string || '0', 10) || 0;
 		const queenBeds = parseInt(fd.get('queenBeds') as string || '0', 10) || 0;
 		const doubleBeds = parseInt(fd.get('doubleBeds') as string || '0', 10) || 0;
@@ -161,6 +162,7 @@ export const actions: Actions = {
 			propertyId,
 			roomNumber,
 			roomTypeId,
+			numRooms,
 			kingBeds,
 			queenBeds,
 			doubleBeds,

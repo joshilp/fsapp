@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { bedCompact } from '$lib/utils/room';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
@@ -50,18 +51,12 @@
 		return Math.max(0, Math.round(ms / 86400000));
 	});
 
-	// Bed config compact label
+	// Bed config compact label for room dropdown
 	type Room = (typeof propertyRooms)[0];
 	function roomLabel(r: Room): string {
-		const parts: string[] = [];
-		if (r.kingBeds > 0) parts.push(r.kingBeds === 1 ? '1K' : `${r.kingBeds}K`);
-		if (r.queenBeds > 0) parts.push(r.queenBeds === 1 ? '1Q' : `${r.queenBeds}Q`);
-		if (r.doubleBeds > 0) parts.push(r.doubleBeds === 1 ? '1D' : `${r.doubleBeds}D`);
-		if (r.hasHideabed) parts.push('Sb');
-		const beds = parts.join('+');
-		const kitchen = r.hasKitchen ? ' ✦' : '';
+		const beds = bedCompact(r);
 		const type = r.roomType ? ` — ${r.roomType.name}` : '';
-		return `Rm ${r.roomNumber}  ${beds || '—'}${kitchen}${type}`;
+		return `Rm ${r.roomNumber}  ${beds}${type}`;
 	}
 
 	const moveDateMin = $derived(
