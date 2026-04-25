@@ -156,6 +156,30 @@ export const actions: Actions = {
 			notes
 		});
 
+		// Quoted rate line items (submitted from SlipFormDialog rate section)
+		// Format: li_0_type, li_0_label, li_0_qty, li_0_unit, li_0_total
+		let liIdx = 0;
+		while (fd.has(`li_${liIdx}_type`)) {
+			const type = g(`li_${liIdx}_type`) ?? 'rate';
+			const label = g(`li_${liIdx}_label`) ?? '';
+			const qty = parseFloat((fd.get(`li_${liIdx}_qty`) as string) ?? '0') || null;
+			const unit = parseInt((fd.get(`li_${liIdx}_unit`) as string) ?? '0', 10) || null;
+			const total = parseInt((fd.get(`li_${liIdx}_total`) as string) ?? '0', 10);
+			if (label && !isNaN(total)) {
+				await db.insert(bookingLineItems).values({
+					id: crypto.randomUUID(),
+					bookingId,
+					type,
+					label,
+					quantity: qty,
+					unitAmount: unit,
+					totalAmount: total,
+					sortOrder: liIdx
+				});
+			}
+			liIdx++;
+		}
+
 		// Deposit line item + payment event
 		if (depositAmountStr) {
 			const amount = Math.round(parseFloat(depositAmountStr) * 100);

@@ -5,6 +5,8 @@ import { db } from '$lib/server/db';
 import {
 	bookingChannels,
 	properties,
+	rateSeasons,
+	rateTiers,
 	rooms,
 	roomTypes,
 	taxPresets
@@ -13,8 +15,8 @@ import {
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) redirect(303, '/auth/login');
 
-	const [propertiesList, taxPresetsList, roomsList, roomTypesList, channelsList] = await Promise.all(
-		[
+	const [propertiesList, taxPresetsList, roomsList, roomTypesList, channelsList, rateSeasonsList] =
+		await Promise.all([
 			db.query.properties.findMany({ orderBy: (t, { asc }) => [asc(t.name)] }),
 			db.query.taxPresets.findMany({
 				with: { property: { columns: { name: true } } },
@@ -31,11 +33,21 @@ export const load: PageServerLoad = async ({ locals }) => {
 				with: { property: { columns: { name: true } } },
 				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.sortOrder)]
 			}),
-			db.query.bookingChannels.findMany({ orderBy: (t, { asc }) => [asc(t.sortOrder)] })
-		]
-	);
+			db.query.bookingChannels.findMany({ orderBy: (t, { asc }) => [asc(t.sortOrder)] }),
+			db.query.rateSeasons.findMany({
+				with: { tiers: { with: { roomType: { columns: { name: true, category: true } } } } },
+				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.sortOrder)]
+			})
+		]);
 
-	return { propertiesList, taxPresetsList, roomsList, roomTypesList, channelsList };
+	return {
+		propertiesList,
+		taxPresetsList,
+		roomsList,
+		roomTypesList,
+		channelsList,
+		rateSeasonsList
+	};
 };
 
 export const actions: Actions = {
@@ -168,6 +180,88 @@ export const actions: Actions = {
 		const isActive = fd.get('isActive') === 'true';
 		if (!id) return fail(400, { error: 'Missing ID' });
 		await db.update(rooms).set({ isActive: !isActive }).where(eq(rooms.id, id));
+		return { success: true };
+	},
+
+	// ── Room types ──────────────────────────────────────────────────────────────
+
+	upsertRoomType: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		const propertyId = g('propertyId');
+		const name = g('name');
+		const category = g('category');
+		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
+		if (!propertyId || !name || !category) return fail(400, { error: 'Missing fields' });
+		if (id) {
+			await db.update(roomTypes).set({ name, category, sortOrder }).where(eq(roomTypes.id, id));
+		} else {
+			await db.insert(roomTypes).values({ id: crypto.randomUUID(), propertyId, name, category, sortOrder });
+		}
+		return { success: true };
+	},
+
+	deleteRoomType: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const id = ((await request.formData()).get('id') as string)?.trim();
+		if (!id) return fail(400, { error: 'Missing ID' });
+		await db.delete(roomTypes).where(eq(roomTypes.id, id));
+		return { success: true };
+	},
+
+	// ── Rate seasons (pricing calendar) ─────────────────────────────────────────
+
+	upsertSeason: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		const propertyId = g('propertyId');
+		const name = g('name');
+		const colour = g('colour') ?? '#cccccc';
+		const startDate = g('startDate');
+		const endDate = g('endDate');
+		const minNights = parseInt(g('minNights') ?? '1') || 1;
+		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
+		if (!propertyId || !name || !startDate || !endDate) return fail(400, { error: 'Missing fields' });
+		if (startDate > endDate) return fail(400, { error: 'Start must be before end' });
+		if (id) {
+			await db.update(rateSeasons).set({ name, colour, startDate, endDate, minNights, sortOrder }).where(eq(rateSeasons.id, id));
+		} else {
+			await db.insert(rateSeasons).values({ id: crypto.randomUUID(), propertyId, name, colour, startDate, endDate, minNights, sortOrder });
+		}
+		return { success: true };
+	},
+
+	deleteSeason: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const id = ((await request.formData()).get('id') as string)?.trim();
+		if (!id) return fail(400, { error: 'Missing ID' });
+		await db.delete(rateSeasons).where(eq(rateSeasons.id, id));
+		return { success: true };
+	},
+
+	upsertRateTier: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const seasonId = g('seasonId');
+		const roomTypeId = g('roomTypeId');
+		const rateStr = g('nightlyRate');
+		if (!seasonId || !roomTypeId || !rateStr) return fail(400, { error: 'Missing fields' });
+		const nightlyRate = Math.round(parseFloat(rateStr) * 100);
+		if (isNaN(nightlyRate) || nightlyRate < 0) return fail(400, { error: 'Invalid rate' });
+		// Check if tier exists for this season+roomType
+		const existing = await db.query.rateTiers.findFirst({
+			where: and(eq(rateTiers.seasonId, seasonId), eq(rateTiers.roomTypeId, roomTypeId))
+		});
+		if (existing) {
+			await db.update(rateTiers).set({ nightlyRate }).where(eq(rateTiers.id, existing.id));
+		} else {
+			await db.insert(rateTiers).values({ id: crypto.randomUUID(), seasonId, roomTypeId, nightlyRate });
+		}
 		return { success: true };
 	},
 

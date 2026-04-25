@@ -1,0 +1,1 @@
+ALTER TABLE `rate_seasons` ADD `min_nights` integer DEFAULT 1 NOT NULL;

@@ -256,6 +256,7 @@ type SeasonSpec = {
 	colour: string;
 	start: string;
 	end: string;
+	minNights?: number; // default 1; 3 for peak long-weekend seasons
 	rates: { A: number; B: number; C: number; D: number | null };
 };
 
@@ -321,6 +322,7 @@ const seasons: SeasonSpec[] = [
 		colour: '#ffff00',
 		start: '2026-06-30',
 		end: '2026-07-29',
+		minNights: 3,
 		rates: { A: 18900, B: 19900, C: 21000, D: 25900 }
 	},
 	{
@@ -328,13 +330,15 @@ const seasons: SeasonSpec[] = [
 		colour: '#ea4335',
 		start: '2026-07-30',
 		end: '2026-08-03',
-		rates: { A: 19900, B: 21000, C: 22900, D: null }
+		minNights: 3,
+		rates: { A: 19900, B: 21000, C: 22900, D: 22900 }
 	},
 	{
 		name: 'Peak — Late Summer & Labour Day',
 		colour: '#ffff00',
 		start: '2026-08-04',
 		end: '2026-09-07',
+		minNights: 3,
 		rates: { A: 18900, B: 19900, C: 21000, D: 25900 }
 	},
 	{
@@ -381,6 +385,7 @@ for (const propId of [FALCON, SPANISH]) {
 				colour: s.colour,
 				startDate: s.start,
 				endDate: s.end,
+				minNights: s.minNights ?? 1,
 				sortOrder: i
 			})
 			.onConflictDoNothing();

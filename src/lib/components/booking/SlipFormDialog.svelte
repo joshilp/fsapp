@@ -153,6 +153,56 @@
 		d.setDate(d.getDate() + 1);
 		return d.toISOString().slice(0, 10);
 	}
+
+	// ─── Rate suggestion ──────────────────────────────────────────────────────
+
+	type RateLine = {
+		seasonId: string; seasonName: string; colour: string;
+		nights: number; unitCents: number; totalCents: number; minNights: number;
+	};
+	type PricingSuggestion = {
+		lines: RateLine[]; subtotalCents: number;
+		minNightWarning: string | null; nightsTotal: number;
+	};
+
+	let rateQuote = $state<PricingSuggestion | null>(null);
+	let rateLoading = $state(false);
+	let rateApplied = $state(false); // true once operator clicked "Apply"
+	let appliedLines = $state<RateLine[]>([]);
+
+	let rateFetchTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function scheduleRateFetch() {
+		rateApplied = false;
+		appliedLines = [];
+		if (rateFetchTimer) clearTimeout(rateFetchTimer);
+		if (!roomId || !checkIn || !checkOut || checkIn >= checkOut) { rateQuote = null; return; }
+		rateFetchTimer = setTimeout(async () => {
+			rateLoading = true;
+			try {
+				const res = await fetch(
+					`/api/pricing/suggest?roomId=${encodeURIComponent(roomId)}&checkIn=${checkIn}&checkOut=${checkOut}`
+				);
+				if (res.ok) rateQuote = await res.json();
+			} catch { rateQuote = null; }
+			rateLoading = false;
+		}, 400);
+	}
+
+	$effect(() => {
+		// Trigger rate fetch whenever dates are valid
+		if (checkIn && checkOut && checkIn < checkOut) scheduleRateFetch();
+	});
+
+	function applyRates() {
+		if (!rateQuote) return;
+		appliedLines = [...rateQuote.lines];
+		rateApplied = true;
+	}
+
+	function fmt(cents: number) {
+		return '$' + (cents / 100).toFixed(2);
+	}
 </script>
 
 <CustomDialog
@@ -267,6 +317,54 @@
 					<Input id="checkOut" name="checkOut" type="date" bind:value={checkOut} required />
 				</div>
 			</div>
+
+			<!-- ── Rate suggestion ────────────────────────────────────────── -->
+			{#if rateLoading}
+				<p class="text-muted-foreground text-xs">Calculating rates…</p>
+			{:else if rateQuote && rateQuote.lines.length > 0}
+				<div class="rounded-md border border-border bg-muted/20 p-3 space-y-2 text-sm">
+					<div class="flex items-center justify-between">
+						<span class="font-medium text-xs uppercase tracking-wide text-muted-foreground">Quoted Rate</span>
+						{#if !rateApplied}
+							<button type="button" onclick={applyRates}
+								class="rounded bg-primary px-2 py-0.5 text-xs text-primary-foreground hover:opacity-90">
+								Apply to booking
+							</button>
+						{:else}
+							<span class="text-xs text-green-600 font-medium">✓ Applied</span>
+						{/if}
+					</div>
+
+					{#each rateQuote.lines as line}
+						<div class="flex items-center gap-2">
+							<span class="h-2.5 w-2.5 rounded-sm shrink-0 border border-black/10"
+								style="background:{line.colour}"></span>
+							<span class="flex-1 text-xs">{line.nights}n × {fmt(line.unitCents)}</span>
+							<span class="text-xs font-mono">{fmt(line.totalCents)}</span>
+						</div>
+					{/each}
+
+					<div class="flex items-center justify-between border-t border-border pt-1.5 mt-1">
+						<span class="text-xs text-muted-foreground">Subtotal (before tax)</span>
+						<span class="font-semibold font-mono">{fmt(rateQuote.subtotalCents)}</span>
+					</div>
+
+					{#if rateQuote.minNightWarning}
+						<p class="text-amber-600 text-xs bg-amber-50 rounded px-2 py-1">
+							⚠ {rateQuote.minNightWarning}
+						</p>
+					{/if}
+				</div>
+			{/if}
+
+			<!-- Applied rate line items sent with the booking -->
+			{#each appliedLines as line, idx}
+				<input type="hidden" name="li_{idx}_type" value="rate" />
+				<input type="hidden" name="li_{idx}_label" value="{line.nights} night{line.nights === 1 ? '' : 's'} × {fmt(line.unitCents)} ({line.seasonName})" />
+				<input type="hidden" name="li_{idx}_qty" value={line.nights} />
+				<input type="hidden" name="li_{idx}_unit" value={line.unitCents} />
+				<input type="hidden" name="li_{idx}_total" value={line.totalCents} />
+			{/each}
 
 			<!-- Guest — name + phone with shared floating autocomplete -->
 			<div class="relative">

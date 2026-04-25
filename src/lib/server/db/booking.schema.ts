@@ -111,6 +111,8 @@ export const rateSeasons = sqliteTable(
 		colour: text('colour').notNull().default('#cccccc'), // hex, shown on booking grid
 		startDate: text('start_date').notNull(), // ISO "YYYY-MM-DD"
 		endDate: text('end_date').notNull(),
+		// Minimum stay required for this season (e.g. 3 for long weekends)
+		minNights: integer('min_nights').notNull().default(1),
 		sortOrder: integer('sort_order').notNull().default(0),
 		...timestamps
 	},
