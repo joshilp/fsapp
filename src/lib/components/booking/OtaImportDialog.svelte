@@ -109,14 +109,44 @@
 		});
 	}
 
-	// ─── Step 3 — Confirm + create ────────────────────────────────────────────
+	// ─── Step 3 — Rate suggestion + confirm ──────────────────────────────────
+
+	type RateLine = { seasonId: string; seasonName: string; colour: string; nights: number; unitCents: number; totalCents: number; minNights: number };
+	type PricingSuggestion = { lines: RateLine[]; subtotalCents: number; minNightWarning: string | null };
+
+	let rateQuote = $state<PricingSuggestion | null>(null);
+	let rateLoading = $state(false);
+	let quotedTotal = $state('');
+	let totalOverridden = $state(false);
+
+	async function fetchRate(roomId: string) {
+		if (!checkIn || !checkOut || checkIn >= checkOut) return;
+		rateLoading = true;
+		rateQuote = null;
+		try {
+			const res = await fetch(`/api/pricing/suggest?roomId=${encodeURIComponent(roomId)}&checkIn=${checkIn}&checkOut=${checkOut}`);
+			if (res.ok) {
+				rateQuote = await res.json();
+				if (!totalOverridden && rateQuote) quotedTotal = (rateQuote.subtotalCents / 100).toFixed(2);
+			}
+		} catch { /* ignore */ }
+		rateLoading = false;
+	}
+
+	const quotedTotalCents = $derived(Math.round(parseFloat(quotedTotal || '0') * 100));
+
+	function fmt(cents: number) { return '$' + (cents / 100).toFixed(2); }
 
 	let submitting = $state(false);
 	let submitError = $state('');
 
 	function pickRoom(room: AvailableRoom) {
 		selectedRoom = room;
+		totalOverridden = false;
+		quotedTotal = '';
+		rateQuote = null;
 		step = 'confirm';
+		fetchRate(room.id);
 	}
 
 	// ─── Reset ────────────────────────────────────────────────────────────────
@@ -133,6 +163,9 @@
 		availableRooms = [];
 		step1Error = '';
 		submitError = '';
+		rateQuote = null;
+		quotedTotal = '';
+		totalOverridden = false;
 	}
 
 	$effect(() => {
@@ -314,46 +347,96 @@
 					</div>
 				</div>
 
-				{#if submitError}
-					<p class="text-destructive text-xs">{submitError}</p>
+			<!-- Quoted rate -->
+			<div class="flex flex-col gap-1.5">
+				<div class="flex items-center justify-between">
+					<label class="text-xs font-medium text-muted-foreground" for="otaQuotedTotal">
+						Quoted total <span class="text-destructive">*</span>
+						<span class="ml-1 font-normal">(before tax)</span>
+					</label>
+					{#if rateLoading}
+						<span class="text-[10px] text-muted-foreground">Calculating…</span>
+					{:else if rateQuote && totalOverridden}
+						<button type="button" class="text-[10px] text-primary underline"
+							onclick={() => { totalOverridden = false; quotedTotal = (rateQuote!.subtotalCents / 100).toFixed(2); }}>
+							Reset ({fmt(rateQuote.subtotalCents)})
+						</button>
+					{/if}
+				</div>
+				<div class="relative">
+					<span class="text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 text-sm">$</span>
+					<input
+						id="otaQuotedTotal"
+						type="number" min="0" step="0.01"
+						bind:value={quotedTotal}
+						oninput={() => { totalOverridden = true; }}
+						placeholder="0.00"
+						class="w-full border border-input rounded pl-6 pr-3 py-2 text-sm bg-background"
+					/>
+				</div>
+				{#if rateQuote && rateQuote.lines.length > 0}
+					<div class="rounded border border-border bg-muted/20 px-2.5 py-1.5 space-y-0.5">
+						{#each rateQuote.lines as line}
+							<div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+								<span class="h-2 w-2 rounded-sm shrink-0" style="background:{line.colour}"></span>
+								<span class="flex-1">{line.nights}n × {fmt(line.unitCents)}</span>
+								<span class="font-mono">{fmt(line.totalCents)}</span>
+							</div>
+						{/each}
+					</div>
+				{:else if !rateLoading}
+					<p class="text-muted-foreground text-xs">No rate configured — enter total manually.</p>
+				{/if}
+			</div>
+
+			{#if submitError}
+				<p class="text-destructive text-xs">{submitError}</p>
+			{/if}
+
+			<!-- Submit via hidden form -->
+			<form
+				method="POST"
+				action="?/createBooking"
+				use:enhance={() => {
+					submitting = true;
+					submitError = '';
+					return async ({ result }) => {
+						submitting = false;
+						if (result.type === 'success') {
+							const bookingId = (result.data as { bookingId?: string })?.bookingId;
+							open = false;
+							if (bookingId) {
+								await goto(`/booking/${bookingId}/checkin`);
+							}
+						} else if (result.type === 'failure') {
+							submitError = (result.data as { error?: string })?.error ?? 'Could not create booking';
+						}
+					};
+				}}
+			>
+				<input type="hidden" name="propertyId" value={selectedRoom.propertyId} />
+				<input type="hidden" name="roomId" value={selectedRoom.id} />
+				<input type="hidden" name="guestName" value={guestName} />
+				<input type="hidden" name="guestPhone" value={guestPhone.replace(/\D/g, '')} />
+				<input type="hidden" name="channelId" value={otaChannelId} />
+				<input type="hidden" name="checkIn" value={checkIn} />
+				<input type="hidden" name="checkOut" value={checkOut} />
+				<input type="hidden" name="otaConfirmationNumber" value={otaConfirmation} />
+				<input type="hidden" name="notes" value={otaNotes} />
+				<input type="hidden" name="clerkUserId" value={currentUserId} />
+				<!-- Quoted rate line item -->
+				{#if quotedTotalCents > 0}
+					<input type="hidden" name="li_0_type" value="rate" />
+					<input type="hidden" name="li_0_label" value="Room rate · {nightCount()} night{nightCount() === 1 ? '' : 's'}" />
+					<input type="hidden" name="li_0_qty" value={nightCount()} />
+					<input type="hidden" name="li_0_unit" value={nightCount() > 0 ? Math.round(quotedTotalCents / nightCount()) : quotedTotalCents} />
+					<input type="hidden" name="li_0_total" value={quotedTotalCents} />
 				{/if}
 
-				<!-- Submit via hidden form -->
-				<form
-					method="POST"
-					action="?/createBooking"
-					use:enhance={() => {
-						submitting = true;
-						submitError = '';
-						return async ({ result }) => {
-							submitting = false;
-							if (result.type === 'success') {
-								const bookingId = (result.data as { bookingId?: string })?.bookingId;
-								open = false;
-								if (bookingId) {
-									await goto(`/booking/${bookingId}/checkin`);
-								}
-							} else if (result.type === 'failure') {
-								submitError = (result.data as { error?: string })?.error ?? 'Could not create booking';
-							}
-						};
-					}}
-				>
-					<input type="hidden" name="propertyId" value={selectedRoom.propertyId} />
-					<input type="hidden" name="roomId" value={selectedRoom.id} />
-					<input type="hidden" name="guestName" value={guestName} />
-					<input type="hidden" name="guestPhone" value={guestPhone.replace(/\D/g, '')} />
-					<input type="hidden" name="channelId" value={otaChannelId} />
-					<input type="hidden" name="checkIn" value={checkIn} />
-					<input type="hidden" name="checkOut" value={checkOut} />
-					<input type="hidden" name="otaConfirmationNumber" value={otaConfirmation} />
-					<input type="hidden" name="notes" value={otaNotes} />
-					<input type="hidden" name="clerkUserId" value={currentUserId} />
-
-					<Button type="submit" class="w-full" disabled={submitting}>
-						{submitting ? 'Creating booking…' : '✓ Create OTA Booking → Check-in'}
-					</Button>
-				</form>
+				<Button type="submit" class="w-full" disabled={submitting}>
+					{submitting ? 'Creating booking…' : '✓ Create OTA Booking → Check-in'}
+				</Button>
+			</form>
 			{/if}
 		</div>
 	{/snippet}

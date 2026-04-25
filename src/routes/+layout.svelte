@@ -10,7 +10,7 @@
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
 <div class="flex min-h-screen flex-col">
-	<Navbar user={data.user} />
+	<Navbar user={data.user} pendingUserCount={data.pendingUserCount} />
 	<main class="flex flex-1 flex-col">
 		{@render children()}
 	</main>

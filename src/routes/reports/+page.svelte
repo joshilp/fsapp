@@ -28,23 +28,45 @@
 	</div>
 
 	<!-- Summary cards -->
-	<div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+	<div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
 		<div class="rounded-lg border border-border bg-card p-5">
-			<p class="text-muted-foreground text-xs font-medium uppercase tracking-wide">Bookings</p>
+			<p class="text-muted-foreground text-xs font-medium uppercase tracking-wide">Check-ins</p>
 			<p class="mt-1 text-3xl font-bold">{data.totalBookings}</p>
+			<p class="text-muted-foreground text-xs mt-1">arrivals this month</p>
 		</div>
 		<div class="rounded-lg border border-border bg-card p-5">
-			<p class="text-muted-foreground text-xs font-medium uppercase tracking-wide">Revenue (rates)</p>
+			<p class="text-muted-foreground text-xs font-medium uppercase tracking-wide">Accommodation</p>
 			<p class="mt-1 text-3xl font-bold">${data.totalRevenueDollars}</p>
-			<p class="text-muted-foreground text-xs mt-1">From itemized rate lines</p>
+			<p class="text-muted-foreground text-xs mt-1">before tax</p>
 		</div>
+		<div class="rounded-lg border border-border bg-card p-5">
+			<p class="text-muted-foreground text-xs font-medium uppercase tracking-wide">Tax collected</p>
+			<p class="mt-1 text-3xl font-bold">${data.totalTaxDollars}</p>
+			<p class="text-muted-foreground text-xs mt-1">GST + PST lines</p>
+		</div>
+		<div class="rounded-lg border border-border bg-card p-5">
+			<p class="text-muted-foreground text-xs font-medium uppercase tracking-wide">Payments in</p>
+			<p class="mt-1 text-3xl font-bold">${data.totalCollectedDollars}</p>
+			{#if parseFloat(data.totalRefundedDollars) > 0}
+				<p class="text-muted-foreground text-xs mt-1">− ${data.totalRefundedDollars} refunded</p>
+			{:else}
+				<p class="text-muted-foreground text-xs mt-1">recorded payments</p>
+			{/if}
+		</div>
+	</div>
+
+	<!-- Occupancy per property -->
+	<div class="grid gap-4 sm:grid-cols-{data.propertyStats.length}">
 		{#each data.propertyStats as prop}
 			<div class="rounded-lg border border-border bg-card p-5">
 				<p class="text-muted-foreground text-xs font-medium uppercase tracking-wide truncate">{prop.propertyName}</p>
 				<p class="mt-1 text-3xl font-bold">{prop.occupancyPct}%</p>
 				<p class="text-muted-foreground text-xs mt-1">
-					{prop.bookedNights} / {prop.availableNights} room-nights
+					{prop.bookedNights} / {prop.availableNights} room-nights occupied
 				</p>
+				<div class="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
+					<div class="h-full bg-teal-500 rounded-full" style="width:{prop.occupancyPct}%"></div>
+				</div>
 			</div>
 		{/each}
 	</div>
@@ -90,50 +112,34 @@
 			{/if}
 		</div>
 
-		<!-- Property breakdown -->
+		<!-- Status breakdown -->
 		<div class="rounded-lg border border-border bg-card p-5">
-			<h2 class="font-semibold mb-4 text-sm">By Property</h2>
-			<div class="space-y-3">
-				{#each data.propertyStats as prop}
-					<div class="space-y-1">
-						<div class="flex justify-between text-sm">
-							<span class="font-medium">{prop.propertyName}</span>
-							<span class="text-muted-foreground">{prop.totalBookings} bookings</span>
+			<h2 class="font-semibold mb-4 text-sm">Booking Statuses</h2>
+			{#if Object.keys(data.statusCounts).length === 0}
+				<p class="text-muted-foreground text-sm">No bookings this month.</p>
+			{:else}
+				<div class="space-y-2">
+					{#each Object.entries(data.statusCounts) as [status, cnt]}
+						{@const colors: Record<string, string> = {
+							confirmed: 'bg-blue-100 text-blue-700',
+							checked_in: 'bg-green-100 text-green-700',
+							checked_out: 'bg-gray-100 text-gray-600',
+							cancelled: 'bg-red-100 text-red-600'
+						}}
+						<div class="flex items-center justify-between text-sm">
+							<span class={['rounded-full px-2.5 py-0.5 text-xs font-medium', colors[status] ?? 'bg-muted text-muted-foreground'].join(' ')}>
+								{status.replace('_', ' ')}
+							</span>
+							<span class="font-medium">{cnt}</span>
 						</div>
-						<div class="flex justify-between text-xs text-muted-foreground">
-							<span>{prop.totalRooms} rooms</span>
-							<span>{prop.occupancyPct}% occupancy</span>
-						</div>
-						<div class="h-1.5 bg-muted rounded-full overflow-hidden">
-							<div class="h-full bg-teal-500 rounded-full" style="width:{prop.occupancyPct}%"></div>
-						</div>
-					</div>
-				{/each}
-			</div>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	</div>
 
-	<!-- Status breakdown -->
-	{#if Object.keys(data.statusCounts).length > 0}
-		<div class="rounded-lg border border-border bg-card p-5">
-			<h2 class="font-semibold mb-4 text-sm">Booking Status Breakdown</h2>
-			<div class="flex flex-wrap gap-3">
-				{#each Object.entries(data.statusCounts) as [status, cnt]}
-					{@const colors: Record<string, string> = {
-						confirmed: 'bg-blue-100 text-blue-800',
-						checked_in: 'bg-green-100 text-green-800',
-						checked_out: 'bg-gray-100 text-gray-600'
-					}}
-					<div class={['rounded-full px-3 py-1 text-sm font-medium', colors[status] ?? 'bg-muted'].join(' ')}>
-						{status.replace('_', ' ')}: {cnt}
-					</div>
-				{/each}
-			</div>
-		</div>
-	{/if}
-
 	<p class="text-xs text-muted-foreground text-center">
-		Revenue figures reflect itemized rate lines only. Tax and deposit lines are excluded.
-		Populate line items at check-in to see accurate revenue.
+		Revenue reflects accommodation rate lines for bookings that <em>checked in</em> this month.
+		Occupancy counts all room-nights overlapping this month across both properties.
 	</p>
 </div>

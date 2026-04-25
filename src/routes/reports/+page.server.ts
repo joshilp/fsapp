@@ -1,8 +1,8 @@
 import { redirect } from '@sveltejs/kit';
-import { and, eq, gte, gt, lt, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, gt, lt, lte, ne, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { bookingLineItems, bookings, rooms } from '$lib/server/db/schema';
+import { bookingLineItems, bookings, paymentEvents, rooms } from '$lib/server/db/schema';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!locals.user) redirect(303, '/auth/login');
@@ -26,11 +26,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	const allProperties = await db.query.properties.findMany({ columns: { id: true, name: true } });
 
-	// Bookings with check-in in this month
-	const monthlyBookings = await db.query.bookings.findMany({
+	// All bookings that OVERLAP with this month (for accurate occupancy)
+	const overlappingBookings = await db.query.bookings.findMany({
 		where: and(
-			gte(bookings.checkInDate, monthStart),
 			lt(bookings.checkInDate, monthEnd),
+			gt(bookings.checkOutDate, monthStart),
 			ne(bookings.status, 'cancelled'),
 			ne(bookings.status, 'blocked')
 		),
@@ -38,25 +38,39 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		columns: { id: true, propertyId: true, status: true, checkInDate: true, checkOutDate: true }
 	});
 
-	// Revenue from rate line items for those bookings
-	const bookingIds = monthlyBookings.map((b) => b.id);
+	// Bookings that CHECK IN this month (for revenue counting — revenue belongs to arrival month)
+	const monthlyCheckIns = overlappingBookings.filter(
+		(b) => b.checkInDate >= monthStart && b.checkInDate < monthEnd
+	);
+
+	// Revenue + tax from rate/tax line items for check-in-this-month bookings
+	const bookingIds = monthlyCheckIns.map((b) => b.id);
 	let totalRevenueCents = 0;
-	let channelRevenue: Record<string, number> = {};
+	let totalTaxCents = 0;
 
 	if (bookingIds.length > 0) {
 		const lineItems = await db.query.bookingLineItems.findMany({
 			where: and(
 				sql`${bookingLineItems.bookingId} IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})`,
-				eq(bookingLineItems.type, 'rate')
+				sql`${bookingLineItems.type} IN ('rate','extra','tax')`
 			),
-			columns: { bookingId: true, totalAmount: true }
+			columns: { bookingId: true, type: true, totalAmount: true }
 		});
 		for (const li of lineItems) {
-			totalRevenueCents += li.totalAmount;
+			if (li.type === 'rate' || li.type === 'extra') totalRevenueCents += li.totalAmount;
+			else if (li.type === 'tax') totalTaxCents += li.totalAmount;
 		}
+
+		// Payments received for these bookings
+		const payments = await db.query.paymentEvents.findMany({
+			where: sql`${paymentEvents.bookingId} IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})`,
+			columns: { bookingId: true, type: true, amount: true }
+		});
+		var totalCollectedCents = payments.filter(p => p.type !== 'refund').reduce((s, p) => s + p.amount, 0);
+		var totalRefundedCents  = payments.filter(p => p.type === 'refund').reduce((s, p) => s + p.amount, 0);
 	}
 
-	// Occupancy per property
+	// Occupancy per property — uses ALL overlapping bookings for accuracy
 	const propertyStats = await Promise.all(
 		allProperties.map(async (prop) => {
 			const propRooms = await db.query.rooms.findMany({
@@ -64,12 +78,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 				columns: { id: true }
 			});
 			const totalRoomNights = propRooms.length * daysInMonth;
-			const propBookings = monthlyBookings.filter((b) => b.propertyId === prop.id);
+			const propBookings = overlappingBookings.filter((b) => b.propertyId === prop.id);
+			const propCheckIns = monthlyCheckIns.filter((b) => b.propertyId === prop.id);
 
 			let bookedNights = 0;
 			for (const b of propBookings) {
-				const startMs = Math.max(new Date(b.checkInDate).getTime(), new Date(monthStart).getTime());
-				const endMs = Math.min(new Date(b.checkOutDate).getTime(), new Date(monthEnd).getTime());
+				const startMs = Math.max(new Date(b.checkInDate + 'T00:00:00').getTime(), new Date(monthStart + 'T00:00:00').getTime());
+				const endMs = Math.min(new Date(b.checkOutDate + 'T00:00:00').getTime(), new Date(monthEnd + 'T00:00:00').getTime());
 				bookedNights += Math.max(0, Math.round((endMs - startMs) / 86400000));
 			}
 
@@ -77,7 +92,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 				propertyId: prop.id,
 				propertyName: prop.name,
 				totalRooms: propRooms.length,
-				totalBookings: propBookings.length,
+				totalBookings: propCheckIns.length,
 				bookedNights,
 				availableNights: totalRoomNights,
 				occupancyPct: totalRoomNights > 0 ? Math.round((bookedNights / totalRoomNights) * 100) : 0
@@ -85,16 +100,16 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		})
 	);
 
-	// Channel breakdown
+	// Channel breakdown (check-ins this month)
 	const channelCounts: Record<string, number> = {};
-	for (const b of monthlyBookings) {
+	for (const b of monthlyCheckIns) {
 		const ch = b.channel?.name ?? 'Direct';
 		channelCounts[ch] = (channelCounts[ch] ?? 0) + 1;
 	}
 
-	// Booking status breakdown
+	// Booking status breakdown (check-ins this month)
 	const statusCounts: Record<string, number> = {};
-	for (const b of monthlyBookings) {
+	for (const b of monthlyCheckIns) {
 		statusCounts[b.status] = (statusCounts[b.status] ?? 0) + 1;
 	}
 
@@ -119,6 +134,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		});
 	}
 
+	const collected = (totalCollectedCents ?? 0);
+	const refunded  = (totalRefundedCents ?? 0);
+
 	const prevMonth = month === 1 ? 12 : month - 1;
 	const prevYear = month === 1 ? year - 1 : year;
 
@@ -127,8 +145,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		prevMonthParam: `${prevYear}-${String(prevMonth).padStart(2, '0')}`,
 		nextMonthParam: `${nextY}-${String(nextM).padStart(2, '0')}`,
 		monthLabel: new Date(year, month - 1, 1).toLocaleDateString('en-CA', { month: 'long', year: 'numeric' }),
-		totalBookings: monthlyBookings.length,
+		totalBookings: monthlyCheckIns.length,
 		totalRevenueDollars: (totalRevenueCents / 100).toFixed(2),
+		totalTaxDollars: (totalTaxCents / 100).toFixed(2),
+		totalCollectedDollars: (collected / 100).toFixed(2),
+		totalRefundedDollars: (refunded / 100).toFixed(2),
 		channelCounts,
 		statusCounts,
 		propertyStats,
