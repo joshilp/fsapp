@@ -1,7 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { and, eq, gt, lt, ne } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
-import { getGridData, getTodayData } from '$lib/server/booking-queries';
+import { getGridData, getTodayData, getUnassignedBookings } from '$lib/server/booking-queries';
 import { db } from '$lib/server/db';
 import {
 	bookingChannels,
@@ -39,7 +39,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const rawView = url.searchParams.get('view');
 	const viewMode: 'grid' | 'today' = rawView === 'today' ? 'today' : 'grid';
 
-	const [falcon, spanish, channels, users, todayData] = await Promise.all([
+	const [falcon, spanish, channels, users, todayData, unassignedFalcon, unassignedSpanish] = await Promise.all([
 		viewMode === 'grid' ? getGridData('prop-falcon', year, month) : Promise.resolve(null),
 		viewMode === 'grid' ? getGridData('prop-spanish', year, month) : Promise.resolve(null),
 		db.query.bookingChannels.findMany({
@@ -47,7 +47,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			orderBy: (t, { asc }) => [asc(t.sortOrder)]
 		}),
 		db.select({ id: user.id, name: user.name }).from(user).orderBy(user.name),
-		viewMode === 'today' ? getTodayData(todayIso) : Promise.resolve(null)
+		viewMode === 'today' ? getTodayData(todayIso) : Promise.resolve(null),
+		getUnassignedBookings('prop-falcon'),
+		getUnassignedBookings('prop-spanish')
 	]);
 
 	return {
@@ -60,7 +62,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		channels: channels.map((c) => ({ id: c.id, name: c.name })),
 		users: users.map((u) => ({ id: u.id, name: u.name })),
 		currentUserId: locals.user.id,
-		todayData
+		todayData,
+		unassigned: { falcon: unassignedFalcon, spanish: unassignedSpanish }
 	};
 };
 

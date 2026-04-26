@@ -40,7 +40,8 @@ const RT = {
 const CH = {
 	direct: 'ch-direct',
 	expedia: 'ch-expedia',
-	bookingCom: 'ch-booking-com'
+	bookingCom: 'ch-booking-com',
+	online: 'ch-online'
 } as const;
 
 // ─── Properties ──────────────────────────────────────────────────────────────
@@ -446,7 +447,8 @@ await db
 	.values([
 		{ id: CH.direct, name: 'Direct', isOta: false, isActive: true, sortOrder: 0 },
 		{ id: CH.expedia, name: 'Expedia', isOta: true, isActive: true, sortOrder: 1 },
-		{ id: CH.bookingCom, name: 'Booking.com', isOta: true, isActive: true, sortOrder: 2 }
+		{ id: CH.bookingCom, name: 'Booking.com', isOta: true, isActive: true, sortOrder: 2 },
+		{ id: CH.online, name: 'Online', isOta: false, isActive: true, sortOrder: 3 }
 	])
 	.onConflictDoNothing();
 

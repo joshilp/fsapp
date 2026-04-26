@@ -240,6 +240,10 @@ export const bookings = sqliteTable(
 		vehiclePlate: text('vehicle_plate'),
 
 		otaConfirmationNumber: text('ota_confirmation_number'),
+		// Set on public (online) bookings — 8-char token for confirmation page (no auth)
+		publicToken: text('public_token'),
+		// For unassigned online bookings: captures the requested room type before operator assigns a room
+		requestedRoomTypeId: text('requested_room_type_id').references(() => roomTypes.id, { onDelete: 'set null' }),
 		// Free-text clerk name for non-registered users (walk-ins helping at desk, etc.)
 		// Takes precedence over clerkId for display when set.
 		clerkName: text('clerk_name'),
@@ -411,6 +415,7 @@ export const guestsRelations = relations(guests, ({ many }) => ({
 export const bookingsRelations = relations(bookings, ({ one, many }) => ({
 	property: one(properties, { fields: [bookings.propertyId], references: [properties.id] }),
 	room: one(rooms, { fields: [bookings.roomId], references: [rooms.id] }),
+	requestedRoomType: one(roomTypes, { fields: [bookings.requestedRoomTypeId], references: [roomTypes.id] }),
 	guest: one(guests, { fields: [bookings.guestId], references: [guests.id] }),
 	channel: one(bookingChannels, { fields: [bookings.channelId], references: [bookingChannels.id] }),
 	clerk: one(user, { fields: [bookings.clerkId], references: [user.id] }),

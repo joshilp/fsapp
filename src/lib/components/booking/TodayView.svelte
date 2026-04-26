@@ -1,14 +1,16 @@
 <script lang="ts">
-	import type { TodayBooking } from '$lib/server/booking-queries';
+	import type { TodayBooking, UnassignedBooking } from '$lib/server/booking-queries';
+	import UnassignedPanel from './UnassignedPanel.svelte';
 
 	type Props = {
 		arrivals: TodayBooking[];
 		departures: TodayBooking[];
 		inHouse: TodayBooking[];
+		unassigned: UnassignedBooking[];
 		today: string;
 	};
 
-	let { arrivals, departures, inHouse, today }: Props = $props();
+	let { arrivals, departures, inHouse, unassigned, today }: Props = $props();
 
 	const todayLabel = $derived(
 		new Date(today + 'T12:00:00').toLocaleDateString('en-CA', {
@@ -37,6 +39,10 @@
 	const totalInHouseAfter = $derived(arrivals.length + inHouse.length);
 </script>
 
+{#if unassigned.length > 0}
+	<UnassignedPanel bookings={unassigned} {today} />
+{/if}
+
 <div class="mx-auto max-w-4xl px-4 py-6">
 	<!-- Summary stats bar -->
 	<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -51,6 +57,11 @@
 			<span class="flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 font-medium text-green-700">
 				● {totalInHouseAfter} in house tonight
 			</span>
+			{#if unassigned.length > 0}
+				<a href="#unassigned" class="flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 font-medium text-amber-700">
+					⚠ {unassigned.length} unassigned
+				</a>
+			{/if}
 		</div>
 	</div>
 

@@ -47,27 +47,29 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const bookingIds = monthlyCheckIns.map((b) => b.id);
 	let totalRevenueCents = 0;
 	let totalTaxCents = 0;
+	let totalCollectedCents = 0;
+	let totalRefundedCents = 0;
 
 	if (bookingIds.length > 0) {
-		const lineItems = await db.query.bookingLineItems.findMany({
-			where: and(
-				sql`${bookingLineItems.bookingId} IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})`,
-				sql`${bookingLineItems.type} IN ('rate','extra','tax')`
-			),
-			columns: { bookingId: true, type: true, totalAmount: true }
-		});
+		const [lineItems, payments] = await Promise.all([
+			db.query.bookingLineItems.findMany({
+				where: and(
+					sql`${bookingLineItems.bookingId} IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})`,
+					sql`${bookingLineItems.type} IN ('rate','extra','tax')`
+				),
+				columns: { bookingId: true, type: true, totalAmount: true }
+			}),
+			db.query.paymentEvents.findMany({
+				where: sql`${paymentEvents.bookingId} IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})`,
+				columns: { bookingId: true, type: true, amount: true }
+			})
+		]);
 		for (const li of lineItems) {
 			if (li.type === 'rate' || li.type === 'extra') totalRevenueCents += li.totalAmount;
 			else if (li.type === 'tax') totalTaxCents += li.totalAmount;
 		}
-
-		// Payments received for these bookings
-		const payments = await db.query.paymentEvents.findMany({
-			where: sql`${paymentEvents.bookingId} IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})`,
-			columns: { bookingId: true, type: true, amount: true }
-		});
-		var totalCollectedCents = payments.filter(p => p.type !== 'refund').reduce((s, p) => s + p.amount, 0);
-		var totalRefundedCents  = payments.filter(p => p.type === 'refund').reduce((s, p) => s + p.amount, 0);
+		totalCollectedCents = payments.filter(p => p.type !== 'refund').reduce((s, p) => s + p.amount, 0);
+		totalRefundedCents  = payments.filter(p => p.type === 'refund').reduce((s, p) => s + p.amount, 0);
 	}
 
 	// Occupancy per property — uses ALL overlapping bookings for accuracy
@@ -134,8 +136,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		});
 	}
 
-	const collected = (totalCollectedCents ?? 0);
-	const refunded  = (totalRefundedCents ?? 0);
 
 	const prevMonth = month === 1 ? 12 : month - 1;
 	const prevYear = month === 1 ? year - 1 : year;
@@ -148,8 +148,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		totalBookings: monthlyCheckIns.length,
 		totalRevenueDollars: (totalRevenueCents / 100).toFixed(2),
 		totalTaxDollars: (totalTaxCents / 100).toFixed(2),
-		totalCollectedDollars: (collected / 100).toFixed(2),
-		totalRefundedDollars: (refunded / 100).toFixed(2),
+		totalCollectedDollars: (totalCollectedCents / 100).toFixed(2),
+		totalRefundedDollars: (totalRefundedCents / 100).toFixed(2),
 		channelCounts,
 		statusCounts,
 		propertyStats,

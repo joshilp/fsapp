@@ -272,6 +272,66 @@ export async function getGridData(
 	};
 }
 
+// ─── Unassigned bookings (no room yet — online/public bookings) ───────────────
+
+export type UnassignedBooking = {
+	id: string;
+	propertyId: string;
+	propertyName: string;
+	requestedTypeName: string | null;
+	requestedTypeCategory: string | null;
+	guestName: string | null;
+	guestEmail: string | null;
+	channelName: string | null;
+	checkInDate: string;
+	checkOutDate: string;
+	numAdults: number;
+	numChildren: number;
+	notes: string | null;
+	publicToken: string | null;
+};
+
+export async function getUnassignedBookings(propertyId: string): Promise<UnassignedBooking[]> {
+	const rows = await db.query.bookings.findMany({
+		where: and(
+			eq(bookings.propertyId, propertyId),
+			// roomId IS NULL — Drizzle: use sql`` helper
+			sql`${bookings.roomId} IS NULL`,
+			ne(bookings.status, 'cancelled'),
+			ne(bookings.status, 'checked_out')
+		),
+		with: {
+			guest: { columns: { name: true, email: true } },
+			channel: { columns: { name: true } },
+			requestedRoomType: { columns: { name: true, category: true } },
+			property: { columns: { name: true } }
+		},
+		columns: {
+			id: true, propertyId: true, status: true,
+			checkInDate: true, checkOutDate: true,
+			numAdults: true, numChildren: true, notes: true, publicToken: true
+		},
+		orderBy: (b, { asc }) => [asc(b.checkInDate)]
+	});
+
+	return rows.map(r => ({
+		id: r.id,
+		propertyId: r.propertyId,
+		propertyName: r.property?.name ?? r.propertyId,
+		requestedTypeName: r.requestedRoomType?.name ?? null,
+		requestedTypeCategory: r.requestedRoomType?.category ?? null,
+		guestName: r.guest?.name ?? null,
+		guestEmail: r.guest?.email ?? null,
+		channelName: r.channel?.name ?? null,
+		checkInDate: r.checkInDate,
+		checkOutDate: r.checkOutDate,
+		numAdults: r.numAdults,
+		numChildren: r.numChildren,
+		notes: r.notes,
+		publicToken: r.publicToken
+	}));
+}
+
 // ─── Today data ───────────────────────────────────────────────────────────────
 
 export type TodayBooking = {
@@ -294,42 +354,68 @@ export async function getTodayData(today: string): Promise<{
 	arrivals: TodayBooking[];
 	departures: TodayBooking[];
 	inHouse: TodayBooking[];
+	unassigned: UnassignedBooking[];
 }> {
-	const rows = await db.query.bookings.findMany({
-		where: and(
-			or(
-				// Arriving today (confirmed or already checked in today)
-				eq(bookings.checkInDate, today),
-				// Departing today
-				eq(bookings.checkOutDate, today),
-				// Currently in house
-				and(lt(bookings.checkInDate, today), gt(bookings.checkOutDate, today))
+	const [rows, unassignedRows] = await Promise.all([
+		db.query.bookings.findMany({
+			where: and(
+				or(
+					// Arriving today (confirmed or already checked in today)
+					eq(bookings.checkInDate, today),
+					// Departing today
+					eq(bookings.checkOutDate, today),
+					// Currently in house
+					and(lt(bookings.checkInDate, today), gt(bookings.checkOutDate, today))
+				),
+				ne(bookings.status, 'cancelled'),
+				// Only assigned bookings here — unassigned are separate
+				sql`${bookings.roomId} IS NOT NULL`
 			),
-			ne(bookings.status, 'cancelled')
-		),
-		with: {
-			guest: { columns: { name: true } },
-			channel: { columns: { name: true } },
-			room: {
-				columns: { roomNumber: true },
-				with: {
-					roomType: { columns: { category: true } },
-					property: { columns: { id: true, name: true } }
+			with: {
+				guest: { columns: { name: true } },
+				channel: { columns: { name: true } },
+				room: {
+					columns: { roomNumber: true },
+					with: {
+						roomType: { columns: { category: true } },
+						property: { columns: { id: true, name: true } }
+					}
 				}
-			}
-		},
-		columns: {
-			id: true,
-			propertyId: true,
-			status: true,
-			checkInDate: true,
-			checkOutDate: true,
-			numAdults: true,
-			numChildren: true,
-			notes: true
-		},
-		orderBy: (b, { asc }) => [asc(b.checkInDate)]
-	});
+			},
+			columns: {
+				id: true,
+				propertyId: true,
+				status: true,
+				checkInDate: true,
+				checkOutDate: true,
+				numAdults: true,
+				numChildren: true,
+				notes: true
+			},
+			orderBy: (b, { asc }) => [asc(b.checkInDate)]
+		}),
+		// Unassigned bookings arriving today or upcoming (all properties)
+		db.query.bookings.findMany({
+			where: and(
+				sql`${bookings.roomId} IS NULL`,
+				ne(bookings.status, 'cancelled'),
+				ne(bookings.status, 'checked_out'),
+				lte(bookings.checkInDate, today) // arriving today or overdue
+			),
+			with: {
+				guest: { columns: { name: true, email: true } },
+				channel: { columns: { name: true } },
+				requestedRoomType: { columns: { name: true, category: true } },
+				property: { columns: { name: true } }
+			},
+			columns: {
+				id: true, propertyId: true, status: true,
+				checkInDate: true, checkOutDate: true,
+				numAdults: true, numChildren: true, notes: true, publicToken: true
+			},
+			orderBy: (b, { asc }) => [asc(b.checkInDate)]
+		})
+	]);
 
 	const toTodayBooking = (r: (typeof rows)[0]): TodayBooking => ({
 		id: r.id,
@@ -347,6 +433,23 @@ export async function getTodayData(today: string): Promise<{
 		notes: r.notes
 	});
 
+	const unassigned: UnassignedBooking[] = unassignedRows.map(r => ({
+		id: r.id,
+		propertyId: r.propertyId,
+		propertyName: r.property?.name ?? r.propertyId,
+		requestedTypeName: r.requestedRoomType?.name ?? null,
+		requestedTypeCategory: r.requestedRoomType?.category ?? null,
+		guestName: r.guest?.name ?? null,
+		guestEmail: r.guest?.email ?? null,
+		channelName: r.channel?.name ?? null,
+		checkInDate: r.checkInDate,
+		checkOutDate: r.checkOutDate,
+		numAdults: r.numAdults,
+		numChildren: r.numChildren,
+		notes: r.notes,
+		publicToken: r.publicToken
+	}));
+
 	return {
 		arrivals: rows
 			.filter((r) => r.checkInDate === today && r.status === 'confirmed')
@@ -356,6 +459,7 @@ export async function getTodayData(today: string): Promise<{
 			.map(toTodayBooking),
 		inHouse: rows
 			.filter((r) => r.checkInDate < today && r.checkOutDate > today && r.status === 'checked_in')
-			.map(toTodayBooking)
+			.map(toTodayBooking),
+		unassigned
 	};
 }
