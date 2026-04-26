@@ -6,7 +6,8 @@ import { db } from '$lib/server/db';
 import { user } from '$lib/server/db/auth.schema';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 
-const UNPROTECTED = ['/auth/', '/api/'];
+// Routes that bypass the isApproved check entirely (public or system routes)
+const UNPROTECTED = ['/auth/', '/api/', '/book', '/pending'];
 const PENDING_PATH = '/pending';
 
 const handleBetterAuth: Handle = async ({ event, resolve }) => {
@@ -18,7 +19,11 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 
 		// Approval check for authenticated routes
 		const path = event.url.pathname;
-		const isUnprotected = UNPROTECTED.some((p) => path.startsWith(p)) || path === PENDING_PATH;
+		// Also allow the public homepage and all public paths
+		const isUnprotected =
+			UNPROTECTED.some((p) => path.startsWith(p)) ||
+			path === '/' ||
+			path === PENDING_PATH;
 
 		if (!isUnprotected) {
 			const dbUser = await db.query.user.findFirst({

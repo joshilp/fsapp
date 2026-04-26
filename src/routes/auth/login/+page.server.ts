@@ -4,7 +4,7 @@ import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = (event) => {
 	if (event.locals.user) {
-		return redirect(302, '/');
+		return redirect(302, '/booking');
 	}
 	return { allowSignup: env.ALLOW_SIGNUP === 'true' };
 };
