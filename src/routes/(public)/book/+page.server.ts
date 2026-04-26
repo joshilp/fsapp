@@ -2,7 +2,9 @@ import { fail } from '@sveltejs/kit';
 import { eq, and, lt, gt, ne } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { bookings, bookingChannels, bookingLineItems, guests, rooms } from '$lib/server/db/schema';
+import { bookings, bookingChannels, bookingLineItems, guests, properties, roomTypes, rooms } from '$lib/server/db/schema';
+import { sendGuestConfirmation, sendOperatorAlert } from '$lib/server/email';
+import { env } from '$env/dynamic/private';
 
 function randomToken(len = 8): string {
 	const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
@@ -171,6 +173,41 @@ export const actions: Actions = {
 				sortOrder: 0
 			});
 		}
+
+		// Send confirmation email to guest and alert to operator (non-blocking)
+		const [propRow, typeRow] = await Promise.all([
+			db.query.properties.findFirst({ where: eq(properties.id, propertyId), columns: { name: true } }),
+			db.query.roomTypes.findFirst({ where: eq(roomTypes.id, roomTypeId), columns: { name: true } })
+		]);
+		const propName = propRow?.name ?? propertyId;
+		const reqTypeName = typeRow?.name ?? null;
+		const nights = Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
+		const origin = env.ORIGIN ?? 'http://localhost:5173';
+		const confirmUrl = `${origin}/book/confirmation/${token}`;
+
+		void sendGuestConfirmation({
+			guestName,
+			guestEmail,
+			propertyName: propName,
+			checkInDate: checkIn,
+			checkOutDate: checkOut,
+			nights,
+			requestedRoomType: reqTypeName,
+			quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null,
+			publicToken: token,
+			confirmationUrl: confirmUrl
+		});
+		void sendOperatorAlert({
+			guestName,
+			guestEmail,
+			propertyName: propName,
+			checkInDate: checkIn,
+			checkOutDate: checkOut,
+			nights,
+			requestedRoomType: reqTypeName,
+			quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null,
+			confirmationUrl: confirmUrl
+		});
 
 		return { success: true, token: booking.publicToken };
 	}

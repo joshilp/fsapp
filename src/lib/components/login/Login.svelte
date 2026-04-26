@@ -5,13 +5,18 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+
+	type Props = { allowSignup?: boolean };
+	let { allowSignup = false }: Props = $props();
 </script>
 
 <div class="flex flex-1 items-center justify-center px-4 py-12">
 	<Tabs.Root value="signin" class="w-full max-w-sm">
-		<Tabs.List class="grid w-full grid-cols-2">
+		<Tabs.List class={allowSignup ? 'grid w-full grid-cols-2' : 'grid w-full grid-cols-1'}>
 			<Tabs.Trigger value="signin">Sign In</Tabs.Trigger>
-			<Tabs.Trigger value="signup">Sign Up</Tabs.Trigger>
+			{#if allowSignup}
+				<Tabs.Trigger value="signup">Sign Up</Tabs.Trigger>
+			{/if}
 		</Tabs.List>
 
 		<Tabs.Content value="signin">
@@ -58,6 +63,7 @@
 			</Card.Root>
 		</Tabs.Content>
 
+	{#if allowSignup}
 		<Tabs.Content value="signup">
 			<Card.Root>
 				<Card.Header>
@@ -113,5 +119,6 @@
 				</Card.Content>
 			</Card.Root>
 		</Tabs.Content>
-	</Tabs.Root>
+	{/if}
+</Tabs.Root>
 </div>

@@ -19,6 +19,7 @@
 		"db:seed": "tsx --env-file=.env scripts/seed.ts",
 		"db:seed:demo": "tsx --env-file=.env scripts/seed-demo.ts",
 		"db:seed:reset": "tsx --env-file=.env scripts/seed-demo.ts --reset",
+		"db:seed:admin": "tsx --env-file=.env scripts/seed-admin.ts",
 		"auth:schema": "better-auth generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes"
 	},
 	"devDependencies": {
@@ -60,6 +61,7 @@
 	},
 	"dependencies": {
 		"better-sqlite3": "^12.8.0",
+		"resend": "^6.12.2",
 		"valibot": "^1.3.1"
 	}
 }

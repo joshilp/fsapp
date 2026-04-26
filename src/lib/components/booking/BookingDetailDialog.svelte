@@ -461,48 +461,55 @@
 						<Button variant="ghost" size="sm">Print card</Button>
 					</a>
 
-					{#if !confirmCheckOut}
-						<Button
-							variant="default"
-							size="sm"
-							onclick={() => { resetConfirms(); confirmCheckOut = true; }}
+				{#if !confirmCheckOut}
+					<Button
+						variant="default"
+						size="sm"
+						onclick={() => { resetConfirms(); confirmCheckOut = true; }}
+					>
+						Check Out
+					</Button>
+				{:else}
+					<div class="flex flex-col gap-2 w-full">
+						{#if booking.movedFromBookingId && priorStay}
+							<div class="rounded bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs text-amber-900 space-y-0.5">
+								<p class="font-semibold">Combined stay charges:</p>
+								<p>Rm {priorStay.roomNumber} ({priorStay.checkInDate} → {priorStay.checkOutDate}): {priorStay.chargesFormatted}</p>
+								<p>This room ({booking.checkInDate} → {booking.checkOutDate}): check card for total</p>
+							</div>
+						{/if}
+						<form
+							method="POST"
+							action="?/checkOutBooking"
+							class="flex flex-col gap-2 w-full"
+							use:enhance={() => {
+								processing = true;
+								return async ({ update }) => {
+									processing = false;
+									confirmCheckOut = false;
+									open = false;
+									onClose?.();
+									await update();
+								};
+							}}
 						>
-							Check Out
-						</Button>
-					{:else}
-						<div class="flex flex-col gap-2 w-full">
-							{#if booking.movedFromBookingId && priorStay}
-								<div class="rounded bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs text-amber-900 space-y-0.5">
-									<p class="font-semibold">Combined stay charges:</p>
-									<p>Rm {priorStay.roomNumber} ({priorStay.checkInDate} → {priorStay.checkOutDate}): {priorStay.chargesFormatted}</p>
-									<p>This room ({booking.checkInDate} → {booking.checkOutDate}): check card for total</p>
-								</div>
-							{/if}
+							<input type="hidden" name="bookingId" value={booking.id} />
+							<textarea
+								name="checkoutNotes"
+								rows="2"
+								placeholder="Checkout notes (damage, issues, etc.) — optional"
+								class="w-full rounded border border-input bg-background px-2 py-1 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+							></textarea>
 						<div class="flex items-center gap-2">
 							<span class="text-muted-foreground text-xs">Confirm checkout?</span>
-							<form
-								method="POST"
-								action="?/checkOutBooking"
-								use:enhance={() => {
-									processing = true;
-									return async ({ update }) => {
-										processing = false;
-										confirmCheckOut = false;
-										open = false;
-										onClose?.();
-										await update();
-									};
-								}}
-							>
-								<input type="hidden" name="bookingId" value={booking.id} />
-								<Button type="submit" variant="default" size="sm" disabled={processing}>
-									{processing ? '…' : 'Yes, check out'}
-								</Button>
-							</form>
-							<Button variant="ghost" size="sm" onclick={resetConfirms}>No</Button>
+							<Button type="submit" variant="default" size="sm" disabled={processing}>
+								{processing ? '…' : 'Yes, check out'}
+							</Button>
+							<Button type="button" variant="ghost" size="sm" onclick={resetConfirms}>No</Button>
 						</div>
-					</div><!-- /flex-col combined checkout -->
-					{/if}
+						</form>
+				</div><!-- /flex-col combined checkout -->
+				{/if}
 				</div><!-- /flex-wrap checked_in actions -->
 
 			{:else if booking.status === 'cancelled'}

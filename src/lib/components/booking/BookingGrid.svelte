@@ -417,7 +417,18 @@
 				{HK_LABELS[s]}
 			</span>
 		{/each}
-		<span class="ml-auto opacity-60">Dot in cell corner · click room dot to cycle</span>
+		<span class="mx-2 text-border">|</span>
+	<span class="font-medium">Payment:</span>
+	<span class="flex items-center gap-1">
+		<span class="inline-block rounded bg-red-500/80 px-[3px] py-0.5 text-[8px] font-bold text-white">$?</span>Unpaid
+	</span>
+	<span class="flex items-center gap-1">
+		<span class="inline-block rounded bg-yellow-400/90 px-[3px] py-0.5 text-[8px] font-bold text-stone-900">½$</span>Partial
+	</span>
+	<span class="flex items-center gap-1">
+		<span class="inline-block rounded bg-green-500/70 px-[3px] py-0.5 text-[8px] font-bold text-white">✓$</span>Paid
+	</span>
+	<span class="ml-auto opacity-60">Dot in cell corner · click room dot to cycle</span>
 	</div>
 
 	<div class="overflow-x-auto">
@@ -491,7 +502,7 @@
 								todayDay() === span.day && !state ? 'ring-1 ring-inset ring-primary/30' : '',
 								!state ? 'hover:brightness-90' : ''
 							].join(' ')}
-							style="min-width:36px; width:36px; height:32px; background:{freeCellBg(room.roomTypeId, span.day, state)}"
+							style="min-width:36px; width:36px; height:38px; background:{freeCellBg(room.roomTypeId, span.day, state)}"
 							onmousedown={(e) => startDrag(e, room.id, span.day)}
 							onmouseenter={() => updateDrag(room.id, span.day)}
 							ontouchend={(e) => { e.preventDefault(); onCellTap(room.id, span.day); }}
@@ -515,7 +526,7 @@
 								<td
 									colspan={s.length}
 									class="border-border relative cursor-pointer border-b border-r p-0"
-									style="min-width:{s.length * 36}px; height:32px"
+									style="min-width:{s.length * 36}px; height:38px"
 									onmouseenter={() => updateDrag(room.id, s.day)}
 									onclick={() => !drag && !isBlocked && openDetail(s.booking, room)}
 								>
@@ -562,9 +573,18 @@
 											</span>
 										{/if}
 
-										{#if s.booking.status === 'checked_in'}
-											<span class="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-green-300"></span>
-										{/if}
+					{#if s.booking.status === 'checked_in'}
+										<span class="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-green-300"></span>
+									{/if}
+
+									<!-- Payment status badge -->
+									{#if s.booking.paymentStatus === 'unpaid'}
+										<span class="ml-auto shrink-0 rounded bg-red-500/80 px-[3px] py-0.5 text-[8px] font-bold leading-none text-white" title="Unpaid">$?</span>
+									{:else if s.booking.paymentStatus === 'partial'}
+										<span class="ml-auto shrink-0 rounded bg-yellow-400/90 px-[3px] py-0.5 text-[8px] font-bold leading-none text-stone-900" title="Partially paid">½$</span>
+									{:else if s.booking.paymentStatus === 'paid'}
+										<span class="ml-auto shrink-0 rounded bg-green-500/70 px-[3px] py-0.5 text-[8px] font-bold leading-none text-white" title="Paid">✓$</span>
+									{/if}
 
 										<!-- End-cap always visible via absolute position so overflow-hidden can't clip it -->
 										{#if s.overflowEnd}

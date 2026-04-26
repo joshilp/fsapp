@@ -31,6 +31,13 @@
 			.filter((li) => li.type === 'rate' || li.type === 'extra')
 			.reduce((s, li) => s + li.totalAmount, 0)
 	);
+	// Original night count and per-night rate (for auto-recalc)
+	const originalNights = $derived(Math.round(
+		(new Date(booking.checkOutDate).getTime() - new Date(booking.checkInDate).getTime()) / 86400000
+	));
+	const perNightCents = $derived(
+		existingRateTotal > 0 && originalNights > 0 ? existingRateTotal / originalNights : 0
+	);
 	// Dollar string for the editable input
 	let quotedTotal = $state(existingRateTotal > 0 ? (existingRateTotal / 100).toFixed(2) : '');
 	let rateOverridden = $state(false);
@@ -46,8 +53,19 @@
 		return d.toISOString().slice(0, 10);
 	}
 
+	function autoRecalcRate() {
+		if (rateOverridden || perNightCents === 0) return;
+		const n = nights();
+		if (n > 0) quotedTotal = ((perNightCents * n) / 100).toFixed(2);
+	}
+
 	function onCheckInChange() {
 		if (checkOut <= checkIn) checkOut = advanceDay(checkIn);
+		autoRecalcRate();
+	}
+
+	function onCheckOutChange() {
+		autoRecalcRate();
 	}
 </script>
 
@@ -99,7 +117,7 @@
 						<span class="text-muted-foreground font-normal">({nights()} night{nights() === 1 ? '' : 's'})</span>
 					{/if}
 				</Label>
-				<Input id="checkOut" name="checkOut" type="date" bind:value={checkOut} required />
+				<Input id="checkOut" name="checkOut" type="date" bind:value={checkOut} oninput={onCheckOutChange} required />
 			</div>
 		</div>
 
@@ -187,11 +205,15 @@
 					class="pl-6"
 				/>
 			</div>
-			{#if existingRateTotal === 0}
-				<p class="text-muted-foreground text-xs">No rate saved yet. Enter a total to set it.</p>
-			{:else if !rateOverridden}
-				<p class="text-muted-foreground text-xs">Current: ${(existingRateTotal / 100).toFixed(2)} — edit to change.</p>
-			{/if}
+		{#if existingRateTotal === 0}
+			<p class="text-muted-foreground text-xs">No rate saved yet. Enter a total to set it.</p>
+		{:else if !rateOverridden && perNightCents > 0}
+			<p class="text-muted-foreground text-xs">
+				Auto-adjusted for {nights()} nights × ${(perNightCents / 100).toFixed(2)}/night. Override to lock a custom price.
+			</p>
+		{:else if rateOverridden}
+			<p class="text-muted-foreground text-xs">Manual override — auto-recalc disabled.</p>
+		{/if}
 		</div>
 
 		<div class="flex justify-between pt-2">

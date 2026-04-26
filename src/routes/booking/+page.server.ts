@@ -237,6 +237,7 @@ export const actions: Actions = {
 		const fd = await request.formData();
 		const bookingId = (fd.get('bookingId') as string)?.trim();
 		if (!bookingId) return fail(400, { error: 'Missing bookingId' });
+		const checkoutNotes = ((fd.get('checkoutNotes') as string) ?? '').trim() || null;
 
 		const booking = await db.query.bookings.findFirst({
 			where: eq(bookings.id, bookingId),
@@ -245,7 +246,7 @@ export const actions: Actions = {
 
 		await db
 			.update(bookings)
-			.set({ status: 'checked_out', checkedOutAt: new Date() })
+			.set({ status: 'checked_out', checkedOutAt: new Date(), checkoutNotes })
 			.where(eq(bookings.id, bookingId));
 
 		if (booking?.roomId) {

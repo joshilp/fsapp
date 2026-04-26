@@ -48,7 +48,7 @@
 	</div>
 </div>
 
-{#if allUnassigned.length > 0}
+{#if allUnassigned.length > 0 && data.viewMode !== 'today'}
 	<div id="unassigned">
 		<UnassignedPanel bookings={allUnassigned} today={data.today} />
 	</div>

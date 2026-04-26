@@ -1,6 +1,6 @@
 import { and, eq, gt, gte, inArray, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from './db/index';
-import { bookings, ccStaging, properties, rateSeasons, rooms } from './db/schema';
+import { bookingLineItems, bookings, ccStaging, paymentEvents, properties, rateSeasons, rooms } from './db/schema';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +20,9 @@ export type BookingSummary = {
 	// Room-move chain (null when booking was not part of a move)
 	movedFromBookingId: string | null;
 	movedToBookingId: string | null;
+	// Payment status derived from paymentEvents vs line item charges
+	paymentStatus: 'unpaid' | 'partial' | 'paid' | null;
+	lastPaymentMethod: string | null; // most recent non-refund method
 };
 
 export type FreeSpan = { type: 'free'; day: number };
@@ -141,6 +144,51 @@ export async function getGridData(
 			: [];
 	const ccByBooking = new Map(ccRows.map((r) => [r.bookingId, r.lastFour]));
 
+	// Payment status — batch fetch charges and payments for all bookings
+	const [chargeRows, paymentRows] =
+		bookingIds.length > 0
+			? await Promise.all([
+					db.query.bookingLineItems.findMany({
+						where: and(
+							inArray(bookingLineItems.bookingId, bookingIds),
+							ne(bookingLineItems.type, 'deposit')
+						),
+						columns: { bookingId: true, type: true, totalAmount: true }
+					}),
+					db.query.paymentEvents.findMany({
+						where: inArray(paymentEvents.bookingId, bookingIds),
+						columns: { bookingId: true, type: true, amount: true, paymentMethod: true, chargedAt: true }
+					})
+				])
+			: [[], []];
+
+	// Total charges per booking (rate + extra + tax; excludes deposit line items)
+	const chargesByBooking = new Map<string, number>();
+	for (const li of chargeRows) {
+		chargesByBooking.set(li.bookingId, (chargesByBooking.get(li.bookingId) ?? 0) + li.totalAmount);
+	}
+	// Net payments per booking (deposits + final charges − refunds), and last method
+	const paidByBooking = new Map<string, number>();
+	const lastMethodByBooking = new Map<string, string>();
+	// Sort by chargedAt so last entry wins for method
+	const sortedPayments = [...paymentRows].sort(
+		(a, b) => ((a.chargedAt?.getTime() ?? 0) - (b.chargedAt?.getTime() ?? 0))
+	);
+	for (const pe of sortedPayments) {
+		const delta = pe.type === 'refund' ? -pe.amount : pe.amount;
+		paidByBooking.set(pe.bookingId, (paidByBooking.get(pe.bookingId) ?? 0) + delta);
+		if (pe.type !== 'refund') lastMethodByBooking.set(pe.bookingId, pe.paymentMethod);
+	}
+
+	function getPaymentStatus(bookingId: string): 'unpaid' | 'partial' | 'paid' | null {
+		const charged = chargesByBooking.get(bookingId) ?? 0;
+		if (charged === 0) return null; // no charges recorded yet
+		const paid = paidByBooking.get(bookingId) ?? 0;
+		if (paid <= 0) return 'unpaid';
+		if (paid >= charged) return 'paid';
+		return 'partial';
+	}
+
 	// Rate seasons overlapping this month (for grid cell pricing colours)
 	const monthSeasons = await db.query.rateSeasons.findMany({
 		where: and(
@@ -237,7 +285,9 @@ export async function getGridData(
 					notes: b.notes,
 					ccLastFour: ccByBooking.get(b.id) ?? null,
 					movedFromBookingId: b.movedFromBookingId ?? null,
-					movedToBookingId: b.movedToBookingId ?? null
+					movedToBookingId: b.movedToBookingId ?? null,
+					paymentStatus: getPaymentStatus(b.id),
+					lastPaymentMethod: lastMethodByBooking.get(b.id) ?? null
 				}
 			});
 			day += length;

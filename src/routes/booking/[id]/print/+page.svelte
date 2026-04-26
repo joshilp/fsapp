@@ -15,9 +15,16 @@
 
 	const subtotal = $derived(rateItems.reduce((s, li) => s + li.totalAmount, 0));
 	const taxTotal = $derived(taxItems.reduce((s, li) => s + li.totalAmount, 0));
-	const depositTotal = $derived(depositItems.reduce((s, li) => s + li.totalAmount, 0)); // negative
+	const depositTotal = $derived(depositItems.reduce((s, li) => s + li.totalAmount, 0)); // negative (legacy line items)
 	const grandTotal = $derived(subtotal + taxTotal);
-	const balanceDue = $derived(grandTotal + depositTotal);
+
+	// Payments from paymentEvents (deposits + final charges − refunds)
+	const netPaymentsCents = $derived(
+		(booking.paymentEvents ?? []).reduce((s, pe) => s + (pe.type === 'refund' ? -pe.amount : pe.amount), 0)
+	);
+	// Prefer paymentEvents if any exist; fall back to legacy deposit line items
+	const effectivePaidCents = $derived(netPaymentsCents > 0 ? netPaymentsCents : -depositTotal);
+	const balanceDue = $derived(Math.max(0, grandTotal - effectivePaidCents));
 
 	function fmt(cents: number) {
 		return (Math.abs(cents) / 100).toFixed(2);
@@ -262,27 +269,53 @@
 						<div class="border-t border-gray-800 pt-0.5"></div>
 					</td>
 				</tr>
+			<tr>
+				<td class="py-0.5 font-semibold">Total</td>
+				<td class="py-0.5 text-right font-semibold tabular-nums">${fmt(grandTotal)}</td>
+			</tr>
+			{#if (booking.paymentEvents ?? []).length > 0}
+				{#each booking.paymentEvents ?? [] as pe}
+					<tr>
+						<td class="py-0.5 text-gray-600 capitalize">
+							{pe.type === 'refund' ? 'Refund' : pe.type === 'deposit' ? 'Deposit received' : 'Payment received'}
+							{#if pe.paymentMethod}· <span class="uppercase text-[10px]">{pe.paymentMethod}</span>{/if}
+						</td>
+						<td class="py-0.5 text-right tabular-nums text-gray-600">
+							{pe.type === 'refund' ? '+' : '–'}${fmt(pe.amount)}
+						</td>
+					</tr>
+				{/each}
 				<tr>
-					<td class="py-0.5 font-semibold">Total</td>
-					<td class="py-0.5 text-right font-semibold tabular-nums">${fmt(grandTotal)}</td>
+					<td colspan="2" class="py-0.5">
+						<div class="border-t border-gray-800 pt-0.5"></div>
+					</td>
 				</tr>
+				<tr>
+					<td class="py-0.5 font-bold">Balance Due</td>
+					<td class="py-0.5 text-right font-bold tabular-nums">${fmt(balanceDue)}</td>
+				</tr>
+			{:else if depositItems.length > 0}
 				{#each depositItems as li}
 					<tr>
 						<td class="py-0.5 text-gray-600">{li.label}</td>
 						<td class="py-0.5 text-right tabular-nums text-gray-600">–${fmt(Math.abs(li.totalAmount))}</td>
 					</tr>
 				{/each}
-				{#if depositItems.length > 0}
-					<tr>
-						<td colspan="2" class="py-0.5">
-							<div class="border-t border-gray-800 pt-0.5"></div>
-						</td>
-					</tr>
-					<tr>
-						<td class="py-0.5 font-bold">Balance Due</td>
-						<td class="py-0.5 text-right font-bold tabular-nums">${fmt(Math.max(0, balanceDue))}</td>
-					</tr>
-				{/if}
+				<tr>
+					<td colspan="2" class="py-0.5">
+						<div class="border-t border-gray-800 pt-0.5"></div>
+					</td>
+				</tr>
+				<tr>
+					<td class="py-0.5 font-bold">Balance Due</td>
+					<td class="py-0.5 text-right font-bold tabular-nums">${fmt(balanceDue)}</td>
+				</tr>
+			{:else}
+				<tr>
+					<td class="py-0.5 text-gray-500 text-xs italic">Balance due on arrival</td>
+					<td class="py-0.5 text-right font-semibold tabular-nums">${fmt(grandTotal)}</td>
+				</tr>
+			{/if}
 			</tbody>
 		</table>
 	{:else}

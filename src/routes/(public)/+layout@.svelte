@@ -1,5 +1,5 @@
 <script lang="ts">
-	import '../../routes/layout.css';
+	import '../layout.css';
 	import type { LayoutData } from './$types';
 
 	let { children, data }: { children: import('svelte').Snippet; data: LayoutData } = $props();
