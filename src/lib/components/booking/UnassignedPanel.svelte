@@ -118,6 +118,13 @@
 						{/if}
 						<span class="text-xs text-stone-400">·</span>
 						<span class="text-xs text-stone-500">{fmtDate(b.checkInDate)} → {fmtDate(b.checkOutDate)} ({nights(b)}n)</span>
+						{#if b.quotedTotalCents}
+							<span class="text-xs font-semibold text-emerald-700">
+								Quoted ${(b.quotedTotalCents / 100).toFixed(0)}
+							</span>
+						{:else}
+							<span class="text-xs text-amber-600">No rate quoted</span>
+						{/if}
 					</div>
 					<div class="flex items-center gap-2 mt-0.5">
 						<span class="text-xs text-stone-400">{b.propertyName}</span>
@@ -145,11 +152,24 @@
 			<div class="flex flex-col gap-4 p-1">
 				<!-- Summary -->
 				<div class="rounded-lg bg-muted/30 border border-border px-3 py-2.5 text-sm space-y-0.5">
-					<p><strong>{assignBooking.guestName}</strong> · {assignBooking.propertyName}</p>
-					<p class="text-muted-foreground text-xs">
-						{fmtDate(assignBooking.checkInDate)} → {fmtDate(assignBooking.checkOutDate)} · {nights(assignBooking)}n
-						{#if assignBooking.requestedTypeName}· Requested: {assignBooking.requestedTypeName}{/if}
-					</p>
+					<div class="flex items-start justify-between gap-2">
+						<div>
+							<p><strong>{assignBooking.guestName}</strong> · {assignBooking.propertyName}</p>
+							<p class="text-muted-foreground text-xs">
+								{fmtDate(assignBooking.checkInDate)} → {fmtDate(assignBooking.checkOutDate)} · {nights(assignBooking)}n
+								{#if assignBooking.requestedTypeName}· Requested: {assignBooking.requestedTypeName}{/if}
+							</p>
+						</div>
+						{#if assignBooking.quotedTotalCents}
+							<div class="text-right shrink-0">
+								<p class="text-[10px] text-muted-foreground">Quoted to guest</p>
+								<p class="font-bold text-emerald-700">${(assignBooking.quotedTotalCents / 100).toFixed(0)}</p>
+								<p class="text-[10px] text-muted-foreground">before tax</p>
+							</div>
+						{:else}
+							<span class="text-xs text-amber-600 shrink-0">No rate saved</span>
+						{/if}
+					</div>
 				</div>
 
 				<!-- Type filter chips -->

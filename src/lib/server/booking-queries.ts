@@ -289,13 +289,13 @@ export type UnassignedBooking = {
 	numChildren: number;
 	notes: string | null;
 	publicToken: string | null;
+	quotedTotalCents: number | null; // rate line total saved at booking time
 };
 
 export async function getUnassignedBookings(propertyId: string): Promise<UnassignedBooking[]> {
 	const rows = await db.query.bookings.findMany({
 		where: and(
 			eq(bookings.propertyId, propertyId),
-			// roomId IS NULL — Drizzle: use sql`` helper
 			sql`${bookings.roomId} IS NULL`,
 			ne(bookings.status, 'cancelled'),
 			ne(bookings.status, 'checked_out')
@@ -304,7 +304,8 @@ export async function getUnassignedBookings(propertyId: string): Promise<Unassig
 			guest: { columns: { name: true, email: true } },
 			channel: { columns: { name: true } },
 			requestedRoomType: { columns: { name: true, category: true } },
-			property: { columns: { name: true } }
+			property: { columns: { name: true } },
+			lineItems: { columns: { type: true, totalAmount: true } }
 		},
 		columns: {
 			id: true, propertyId: true, status: true,
@@ -314,22 +315,28 @@ export async function getUnassignedBookings(propertyId: string): Promise<Unassig
 		orderBy: (b, { asc }) => [asc(b.checkInDate)]
 	});
 
-	return rows.map(r => ({
-		id: r.id,
-		propertyId: r.propertyId,
-		propertyName: r.property?.name ?? r.propertyId,
-		requestedTypeName: r.requestedRoomType?.name ?? null,
-		requestedTypeCategory: r.requestedRoomType?.category ?? null,
-		guestName: r.guest?.name ?? null,
-		guestEmail: r.guest?.email ?? null,
-		channelName: r.channel?.name ?? null,
-		checkInDate: r.checkInDate,
-		checkOutDate: r.checkOutDate,
-		numAdults: r.numAdults,
-		numChildren: r.numChildren,
-		notes: r.notes,
-		publicToken: r.publicToken
-	}));
+	return rows.map(r => {
+		const quotedTotal = r.lineItems
+			.filter(li => li.type === 'rate')
+			.reduce((sum, li) => sum + li.totalAmount, 0);
+		return {
+			id: r.id,
+			propertyId: r.propertyId,
+			propertyName: r.property?.name ?? r.propertyId,
+			requestedTypeName: r.requestedRoomType?.name ?? null,
+			requestedTypeCategory: r.requestedRoomType?.category ?? null,
+			guestName: r.guest?.name ?? null,
+			guestEmail: r.guest?.email ?? null,
+			channelName: r.channel?.name ?? null,
+			checkInDate: r.checkInDate,
+			checkOutDate: r.checkOutDate,
+			numAdults: r.numAdults,
+			numChildren: r.numChildren,
+			notes: r.notes,
+			publicToken: r.publicToken,
+			quotedTotalCents: quotedTotal > 0 ? quotedTotal : null
+		};
+	});
 }
 
 // ─── Today data ───────────────────────────────────────────────────────────────
@@ -394,19 +401,20 @@ export async function getTodayData(today: string): Promise<{
 			},
 			orderBy: (b, { asc }) => [asc(b.checkInDate)]
 		}),
-		// Unassigned bookings arriving today or upcoming (all properties)
+		// Unassigned bookings arriving today or overdue (all properties)
 		db.query.bookings.findMany({
 			where: and(
 				sql`${bookings.roomId} IS NULL`,
 				ne(bookings.status, 'cancelled'),
 				ne(bookings.status, 'checked_out'),
-				lte(bookings.checkInDate, today) // arriving today or overdue
+				lte(bookings.checkInDate, today)
 			),
 			with: {
 				guest: { columns: { name: true, email: true } },
 				channel: { columns: { name: true } },
 				requestedRoomType: { columns: { name: true, category: true } },
-				property: { columns: { name: true } }
+				property: { columns: { name: true } },
+				lineItems: { columns: { type: true, totalAmount: true } }
 			},
 			columns: {
 				id: true, propertyId: true, status: true,
@@ -433,22 +441,28 @@ export async function getTodayData(today: string): Promise<{
 		notes: r.notes
 	});
 
-	const unassigned: UnassignedBooking[] = unassignedRows.map(r => ({
-		id: r.id,
-		propertyId: r.propertyId,
-		propertyName: r.property?.name ?? r.propertyId,
-		requestedTypeName: r.requestedRoomType?.name ?? null,
-		requestedTypeCategory: r.requestedRoomType?.category ?? null,
-		guestName: r.guest?.name ?? null,
-		guestEmail: r.guest?.email ?? null,
-		channelName: r.channel?.name ?? null,
-		checkInDate: r.checkInDate,
-		checkOutDate: r.checkOutDate,
-		numAdults: r.numAdults,
-		numChildren: r.numChildren,
-		notes: r.notes,
-		publicToken: r.publicToken
-	}));
+	const unassigned: UnassignedBooking[] = unassignedRows.map(r => {
+		const quotedTotal = r.lineItems
+			.filter(li => li.type === 'rate')
+			.reduce((sum, li) => sum + li.totalAmount, 0);
+		return {
+			id: r.id,
+			propertyId: r.propertyId,
+			propertyName: r.property?.name ?? r.propertyId,
+			requestedTypeName: r.requestedRoomType?.name ?? null,
+			requestedTypeCategory: r.requestedRoomType?.category ?? null,
+			guestName: r.guest?.name ?? null,
+			guestEmail: r.guest?.email ?? null,
+			channelName: r.channel?.name ?? null,
+			checkInDate: r.checkInDate,
+			checkOutDate: r.checkOutDate,
+			numAdults: r.numAdults,
+			numChildren: r.numChildren,
+			notes: r.notes,
+			publicToken: r.publicToken,
+			quotedTotalCents: quotedTotal > 0 ? quotedTotal : null
+		};
+	});
 
 	return {
 		arrivals: rows

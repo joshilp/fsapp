@@ -464,6 +464,11 @@
 					<input type="hidden" name="numAdults" value={numAdults} />
 					<input type="hidden" name="numChildren" value={numChildren} />
 					<input type="hidden" name="notes" value={guestNotes} />
+					<!-- Quoted rate — locked in at time of booking so operator always sees what guest was promised -->
+					{#if rateQuote && rateQuote.subtotalCents > 0}
+						<input type="hidden" name="quotedTotalCents" value={rateQuote.subtotalCents} />
+						<input type="hidden" name="quotedNights" value={nights} />
+					{/if}
 
 					<button type="submit" disabled={submitting}
 						class="w-full rounded-xl bg-amber-500 py-4 text-sm font-bold text-stone-900 hover:bg-amber-400 transition-colors disabled:opacity-60">

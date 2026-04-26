@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { eq, and, lt, gt, ne } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { bookings, bookingChannels, guests, rooms } from '$lib/server/db/schema';
+import { bookings, bookingChannels, bookingLineItems, guests, rooms } from '$lib/server/db/schema';
 
 function randomToken(len = 8): string {
 	const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
@@ -71,6 +71,8 @@ export const actions: Actions = {
 		const numAdults = parseInt(get('numAdults') || '1', 10);
 		const numChildren = parseInt(get('numChildren') || '0', 10);
 		const notes = get('notes');
+		const quotedTotalCents = parseInt(get('quotedTotalCents') || '0', 10);
+		const quotedNights = parseInt(get('quotedNights') || '1', 10);
 
 		// Validation
 		const today = new Date().toISOString().slice(0, 10);
@@ -155,6 +157,20 @@ export const actions: Actions = {
 			notes: notes || null,
 			publicToken: token
 		}).returning({ id: bookings.id, publicToken: bookings.publicToken });
+
+		// Save quoted rate as a line item — locked in at booking time so operator
+		// always knows what the guest was shown, regardless of room assigned later
+		if (quotedTotalCents > 0 && quotedNights > 0) {
+			await db.insert(bookingLineItems).values({
+				bookingId: booking.id,
+				type: 'rate',
+				label: `Room rate · ${quotedNights} night${quotedNights === 1 ? '' : 's'} (online booking)`,
+				quantity: quotedNights,
+				unitAmount: Math.round(quotedTotalCents / quotedNights),
+				totalAmount: quotedTotalCents,
+				sortOrder: 0
+			});
+		}
 
 		return { success: true, token: booking.publicToken };
 	}
