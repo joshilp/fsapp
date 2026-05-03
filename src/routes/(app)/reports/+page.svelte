@@ -24,6 +24,15 @@
 				class="rounded border border-input px-3 py-1.5 text-sm hover:bg-muted">Today</a>
 			<a href="?month={data.nextMonthParam}"
 				class="rounded border border-input px-3 py-1.5 text-sm hover:bg-muted">Next →</a>
+			<a
+				href="/api/reports/export?month={data.year}-{String(data.month).padStart(2,'0')}"
+				download
+				class="rounded border border-input px-3 py-1.5 text-sm hover:bg-muted flex items-center gap-1.5"
+				title="Download CSV for {data.monthLabel}"
+			>
+				<svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12l-4-4h2.5V3h3v5H12L8 12zm-6 2v-1.5h12V14H2z"/></svg>
+				CSV
+			</a>
 		</div>
 	</div>
 

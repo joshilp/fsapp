@@ -385,7 +385,7 @@
 	</div>
 
 	<!-- Legend bar -->
-	<div class="border-border flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-3 py-1 text-[10px] text-muted-foreground">
+	<div class="border-border flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-3 py-1 text-xs text-muted-foreground">
 		<!-- Channel colours -->
 		<span class="font-medium">Booking source:</span>
 		<span class="flex items-center gap-1">
@@ -420,13 +420,13 @@
 		<span class="mx-2 text-border">|</span>
 	<span class="font-medium">Payment:</span>
 	<span class="flex items-center gap-1">
-		<span class="inline-block rounded bg-red-500/80 px-[3px] py-0.5 text-[8px] font-bold text-white">$?</span>Unpaid
+		<span class="inline-block rounded bg-red-500/80 px-[3px] py-0.5 text-[9px] font-bold text-white">$?</span>Unpaid
 	</span>
 	<span class="flex items-center gap-1">
-		<span class="inline-block rounded bg-yellow-400/90 px-[3px] py-0.5 text-[8px] font-bold text-stone-900">½$</span>Partial
+		<span class="inline-block rounded bg-yellow-400/90 px-[3px] py-0.5 text-[9px] font-bold text-stone-900">½$</span>Partial
 	</span>
 	<span class="flex items-center gap-1">
-		<span class="inline-block rounded bg-green-500/70 px-[3px] py-0.5 text-[8px] font-bold text-white">✓$</span>Paid
+		<span class="inline-block rounded bg-green-500/70 px-[3px] py-0.5 text-[9px] font-bold text-white">✓$</span>Paid
 	</span>
 	<span class="ml-auto opacity-60">Dot in cell corner · click room dot to cycle</span>
 	</div>
@@ -436,8 +436,8 @@
 			<thead>
 				<tr>
 				<th
-					class="border-border bg-background sticky left-0 z-20 border-b border-r px-2 py-1.5 text-left font-medium whitespace-nowrap"
-					style="min-width:144px; width:144px"
+				class="border-border bg-background sticky left-0 z-20 border-b border-r px-2 py-1.5 text-left font-medium whitespace-nowrap"
+				style="min-width:172px; width:172px"
 				>Room</th>
 					{#each days as day}
 						<th
@@ -446,10 +446,10 @@
 								isWeekend(day) ? 'bg-muted/30' : '',
 								todayDay() === day ? 'bg-primary/10 text-primary' : 'text-muted-foreground'
 							].join(' ')}
-							style="min-width:36px; width:36px"
+							style="min-width:48px; width:48px"
 						>
 							<div class="flex flex-col items-center py-0.5 leading-none">
-								<span class="text-[10px]">{dayOfWeek(day)}</span>
+								<span class="text-xs">{dayOfWeek(day)}</span>
 								<span class={todayDay() === day ? 'font-bold' : ''}>{day}</span>
 							</div>
 						</th>
@@ -463,13 +463,13 @@
 			<tr class="group">
 				<!-- Room info: number + type name + HK dot + ··· block; bed slots below -->
 				<td
-					class="border-border bg-background sticky left-0 z-10 border-b border-r px-2 py-0.5"
-					style="min-width:144px; width:144px"
+				class="border-border bg-background sticky left-0 z-10 border-b border-r px-2 py-0.5"
+				style="min-width:172px; width:172px"
 				>
 					<!-- Line 1: number · type name · HK dot · ··· -->
 					<div class="flex items-center gap-1 leading-none">
 						<span class="font-mono font-bold text-sm">{room.roomNumber}</span>
-					<span class="text-muted-foreground/70 text-[11px] truncate flex-1 leading-none">
+					<span class="text-muted-foreground/70 text-xs truncate flex-1 leading-none">
 						{room.roomTypeName ?? ''}
 					</span>
 						<button
@@ -481,13 +481,13 @@
 						<button
 							title="Block room for maintenance"
 							onclick={(e) => { e.stopPropagation(); openBlock(room); }}
-							class="shrink-0 text-[11px] leading-none px-0.5 rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors"
+							class="shrink-0 text-xs leading-none px-0.5 rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors"
 						>···</button>
 					</div>
 					<!-- Line 2: fixed 6-slot bed grid [BR · K · Q · D · HB · Kit] -->
-					<div class="mt-0.5 grid leading-none" style="grid-template-columns:repeat(6,1fr)">
-					{#each bedSlots(room) as slot}
-						<span class="text-[11px] font-mono text-muted-foreground/70">{slot}</span>
+				<div class="mt-0.5 grid leading-none" style="grid-template-columns:repeat(6,1fr)">
+				{#each bedSlots(room) as slot}
+					<span class="text-xs font-mono text-muted-foreground/70">{slot}</span>
 					{/each}
 					</div>
 				</td>
@@ -502,7 +502,7 @@
 								todayDay() === span.day && !state ? 'ring-1 ring-inset ring-primary/30' : '',
 								!state ? 'hover:brightness-90' : ''
 							].join(' ')}
-							style="min-width:36px; width:36px; height:38px; background:{freeCellBg(room.roomTypeId, span.day, state)}"
+							style="min-width:48px; width:48px; height:50px; background:{freeCellBg(room.roomTypeId, span.day, state)}"
 							onmousedown={(e) => startDrag(e, room.id, span.day)}
 							onmouseenter={() => updateDrag(room.id, span.day)}
 							ontouchend={(e) => { e.preventDefault(); onCellTap(room.id, span.day); }}
@@ -514,7 +514,7 @@
 							></span>
 							<!-- Nightly rate — centered, tinted to season colour -->
 							{#if rate !== null}
-								<span class="pointer-events-none absolute inset-0 flex items-center justify-center text-[8px] font-medium leading-none select-none text-foreground/45">
+								<span class="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-medium leading-none select-none text-foreground/45">
 									${Math.round(rate / 100)}
 								</span>
 							{/if}
@@ -526,7 +526,7 @@
 								<td
 									colspan={s.length}
 									class="border-border relative cursor-pointer border-b border-r p-0"
-									style="min-width:{s.length * 36}px; height:38px"
+									style="min-width:{s.length * 48}px; height:50px"
 									onmouseenter={() => updateDrag(room.id, s.day)}
 									onclick={() => !drag && !isBlocked && openDetail(s.booking, room)}
 								>
@@ -540,8 +540,8 @@
 											class="relative flex h-full items-center overflow-hidden px-1.5 bg-slate-400 text-white opacity-80"
 											style="border-radius:4px; background-image:repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(0,0,0,.08) 4px,rgba(0,0,0,.08) 8px)"
 										>
-											<span class="mr-1 text-[11px]">🔧</span>
-											<span class="min-w-0 truncate text-[11px] font-medium leading-none">
+										<span class="mr-1 text-xs">🔧</span>
+										<span class="min-w-0 truncate text-xs font-medium leading-none">
 												{s.booking.notes ?? 'Maintenance'}
 											</span>
 										</div>
@@ -563,12 +563,12 @@
 											<span class="mr-0.5 shrink-0 opacity-70">›</span>
 										{/if}
 
-										<span class="min-w-0 truncate text-[11px] font-medium leading-none">
-											{s.booking.guestName ?? '—'}
-										</span>
+									<span class="min-w-0 truncate text-xs font-medium leading-none">
+										{s.booking.guestName ?? '—'}
+									</span>
 
-										{#if s.booking.channelName && s.booking.channelName !== 'Direct'}
-											<span class="ml-1 shrink-0 rounded bg-black/20 px-1 py-0.5 text-[9px] font-bold uppercase leading-none">
+									{#if s.booking.channelName && s.booking.channelName !== 'Direct'}
+										<span class="ml-1 shrink-0 rounded bg-black/20 px-1 py-0.5 text-[10px] font-bold uppercase leading-none">
 												{s.booking.channelName === 'Expedia' ? 'E' : 'B'}
 											</span>
 										{/if}
@@ -578,20 +578,20 @@
 									{/if}
 
 									<!-- Payment status badge -->
-									{#if s.booking.paymentStatus === 'unpaid'}
-										<span class="ml-auto shrink-0 rounded bg-red-500/80 px-[3px] py-0.5 text-[8px] font-bold leading-none text-white" title="Unpaid">$?</span>
-									{:else if s.booking.paymentStatus === 'partial'}
-										<span class="ml-auto shrink-0 rounded bg-yellow-400/90 px-[3px] py-0.5 text-[8px] font-bold leading-none text-stone-900" title="Partially paid">½$</span>
-									{:else if s.booking.paymentStatus === 'paid'}
-										<span class="ml-auto shrink-0 rounded bg-green-500/70 px-[3px] py-0.5 text-[8px] font-bold leading-none text-white" title="Paid">✓$</span>
-									{/if}
+								{#if s.booking.paymentStatus === 'unpaid'}
+									<span class="ml-auto shrink-0 rounded bg-red-500/80 px-[3px] py-0.5 text-[10px] font-bold leading-none text-white" title="Unpaid">$?</span>
+								{:else if s.booking.paymentStatus === 'partial'}
+									<span class="ml-auto shrink-0 rounded bg-yellow-400/90 px-[3px] py-0.5 text-[10px] font-bold leading-none text-stone-900" title="Partially paid">½$</span>
+								{:else if s.booking.paymentStatus === 'paid'}
+									<span class="ml-auto shrink-0 rounded bg-green-500/70 px-[3px] py-0.5 text-[10px] font-bold leading-none text-white" title="Paid">✓$</span>
+								{/if}
 
 										<!-- End-cap always visible via absolute position so overflow-hidden can't clip it -->
-										{#if s.overflowEnd}
-											<span class="absolute right-0.5 top-1/2 -translate-y-1/2 text-[9px] font-semibold opacity-80">›</span>
-										{:else}
-											<span class="absolute right-0.5 top-1/2 -translate-y-1/2 opacity-70">‹</span>
-										{/if}
+									{#if s.overflowEnd}
+										<span class="absolute right-0.5 top-1/2 -translate-y-1/2 text-[11px] font-semibold opacity-80">›</span>
+									{:else}
+										<span class="absolute right-0.5 top-1/2 -translate-y-1/2 opacity-70">‹</span>
+									{/if}
 									</div>
 									{/if}
 								</td>

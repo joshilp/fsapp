@@ -29,6 +29,102 @@
 
 	let { open = $bindable(false), channels, users, currentUserId, today }: Props = $props();
 
+	// ─── OTA Email Parser ─────────────────────────────────────────────────────
+
+	let emailPasteOpen = $state(false);
+	let emailPasteText = $state('');
+	let parseResult = $state<string | null>(null);
+
+	function parseOtaEmail() {
+		const txt = emailPasteText;
+		parseResult = null;
+		const found: string[] = [];
+
+		// ─── Guest name ───────────────────────────────────────────────────────
+		// Booking.com: "Dear John Smith,"  /  "Guest: John Smith"
+		// Expedia: "Traveler name: John Smith"  / "for John Smith"
+		const namePatterns = [
+			/(?:Dear|Hi|Hello)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/,
+			/(?:Guest|Traveler|Traveller|Name|Guest name)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/i,
+			/Booking for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/i,
+		];
+		for (const p of namePatterns) {
+			const m = txt.match(p);
+			if (m) { guestName = m[1].trim(); found.push('name'); break; }
+		}
+
+		// ─── Dates ────────────────────────────────────────────────────────────
+		// Try ISO: YYYY-MM-DD
+		const isoDatePairs = [...txt.matchAll(/(\d{4}-\d{2}-\d{2})/g)].map(m => m[1]);
+		if (isoDatePairs.length >= 2) {
+			const sorted = isoDatePairs.sort();
+			checkIn = sorted[0];
+			checkOut = sorted[1];
+			found.push('dates');
+		} else {
+			// Booking.com style: "Arrival: Wednesday, 14 May 2025" or "Check-in: May 14, 2025"
+			const months: Record<string,string> = {
+				january:'01',february:'02',march:'03',april:'04',may:'05',june:'06',
+				july:'07',august:'08',september:'09',october:'10',november:'11',december:'12'
+			};
+			const datePattern = /(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})/gi;
+			const altPattern = /(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}),?\s+(\d{4})/gi;
+			const parsedDates: string[] = [];
+			let m;
+			const re1 = new RegExp(datePattern.source, 'gi');
+			while ((m = re1.exec(txt)) !== null) {
+				const mo = months[m[2].toLowerCase()];
+				parsedDates.push(`${m[3]}-${mo}-${m[1].padStart(2,'0')}`);
+			}
+			const re2 = new RegExp(altPattern.source, 'gi');
+			while ((m = re2.exec(txt)) !== null) {
+				const mo = months[m[1].toLowerCase()];
+				parsedDates.push(`${m[3]}-${mo}-${m[2].padStart(2,'0')}`);
+			}
+			if (parsedDates.length >= 2) {
+				const sorted = [...new Set(parsedDates)].sort();
+				checkIn = sorted[0];
+				checkOut = sorted[1];
+				found.push('dates');
+			}
+		}
+
+		// ─── Phone ────────────────────────────────────────────────────────────
+		const phoneMatch = txt.match(/(?:Phone|Mobile|Tel|Contact)[:\s]+(\+?[\d\s\-().]{7,20})/i)
+			?? txt.match(/(\+1[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4})/);
+		if (phoneMatch) { guestPhone = phoneMatch[1].trim(); found.push('phone'); }
+
+		// ─── Confirmation # ───────────────────────────────────────────────────
+		const refPatterns = [
+			/(?:Confirmation|Booking|Reservation|Reference)\s*(?:number|#|no\.?|code)[:\s]+([A-Z0-9\-]{4,20})/i,
+			/BDC[-\s]?(\d{8,12})/i,
+			/Itinerary\s*#?[:\s]+(\d{8,12})/i,
+		];
+		for (const p of refPatterns) {
+			const m = txt.match(p);
+			if (m) { otaConfirmation = m[1].trim(); found.push('ref'); break; }
+		}
+
+		// ─── OTA channel ─────────────────────────────────────────────────────
+		if (/booking\.com/i.test(txt)) {
+			const bc = channels.find(c => /booking\.com/i.test(c.name));
+			if (bc) otaChannelId = bc.id;
+		} else if (/expedia/i.test(txt)) {
+			const ex = channels.find(c => /expedia/i.test(c.name));
+			if (ex) otaChannelId = ex.id;
+		} else if (/airbnb/i.test(txt)) {
+			const ab = channels.find(c => /airbnb/i.test(c.name));
+			if (ab) otaChannelId = ab.id;
+		}
+
+		if (found.length === 0) {
+			parseResult = 'Could not extract any details — check the format and try again.';
+		} else {
+			parseResult = `Filled in: ${found.join(', ')}. Review the fields below and adjust if needed.`;
+			emailPasteOpen = false;
+		}
+	}
+
 	// ─── Step ─────────────────────────────────────────────────────────────────
 
 	type Step = 'details' | 'rooms' | 'confirm';
@@ -166,6 +262,9 @@
 		rateQuote = null;
 		quotedTotal = '';
 		totalOverridden = false;
+		emailPasteOpen = false;
+		emailPasteText = '';
+		parseResult = null;
 	}
 
 	$effect(() => {
@@ -186,6 +285,35 @@
 
 			<!-- ── Step 1: Details ──────────────────────────────────────────── -->
 			{#if step === 'details'}
+				<!-- Email paste quick-fill -->
+				<div class="rounded-lg border border-border bg-muted/30">
+					<button
+						type="button"
+						onclick={() => { emailPasteOpen = !emailPasteOpen; }}
+						class="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+					>
+						<span>Paste confirmation email to auto-fill</span>
+						<span class="text-muted-foreground text-xs">{emailPasteOpen ? '▲ hide' : '▼ show'}</span>
+					</button>
+					{#if emailPasteOpen}
+						<div class="border-t border-border px-3 pb-3 pt-2 space-y-2">
+							<p class="text-xs text-muted-foreground">Paste the full email body from Booking.com, Expedia, or Airbnb. The parser will try to extract guest name, dates, phone, and confirmation #.</p>
+							<textarea
+								rows="6"
+								bind:value={emailPasteText}
+								placeholder="Paste email text here…"
+								class="w-full rounded border border-input bg-background px-3 py-2 text-xs font-mono leading-relaxed resize-y"
+							></textarea>
+							{#if parseResult}
+								<p class={parseResult.startsWith('Could') ? 'text-destructive text-xs' : 'text-xs text-emerald-700 dark:text-emerald-400'}>{parseResult}</p>
+							{/if}
+							<Button onclick={parseOtaEmail} variant="secondary" size="sm" class="w-full">
+								Parse &amp; Auto-fill
+							</Button>
+						</div>
+					{/if}
+				</div>
+
 				<!-- Channel -->
 				<div>
 					<label class="block text-xs text-muted-foreground mb-0.5" for="otaCh">OTA Source</label>
