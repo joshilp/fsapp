@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import CustomDialog from '$lib/components/core/CustomDialog.svelte';
+	import CheckInSheet from '$lib/components/booking/CheckInSheet.svelte';
+	import EditBookingSheet from '$lib/components/booking/EditBookingSheet.svelte';
+	import RoomMoveSheet from '$lib/components/booking/RoomMoveSheet.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import type { BookingSummary, GridRoom } from '$lib/server/booking-queries';
 	import { bedCompact } from '$lib/utils/room';
@@ -15,6 +18,27 @@
 	};
 
 	let { open = $bindable(false), booking, roomNumber, propertyName, room, onClose }: Props = $props();
+
+	// ─── Child modal state ─────────────────────────────────────────────────────
+	let checkInOpen = $state(false);
+	let checkInBookingId = $state('');
+	let editOpen = $state(false);
+	let moveOpen = $state(false);
+
+	function openCheckIn(id: string) {
+		checkInBookingId = id;
+		checkInOpen = true;
+	}
+	function openEdit() {
+		editOpen = true;
+	}
+	function openMove() {
+		moveOpen = true;
+	}
+	function onMoveComplete(newBookingId: string) {
+		moveOpen = false;
+		openCheckIn(newBookingId);
+	}
 
 	const STATUS_LABELS: Record<string, { label: string; class: string }> = {
 		confirmed: { label: 'Confirmed', class: 'bg-blue-100 text-blue-800' },
@@ -219,7 +243,19 @@
 		<!-- Key details grid -->
 		<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
 			<dt class="text-muted-foreground font-medium">Guest</dt>
-			<dd class="font-semibold">{booking.guestName ?? '—'}</dd>
+			<dd class="font-semibold flex items-center gap-2">
+				{booking.guestName ?? '—'}
+				{#if booking.guestRating}
+					{@const LABELS = ['','★ Great','★★ Good','★★★ Avg','⚠ Caution','⛔ Block']}
+					{@const COLOURS = ['','text-green-700 bg-green-50','text-blue-700 bg-blue-50','text-gray-700 bg-gray-100','text-amber-700 bg-amber-50','text-red-700 bg-red-50']}
+					<span class="rounded px-1.5 py-0.5 text-[10px] font-semibold {COLOURS[booking.guestRating]}"
+						title="Guest rating">{LABELS[booking.guestRating]}</span>
+				{/if}
+				{#if booking.guestId}
+					<a href="/guests?id={booking.guestId}" target="_blank"
+						class="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">profile</a>
+				{/if}
+			</dd>
 
 			<dt class="text-muted-foreground font-medium">Check-in</dt>
 			<dd>{formatDate(booking.checkInDate)}</dd>
@@ -344,10 +380,9 @@
 			<div class="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs">
 				<p class="font-semibold text-blue-900">→ Guest moved rooms mid-stay</p>
 				<p class="text-blue-800">
-					This booking ended early at {booking.checkOutDate}.
-					<a href="/booking/{booking.movedToBookingId}/checkin"
-						onclick={() => (open = false)}
-						class="underline font-medium">View new room booking →</a>
+				This booking ended early at {booking.checkOutDate}.
+				<button onclick={() => openCheckIn(booking.movedToBookingId!)}
+					class="underline font-medium text-blue-900 hover:text-blue-700">View new room booking →</button>
 				</p>
 			</div>
 		{/if}
@@ -401,17 +436,13 @@
 
 			<!-- Actions -->
 			<div class="border-border flex flex-col gap-2 border-t pt-3">
-				{#if booking.status === 'confirmed'}
-					<div class="flex flex-wrap gap-2">
-						<a href="/booking/{booking.id}/checkin" onclick={() => (open = false)}>
-							<Button variant="default" size="sm">Check In →</Button>
-						</a>
-						<a href="/booking/{booking.id}/edit" onclick={() => (open = false)}>
-							<Button variant="outline" size="sm">Edit</Button>
-						</a>
-						<a href="/booking/{booking.id}/print" target="_blank" onclick={() => (open = false)}>
-							<Button variant="ghost" size="sm">Print slip</Button>
-						</a>
+			{#if booking.status === 'confirmed'}
+				<div class="flex flex-wrap gap-2">
+					<Button variant="default" size="sm" onclick={() => openCheckIn(booking.id)}>Check In →</Button>
+					<Button variant="outline" size="sm" onclick={openEdit}>Edit</Button>
+					<a href="/booking/{booking.id}/print" target="_blank">
+						<Button variant="ghost" size="sm">Print slip</Button>
+					</a>
 
 						{#if !confirmCancel}
 							<Button
@@ -449,17 +480,13 @@
 						{/if}
 					</div>
 
-			{:else if booking.status === 'checked_in'}
-				<div class="flex flex-wrap gap-2">
-					<a href="/booking/{booking.id}/checkin" onclick={() => (open = false)}>
-						<Button variant="outline" size="sm">Edit card</Button>
-					</a>
-					<a href="/booking/{booking.id}/move" onclick={() => (open = false)}>
-						<Button variant="outline" size="sm">Move Room</Button>
-					</a>
-					<a href="/booking/{booking.id}/print" target="_blank" onclick={() => (open = false)}>
-						<Button variant="ghost" size="sm">Print card</Button>
-					</a>
+		{:else if booking.status === 'checked_in'}
+			<div class="flex flex-wrap gap-2">
+				<Button variant="outline" size="sm" onclick={() => openCheckIn(booking.id)}>Edit card</Button>
+				<Button variant="outline" size="sm" onclick={openMove}>Move Room</Button>
+				<a href="/booking/{booking.id}/print" target="_blank">
+					<Button variant="ghost" size="sm">Print card</Button>
+				</a>
 
 				{#if !confirmCheckOut}
 					<Button
@@ -551,5 +578,21 @@
 				{/if}
 			</div>
 		</div>
+
+		<!-- Sub-modals nested here so bits-ui Dialog context is shared for data-nested-open:hidden -->
+		<CheckInSheet
+			bind:open={checkInOpen}
+			bookingId={checkInBookingId}
+			onOpenEditModal={(id) => { checkInOpen = false; editOpen = true; }}
+		/>
+		<EditBookingSheet
+			bind:open={editOpen}
+			bookingId={booking.id}
+		/>
+		<RoomMoveSheet
+			bind:open={moveOpen}
+			bookingId={booking.id}
+			{onMoveComplete}
+		/>
 	{/snippet}
 </CustomDialog>

@@ -30,6 +30,8 @@
         disabled?: boolean;
         /** Extra classes merged onto Dialog.Content — use to override the default width (sm:max-w-2xl) or other content-level styles. */
         dialogClass?: string;
+        /** Prevent closing when clicking outside the dialog (e.g. mid-form). Default: 'close'. */
+        interactOutsideBehavior?: 'close' | 'ignore';
     };
     let {
         title,
@@ -47,6 +49,7 @@
         siteStyle,
         disabled = false,
         dialogClass = '',
+        interactOutsideBehavior = 'close',
     }: Props = $props();
    
 </script>
@@ -57,7 +60,7 @@
             {@render trigger?.()}
         </Dialog.Trigger>
     {/if}
-    <Dialog.Content class={cn("data-nested-open:hidden max-h-[80vh] grid grid-rows-[auto_1fr_auto] sm:max-w-2xl z-53", dialogClass)}>
+    <Dialog.Content class={cn("data-nested-open:hidden max-h-[80vh] grid grid-rows-[auto_1fr_auto] sm:max-w-2xl z-53", dialogClass)} {interactOutsideBehavior}>
         <Dialog.Header>
             <div class="flex items-center justify-between gap-2 pr-10">
                 <Dialog.Title>{title}</Dialog.Title>

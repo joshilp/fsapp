@@ -199,6 +199,9 @@ export const guests = sqliteTable('guests', {
 	provinceState: text('province_state'),
 	country: text('country'),
 	notes: text('notes'),
+	// 1 (great) – 5 (problematic); null = not yet rated
+	rating: integer('rating'),
+	ratingNotes: text('rating_notes'),
 	...timestamps
 });
 

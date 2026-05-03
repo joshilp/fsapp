@@ -23,6 +23,9 @@ export type BookingSummary = {
 	// Payment status derived from paymentEvents vs line item charges
 	paymentStatus: 'unpaid' | 'partial' | 'paid' | null;
 	lastPaymentMethod: string | null; // most recent non-refund method
+	// Guest identity + rating for quick display in dialog
+	guestId: string | null;
+	guestRating: number | null;
 };
 
 export type FreeSpan = { type: 'free'; day: number };
@@ -113,24 +116,25 @@ export async function getGridData(
 			ne(bookings.status, 'cancelled')
 		),
 		with: {
-			guest: { columns: { name: true } },
+			guest: { columns: { name: true, rating: true } },
 			channel: { columns: { name: true } },
 			clerk: { columns: { name: true } }
 		},
-		columns: {
-			id: true,
-			roomId: true,
-			status: true,
-			checkInDate: true,
-			checkOutDate: true,
-			clerkName: true,
-			numAdults: true,
-			numChildren: true,
-			notes: true,
-			otaConfirmationNumber: true,
-			movedFromBookingId: true,
-			movedToBookingId: true
-		}
+			columns: {
+				id: true,
+				roomId: true,
+				status: true,
+				checkInDate: true,
+				checkOutDate: true,
+				clerkName: true,
+				numAdults: true,
+				numChildren: true,
+				notes: true,
+				otaConfirmationNumber: true,
+				movedFromBookingId: true,
+				movedToBookingId: true,
+				guestId: true
+			}
 	});
 
 	// CC staging — fetch lastFour for all bookings in this batch
@@ -286,8 +290,10 @@ export async function getGridData(
 					ccLastFour: ccByBooking.get(b.id) ?? null,
 					movedFromBookingId: b.movedFromBookingId ?? null,
 					movedToBookingId: b.movedToBookingId ?? null,
-					paymentStatus: getPaymentStatus(b.id),
-					lastPaymentMethod: lastMethodByBooking.get(b.id) ?? null
+				paymentStatus: getPaymentStatus(b.id),
+				lastPaymentMethod: lastMethodByBooking.get(b.id) ?? null,
+				guestId: b.guestId ?? null,
+				guestRating: b.guest?.rating ?? null
 				}
 			});
 			day += length;

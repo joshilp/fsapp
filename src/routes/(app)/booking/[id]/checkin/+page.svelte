@@ -284,6 +284,27 @@
 		<!-- ── Guest Details ─────────────────────────────────────────────── -->
 		<section class="mb-6">
 			<h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Guest Details</h2>
+
+			<!-- Guest rating warning banner -->
+			{#if guest?.rating && guest.rating >= 4}
+				{@const WARN = [,'','','','⚠ Caution guest — review notes before check-in','⛔ Blocked guest — do not check in without manager approval']}
+				{@const CLR = [,'','','','bg-amber-50 border-amber-300 text-amber-800','bg-red-50 border-red-300 text-red-800']}
+				<div class="mb-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-sm font-medium {CLR[guest.rating]}">
+					<span>{WARN[guest.rating]}</span>
+					{#if guest.ratingNotes}
+						<span class="ml-1 font-normal opacity-80">— {guest.ratingNotes}</span>
+					{/if}
+					<a href="/guests?id={guest.id}" target="_blank" class="ml-auto shrink-0 underline text-xs opacity-70 hover:opacity-100">View profile</a>
+				</div>
+			{:else if guest?.rating}
+				{@const GOOD = [,'★ Excellent guest','★★ Good guest','★★★ Average guest','',''][guest.rating]}
+				<div class="mb-3 flex items-center gap-2 rounded-lg border bg-green-50 border-green-200 text-green-800 px-3 py-1.5 text-xs">
+					<span class="font-medium">{GOOD}</span>
+					{#if guest.ratingNotes}<span class="opacity-70">— {guest.ratingNotes}</span>{/if}
+					<a href="/guests?id={guest.id}" target="_blank" class="ml-auto underline opacity-70 hover:opacity-100">profile</a>
+				</div>
+			{/if}
+
 			<div class="grid grid-cols-2 gap-3">
 				<div class="flex flex-col gap-1.5">
 					<Label>Name</Label>
