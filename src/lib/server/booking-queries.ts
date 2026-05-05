@@ -26,6 +26,9 @@ export type BookingSummary = {
 	// Guest identity + rating for quick display in dialog
 	guestId: string | null;
 	guestRating: number | null;
+	// Group membership (null for standalone bookings)
+	groupId: string | null;
+	groupName: string | null;
 };
 
 export type FreeSpan = { type: 'free'; day: number };
@@ -66,33 +69,39 @@ export type DayRate = {
 export type GridData = {
 	propertyId: string;
 	propertyName: string;
-	year: number;
-	month: number;
-	daysInMonth: number;
+	/** ISO date (YYYY-MM-DD) of the first column (day 1) */
+	startDate: string;
+	/** Total columns shown */
+	numDays: number;
 	rooms: GridRoom[];
-	dayRates: Array<DayRate | null>; // index 1..daysInMonth, index 0 unused
+	/** index 1..numDays — null means no season covers that day */
+	dayRates: Array<DayRate | null>;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function daysInMonth(year: number, month: number): number {
-	return new Date(year, month, 0).getDate(); // month is 1-indexed
-}
-
-function isoDate(year: number, month: number, day: number): string {
-	return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+function isoAddDays(iso: string, n: number): string {
+	const d = new Date(iso + 'T12:00:00');
+	d.setDate(d.getDate() + n);
+	return d.toISOString().slice(0, 10);
 }
 
 // ─── Grid query ───────────────────────────────────────────────────────────────
 
 export async function getGridData(
 	propertyId: string,
-	year: number,
-	month: number
+	startDate: string, // YYYY-MM-DD — first column
+	numDays = 35       // default 5-week window
 ): Promise<GridData> {
-	const days = daysInMonth(year, month);
-	const monthStart = isoDate(year, month, 1);
-	const monthEnd = isoDate(year, month, days);
+	const windowStart = startDate;
+	const windowEnd = isoAddDays(startDate, numDays - 1); // last day inclusive
+
+	const startMs = new Date(startDate + 'T12:00:00').getTime();
+
+	/** Convert an ISO date to a 1-indexed day number within the window */
+	function dateToDay(iso: string): number {
+		return Math.round((new Date(iso + 'T12:00:00').getTime() - startMs) / 86400000) + 1;
+	}
 
 	// Rooms — sorted numerically by room number
 	const propertyRooms = await db.query.rooms.findMany({
@@ -107,18 +116,19 @@ export async function getGridData(
 		columns: { name: true }
 	});
 
-	// All bookings overlapping this month (not cancelled)
+	// All bookings overlapping this window (not cancelled)
 	const monthBookings = await db.query.bookings.findMany({
 		where: and(
 			eq(bookings.propertyId, propertyId),
-			lte(bookings.checkInDate, monthEnd),
-			gt(bookings.checkOutDate, monthStart),
+			lte(bookings.checkInDate, windowEnd),
+			gt(bookings.checkOutDate, windowStart),
 			ne(bookings.status, 'cancelled')
 		),
 		with: {
 			guest: { columns: { name: true, rating: true } },
 			channel: { columns: { name: true } },
-			clerk: { columns: { name: true } }
+			clerk: { columns: { name: true } },
+			group: { columns: { id: true, name: true } }
 		},
 			columns: {
 				id: true,
@@ -133,7 +143,8 @@ export async function getGridData(
 				otaConfirmationNumber: true,
 				movedFromBookingId: true,
 				movedToBookingId: true,
-				guestId: true
+				guestId: true,
+				groupId: true
 			}
 	});
 
@@ -193,22 +204,22 @@ export async function getGridData(
 		return 'partial';
 	}
 
-	// Rate seasons overlapping this month (for grid cell pricing colours)
+	// Rate seasons overlapping this window (for grid cell pricing colours)
 	const monthSeasons = await db.query.rateSeasons.findMany({
 		where: and(
 			eq(rateSeasons.propertyId, propertyId),
-			lte(rateSeasons.startDate, monthEnd),
-			gte(rateSeasons.endDate, monthStart)
+			lte(rateSeasons.startDate, windowEnd),
+			gte(rateSeasons.endDate, windowStart)
 		),
 		with: { tiers: true },
 		orderBy: (s, { asc }) => [asc(s.startDate)]
 	});
 
-	// Build day → DayRate lookup (later seasons overwrite earlier for same day)
-	const dayRatesArr: Array<DayRate | null> = new Array(days + 1).fill(null);
+	// Build day → DayRate lookup (1-indexed, later seasons overwrite earlier)
+	const dayRatesArr: Array<DayRate | null> = new Array(numDays + 1).fill(null);
 	for (const season of monthSeasons) {
-		const startDay = season.startDate < monthStart ? 1 : Number(season.startDate.slice(8));
-		const endDay = season.endDate > monthEnd ? days : Number(season.endDate.slice(8));
+		const startDay = Math.max(1, dateToDay(season.startDate));
+		const endDay = Math.min(numDays, dateToDay(season.endDate));
 		const rateByTypeId: Record<string, number> = {};
 		for (const tier of season.tiers) {
 			rateByTypeId[tier.roomTypeId] = tier.nightlyRate;
@@ -218,7 +229,7 @@ export async function getGridData(
 		}
 	}
 
-	// Group by room
+	// Group bookings by room
 	const byRoom = new Map<string, typeof monthBookings>();
 	for (const b of monthBookings) {
 		if (!b.roomId) continue;
@@ -226,27 +237,25 @@ export async function getGridData(
 		byRoom.get(b.roomId)!.push(b);
 	}
 
-	// Compute spans for each room
+	// Compute spans for each room (day numbers are 1-indexed from windowStart)
 	const gridRooms: GridRoom[] = propertyRooms.map((room) => {
 		const roomBookings = (byRoom.get(room.id) ?? []).sort((a, b) =>
 			a.checkInDate.localeCompare(b.checkInDate)
 		);
 
-		// Build day → booking index for O(1) lookup
+		// Build day → booking for O(1) lookup
 		const dayMap = new Map<number, (typeof monthBookings)[0]>();
 		for (const b of roomBookings) {
-			const startDay = b.checkInDate < monthStart ? 1 : Number(b.checkInDate.slice(8));
-			// check-out day itself is free; guest occupies up to (checkOut - 1)
-			const rawEndDay =
-				b.checkOutDate > monthEnd ? days : Number(b.checkOutDate.slice(8)) - 1;
-			for (let d = startDay; d <= rawEndDay; d++) {
-				dayMap.set(d, b);
-			}
+			const spanStart = Math.max(1, dateToDay(b.checkInDate));
+			// check-out day itself is free; last occupied day = checkOut - 1
+			const spanEnd = Math.min(numDays, dateToDay(b.checkOutDate) - 1);
+			if (spanEnd < spanStart) continue;
+			for (let d = spanStart; d <= spanEnd; d++) dayMap.set(d, b);
 		}
 
 		const spans: DaySpan[] = [];
 		let day = 1;
-		while (day <= days) {
+		while (day <= numDays) {
 			const b = dayMap.get(day);
 			if (!b) {
 				spans.push({ type: 'free', day });
@@ -254,20 +263,13 @@ export async function getGridData(
 				continue;
 			}
 
-			const overflowStart = b.checkInDate < monthStart;
-			const overflowEnd = b.checkOutDate > monthEnd;
-			const spanStart = overflowStart ? 1 : Number(b.checkInDate.slice(8));
-
-			if (day !== spanStart) {
-				// Mid-booking cell already covered — this shouldn't normally occur
-				// because we advance `day` by span length below
-				spans.push({ type: 'free', day });
-				day++;
-				continue;
-			}
-
-			const spanEndDay = overflowEnd ? days : Number(b.checkOutDate.slice(8)) - 1;
-			const length = spanEndDay - spanStart + 1;
+			const ciDay = dateToDay(b.checkInDate);
+			const overflowStart = ciDay < 1;
+			const coDay = dateToDay(b.checkOutDate) - 1; // last occupied day
+			const overflowEnd = coDay > numDays;
+			const spanStart = overflowStart ? 1 : ciDay;
+			const spanEnd = overflowEnd ? numDays : coDay;
+			const length = spanEnd - spanStart + 1;
 
 			spans.push({
 				type: 'booking',
@@ -293,7 +295,9 @@ export async function getGridData(
 				paymentStatus: getPaymentStatus(b.id),
 				lastPaymentMethod: lastMethodByBooking.get(b.id) ?? null,
 				guestId: b.guestId ?? null,
-				guestRating: b.guest?.rating ?? null
+				guestRating: b.guest?.rating ?? null,
+				groupId: b.groupId ?? null,
+				groupName: b.group?.name ?? null
 				}
 			});
 			day += length;
@@ -320,9 +324,8 @@ export async function getGridData(
 	return {
 		propertyId,
 		propertyName: prop?.name ?? propertyId,
-		year,
-		month,
-		daysInMonth: days,
+		startDate,
+		numDays,
 		rooms: gridRooms,
 		dayRates: dayRatesArr
 	};

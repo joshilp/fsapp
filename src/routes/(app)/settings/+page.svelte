@@ -124,15 +124,42 @@
 										<Input name="checkoutTime" value={prop.checkoutTime} class="w-24 text-center" placeholder="10:30" />
 									</div>
 								</div>
-								<div class="col-span-2 flex flex-col gap-1.5">
-									<Label for="policy-{prop.id}">Policy text (printed on card)</Label>
-									<textarea
-										id="policy-{prop.id}"
-										name="policyText"
-										rows="3"
-										class="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
-									>{prop.policyText ?? ''}</textarea>
+							<div class="col-span-2 flex flex-col gap-1.5">
+								<Label for="policy-{prop.id}">Policy text (printed on card)</Label>
+								<textarea
+									id="policy-{prop.id}"
+									name="policyText"
+									rows="3"
+									class="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
+								>{prop.policyText ?? ''}</textarea>
+							</div>
+							<!-- Cancellation policy numbers -->
+							<div class="col-span-2">
+								<Label class="mb-2 block">Cancellation policy</Label>
+								<div class="grid grid-cols-3 gap-3">
+									<div class="flex flex-col gap-1">
+										<Label for="depNights-{prop.id}" class="text-xs text-muted-foreground">Deposit nights</Label>
+										<Input id="depNights-{prop.id}" name="depositNights" type="number" min="0" step="1"
+											value={prop.depositNights ?? 1}
+											class="w-full" />
+										<p class="text-[11px] text-muted-foreground">Nights to charge as deposit</p>
+									</div>
+									<div class="flex flex-col gap-1">
+										<Label for="cancelFee-{prop.id}" class="text-xs text-muted-foreground">Cancellation fee ($)</Label>
+										<Input id="cancelFee-{prop.id}" name="cancellationFeeDollars" type="number" min="0" step="0.01"
+											value={((prop.cancellationFeeCents ?? 2500) / 100).toFixed(2)}
+											class="w-full" />
+										<p class="text-[11px] text-muted-foreground">Flat fee on any cancellation</p>
+									</div>
+									<div class="flex flex-col gap-1">
+										<Label for="noRefund-{prop.id}" class="text-xs text-muted-foreground">No-refund window (days)</Label>
+										<Input id="noRefund-{prop.id}" name="noRefundDays" type="number" min="0" step="1"
+											value={prop.noRefundDays ?? 30}
+											class="w-full" />
+										<p class="text-[11px] text-muted-foreground">Days before check-in with no refund</p>
+									</div>
 								</div>
+							</div>
 							</div>
 							<div class="mt-4 flex justify-end">
 								<Button type="submit" size="sm" disabled={savingProperty === prop.id}>

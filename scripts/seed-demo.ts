@@ -28,7 +28,8 @@ const reset = process.argv.includes('--reset');
 if (reset) {
 	await db.delete(schema.bookings).where(like(schema.bookings.id, 'demo-%'));
 	await db.delete(schema.guests).where(like(schema.guests.id, 'demo-%'));
-	console.log('✓ Cleared demo bookings and guests');
+	await db.delete(schema.groups).where(like(schema.groups.id, 'demo-%'));
+	console.log('✓ Cleared demo bookings, groups and guests');
 }
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -215,6 +216,68 @@ await db
 	.onConflictDoNothing();
 
 console.log(`✓ ${bookingSpecs.length} demo bookings`);
+
+// ─── Group Bookings ───────────────────────────────────────────────────────────
+// Scenario A: Small family group (3 rooms, Falcon, master billing)
+// Scenario B: Company crew (4 rooms across both properties, master billing)
+
+// Extra guests for group organizers
+const groupGuests = [
+	{ id: 'demo-gg-01', name: 'Henderson Family (6 pax)', phone: '555-200-0001', city: 'Red Deer', provinceState: 'AB' },
+	{ id: 'demo-gg-02', name: 'Sunrise Construction Ltd', phone: '555-200-0002', city: 'Calgary',   provinceState: 'AB' },
+];
+await db.insert(schema.guests).values(groupGuests).onConflictDoNothing();
+
+// Group A — Henderson Family reunion (3 rooms, Falcon, same dates)
+await db.insert(schema.groups).values({
+	id:             'demo-grp-01',
+	propertyId:     'prop-falcon',
+	name:           'Henderson Family Reunion',
+	organizerName:  'Bill Henderson',
+	organizerPhone: '5552000001',
+	billingType:    'master',
+	notes:          'Request rooms close together',
+}).onConflictDoNothing();
+
+const groupABookings = [
+	{ id: 'demo-gb-01', roomId: 'room-falcon-19', checkIn: d(17), checkOut: d(21), notes: null },
+	{ id: 'demo-gb-02', roomId: 'room-falcon-20', checkIn: d(17), checkOut: d(21), notes: null },
+	{ id: 'demo-gb-03', roomId: 'room-falcon-21', checkIn: d(17), checkOut: d(20), notes: 'Early checkout — one day less' },
+];
+await db.insert(schema.bookings).values(groupABookings.map(b => ({
+	id: b.id, propertyId: 'prop-falcon', roomId: b.roomId,
+	guestId: 'demo-gg-01', channelId: 'ch-direct',
+	status: 'confirmed' as const, checkInDate: b.checkIn, checkOutDate: b.checkOut,
+	groupId: 'demo-grp-01', notes: b.notes, numAdults: 2
+}))).onConflictDoNothing();
+
+// Group B — Sunrise Construction crew (4 rooms, 2 per property, individual billing)
+await db.insert(schema.groups).values({
+	id:             'demo-grp-02',
+	propertyId:     null, // spans both properties
+	name:           'Sunrise Construction — April Crew',
+	organizerName:  'Sandra Mehta (site coordinator)',
+	organizerPhone: '5552000002',
+	organizerEmail: 'smehta@sunrise.ca',
+	billingType:    'master',
+	notes:          'Invoice Sunrise Construction Ltd. after checkout',
+}).onConflictDoNothing();
+
+const groupBBookings = [
+	{ id: 'demo-gb-04', propId: 'prop-falcon',  roomId: 'room-falcon-4',  checkIn: d(8), checkOut: d(22) },
+	{ id: 'demo-gb-05', propId: 'prop-falcon',  roomId: 'room-falcon-5',  checkIn: d(8), checkOut: d(22) },
+	{ id: 'demo-gb-06', propId: 'prop-spanish', roomId: 'room-spanish-6', checkIn: d(8), checkOut: d(22) },
+	{ id: 'demo-gb-07', propId: 'prop-spanish', roomId: 'room-spanish-7', checkIn: d(8), checkOut: d(22) },
+];
+await db.insert(schema.bookings).values(groupBBookings.map(b => ({
+	id: b.id, propertyId: b.propId, roomId: b.roomId,
+	guestId: 'demo-gg-02', channelId: 'ch-direct',
+	status: 'checked_in' as const, checkInDate: b.checkIn, checkOutDate: b.checkOut,
+	checkedInAt: new Date(),
+	groupId: 'demo-grp-02', numAdults: 1
+}))).onConflictDoNothing();
+
+console.log('✓ 2 demo groups (5 group rooms on Falcon, 2 on Spanish)');
 
 // ─── Done ─────────────────────────────────────────────────────────────────────
 

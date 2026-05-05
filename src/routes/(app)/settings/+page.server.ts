@@ -72,7 +72,10 @@ export const actions: Actions = {
 				gstNumber: g('gstNumber'),
 				checkinTime: g('checkinTime') ?? undefined,
 				checkoutTime: g('checkoutTime') ?? undefined,
-				policyText: g('policyText')
+				policyText: g('policyText'),
+				depositNights: parseInt(g('depositNights') ?? '1') || 1,
+				cancellationFeeCents: Math.round((parseFloat(g('cancellationFeeDollars') ?? '25') || 25) * 100),
+				noRefundDays: parseInt(g('noRefundDays') ?? '30') || 30
 			})
 			.where(eq(properties.id, id));
 

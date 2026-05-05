@@ -65,7 +65,10 @@ await db
 			cancellationPolicy:
 				'Cancellation up to 30 days notice: $25.00 fee. Less than 30 days notice: NO REFUND.',
 			earlyDeparturePolicy: 'Reserved units not staying full term will be charged one extra night.',
-			smokingFee: 15000
+			smokingFee: 15000,
+			depositNights: 1,
+			cancellationFeeCents: 2500,
+			noRefundDays: 30
 		},
 		{
 			id: SPANISH,
@@ -83,7 +86,10 @@ await db
 			cancellationPolicy:
 				'Cancellation up to 30 days notice: $25.00 fee. Less than 30 days notice: NO REFUND.',
 			earlyDeparturePolicy: 'Reserved units not staying full term will be charged one extra night.',
-			smokingFee: 15000
+			smokingFee: 15000,
+			depositNights: 1,
+			cancellationFeeCents: 2500,
+			noRefundDays: 30
 		}
 	])
 	.onConflictDoNothing();

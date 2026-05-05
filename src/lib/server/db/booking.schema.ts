@@ -39,6 +39,13 @@ export const properties = sqliteTable('properties', {
 	cancellationPolicy: text('cancellation_policy'),
 	earlyDeparturePolicy: text('early_departure_policy'),
 	smokingFee: integer('smoking_fee'), // cents
+	// ── Deposit / Cancellation Policy ────────────────────────────────────────
+	// depositNights: how many nights to charge as deposit (0 = no deposit required)
+	depositNights: integer('deposit_nights').notNull().default(1),
+	// Flat fee charged on any cancellation, in cents (e.g. 2500 = $25)
+	cancellationFeeCents: integer('cancellation_fee_cents').notNull().default(2500),
+	// Days before check-in inside which no refund is given (0 = always refund minus fee)
+	noRefundDays: integer('no_refund_days').notNull().default(30),
 	...timestamps
 });
 
@@ -205,6 +212,27 @@ export const guests = sqliteTable('guests', {
 	...timestamps
 });
 
+// ─── Groups ───────────────────────────────────────────────────────────────────
+// A named block of rooms under a single organiser (wedding party, company crew,
+// film crew, sports team, etc.).  Each booking links to a group via groupId.
+//
+// billingType:
+//   master     → organiser pays one combined bill
+//   individual → each guest pays their own room
+
+export const groups = sqliteTable('groups', {
+	id: id(),
+	// nullable: group can span both properties
+	propertyId: text('property_id').references(() => properties.id, { onDelete: 'set null' }),
+	name: text('name').notNull(), // e.g. "Smith Wedding June 14"
+	organizerName:  text('organizer_name'),
+	organizerPhone: text('organizer_phone'),
+	organizerEmail: text('organizer_email'),
+	billingType: text('billing_type').notNull().default('master'), // master | individual
+	notes: text('notes'),
+	...timestamps
+});
+
 // ─── Bookings ─────────────────────────────────────────────────────────────────
 // Central record for the full booking lifecycle.
 //
@@ -267,6 +295,12 @@ export const bookings = sqliteTable(
 		// Stored as plain text (no FK) to avoid self-referential DDL issues.
 		movedFromBookingId: text('moved_from_booking_id'),
 		movedToBookingId:   text('moved_to_booking_id'),
+
+		// Group bookings: multiple rooms linked under one folio
+		groupId: text('group_id').references(() => groups.id, { onDelete: 'set null' }),
+
+		// Guest signed the registration card / waiver
+		waiverSigned: integer('waiver_signed', { mode: 'boolean' }).default(false),
 
 		...timestamps
 	},
@@ -365,6 +399,11 @@ export const ccStaging = sqliteTable('cc_staging', {
 
 // ─── Relations ────────────────────────────────────────────────────────────────
 
+export const groupsRelations = relations(groups, ({ one, many }) => ({
+	property: one(properties, { fields: [groups.propertyId], references: [properties.id] }),
+	bookings: many(bookings)
+}));
+
 export const propertiesRelations = relations(properties, ({ many }) => ({
 	roomTypes: many(roomTypes),
 	rooms: many(rooms),
@@ -424,6 +463,7 @@ export const bookingsRelations = relations(bookings, ({ one, many }) => ({
 	guest: one(guests, { fields: [bookings.guestId], references: [guests.id] }),
 	channel: one(bookingChannels, { fields: [bookings.channelId], references: [bookingChannels.id] }),
 	clerk: one(user, { fields: [bookings.clerkId], references: [user.id] }),
+	group: one(groups, { fields: [bookings.groupId], references: [groups.id] }),
 	lineItems: many(bookingLineItems),
 	paymentEvents: many(paymentEvents),
 	ccStaging: one(ccStaging, { fields: [bookings.id], references: [ccStaging.bookingId] })
