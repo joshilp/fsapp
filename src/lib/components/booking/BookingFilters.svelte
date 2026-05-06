@@ -5,9 +5,10 @@
 		startDate: string; // YYYY-MM-DD — first column in view
 		numDays: number;
 		viewMode: 'grid' | 'today';
+		actions?: import('svelte').Snippet;
 	};
 
-	let { startDate, numDays, viewMode }: Props = $props();
+	let { startDate, numDays, viewMode, actions }: Props = $props();
 
 	const MONTHS = [
 		'January', 'February', 'March', 'April', 'May', 'June',
@@ -122,23 +123,28 @@
 			/>
 		</div>
 
-		<div class="ml-auto flex items-center gap-1">
-			<Button
-				href={`/booking?start=${startDate}`}
-				variant={viewMode === 'grid' ? 'default' : 'ghost'}
-				size="sm"
-				class="h-8 text-xs"
-			>
-				Grid
-			</Button>
-			<Button
-				href={`/booking?start=${startDate}&view=today`}
-				variant={viewMode === 'today' ? 'default' : 'ghost'}
-				size="sm"
-				class="h-8 text-xs"
-			>
-				Today
-			</Button>
+		<div class="ml-auto flex items-center gap-2">
+			{#if actions}
+				{@render actions()}
+			{/if}
+			<div class="flex items-center gap-1">
+				<Button
+					href={`/booking?start=${startDate}`}
+					variant={viewMode === 'grid' ? 'default' : 'ghost'}
+					size="sm"
+					class="h-8 text-xs"
+				>
+					Grid
+				</Button>
+				<Button
+					href={`/booking?start=${startDate}&view=today`}
+					variant={viewMode === 'today' ? 'default' : 'ghost'}
+					size="sm"
+					class="h-8 text-xs"
+				>
+					Today
+				</Button>
+			</div>
 		</div>
 	</div>
 </div>

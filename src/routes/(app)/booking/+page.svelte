@@ -83,26 +83,24 @@
 </svelte:head>
 
 <div class="flex flex-col min-h-0">
-	<BookingFilters startDate={data.startDate} numDays={data.numDays} viewMode={data.viewMode as 'grid' | 'today'} />
-
-	<!-- Quick-action toolbar -->
-	<div class="border-border bg-background flex items-center gap-2 border-b px-4 py-2">
-		<button
-			onclick={() => { otaImportOpen = true; }}
-			class="rounded-md border border-input px-3 py-1.5 text-sm font-medium hover:bg-muted flex items-center gap-1.5"
-		>
-			📥 OTA Import
-		</button>
-
-		{#if allUnassigned.length > 0}
+	<BookingFilters startDate={data.startDate} numDays={data.numDays} viewMode={data.viewMode as 'grid' | 'today'}>
+		{#snippet actions()}
 			<button
-				onclick={() => { unassignedOpen = true; }}
-				class="rounded-md bg-amber-100 border border-amber-300 px-3 py-1.5 text-sm font-semibold text-amber-800 hover:bg-amber-200 flex items-center gap-1.5"
+				onclick={() => { otaImportOpen = true; }}
+				class="rounded-md border border-input px-3 py-1.5 text-xs font-medium hover:bg-muted flex items-center gap-1.5 h-8"
 			>
-				⚠ {allUnassigned.length} unassigned
+				📥 OTA Import
 			</button>
-		{/if}
-	</div>
+			{#if allUnassigned.length > 0}
+				<button
+					onclick={() => { unassignedOpen = true; }}
+					class="rounded-md bg-amber-100 border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-200 flex items-center gap-1.5 h-8"
+				>
+					⚠ {allUnassigned.length} unassigned
+				</button>
+			{/if}
+		{/snippet}
+	</BookingFilters>
 </div>
 
 {#if data.viewMode === 'today' && data.todayData}

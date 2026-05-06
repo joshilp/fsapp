@@ -69,6 +69,41 @@
 		in_progress:  'In progress',
 		out_of_order: 'Out of order'
 	};
+
+	// ── Legend floating panel ─────────────────────────────────────────────────
+	const LEGEND_KEY = 'grid-legend';
+	function loadLegendState() {
+		if (typeof localStorage === 'undefined') return { open: false, x: 24, y: 120 };
+		try { return JSON.parse(localStorage.getItem(LEGEND_KEY) ?? 'null') ?? { open: false, x: 24, y: 120 }; }
+		catch { return { open: false, x: 24, y: 120 }; }
+	}
+	const _ls = loadLegendState();
+	let legendOpen = $state<boolean>(_ls.open);
+	let legendX    = $state<number>(_ls.x);
+	let legendY    = $state<number>(_ls.y);
+	let legendDragging = $state(false);
+	let legendDragOx = 0, legendDragOy = 0;
+
+	function saveLegend() {
+		if (typeof localStorage !== 'undefined')
+			localStorage.setItem(LEGEND_KEY, JSON.stringify({ open: legendOpen, x: legendX, y: legendY }));
+	}
+	function toggleLegend() { legendOpen = !legendOpen; saveLegend(); }
+
+	function onLegendMouseDown(e: MouseEvent) {
+		legendDragging = true;
+		legendDragOx = e.clientX - legendX;
+		legendDragOy = e.clientY - legendY;
+		e.preventDefault();
+	}
+	function onLegendMouseMove(e: MouseEvent) {
+		if (!legendDragging) return;
+		legendX = Math.max(0, Math.min(window.innerWidth  - 320, e.clientX - legendDragOx));
+		legendY = Math.max(0, Math.min(window.innerHeight - 100, e.clientY - legendDragOy));
+	}
+	function onLegendMouseUp() {
+		if (legendDragging) { legendDragging = false; saveLegend(); }
+	}
 	// Convert a hex colour to an rgba tint for cell backgrounds
 	function hexTint(hex: string, alpha: number): string {
 		if (!hex || !hex.startsWith('#') || hex.length < 7) return '';
@@ -258,6 +293,7 @@
 	// ─── Global mouseup — finalise drag or draw ──────────────────────────────
 
 	function onDocumentMouseUp() {
+		onLegendMouseUp();
 		if (drawMode) {
 			finalizeDrawSelection();
 			return;
@@ -517,7 +553,7 @@
 </script>
 
 <!-- Global mouseup listener for drag release -->
-<svelte:document onmouseup={onDocumentMouseUp} />
+<svelte:document onmouseup={onDocumentMouseUp} onmousemove={onLegendMouseMove} />
 
 <!-- Conflict flash message -->
 {#if conflictMessage}
@@ -532,9 +568,29 @@
 		<div class="flex items-center gap-2">
 			<span class="text-sm font-semibold">{propertyName}</span>
 			<span class="text-muted-foreground text-xs">{rooms.length}/{allRooms.length} rooms</span>
+			<div class="ml-auto flex items-center gap-1.5">
+				<!-- Draw mode toggle -->
+				<button
+					onclick={toggleDrawMode}
+					class={[
+						'rounded border px-2 py-0.5 text-xs font-medium transition-colors',
+						drawMode
+							? 'bg-orange-500 text-white border-orange-500'
+							: 'bg-background text-muted-foreground border-input hover:border-orange-400'
+					].join(' ')}
+					title="Draw mode: drag across rooms to select multiple date ranges"
+				>
+					✎ Draw
+				</button>
+				<button
+					type="button"
+					onclick={toggleLegend}
+					class="rounded border border-input bg-background px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+				>Legend</button>
+			</div>
 		</div>
 
-		<!-- Filter chips row 1: bed count / kitchen / available / draw mode -->
+		<!-- Filter chips: bed count / kitchen / available / show available dates -->
 		<div class="flex flex-wrap gap-1.5 items-center">
 			<!-- Bed count chips -->
 			{#each ([0, 1, 2, 3] as const) as n}
@@ -579,23 +635,7 @@
 
 			<span class="text-border mx-1">|</span>
 
-			<!-- Draw mode toggle -->
-			<button
-				onclick={toggleDrawMode}
-				class={[
-					'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
-					drawMode
-						? 'bg-orange-500 text-white border-orange-500'
-						: 'bg-background text-muted-foreground border-border hover:border-orange-400'
-				].join(' ')}
-				title="Draw mode: drag across rooms to select multiple date ranges"
-			>
-				✎ Draw
-			</button>
-		</div>
-
-		<!-- Filter row 2: date range (ghost bars) -->
-		<div class="flex flex-wrap items-center gap-2">
+			<!-- Show available date range (ghost bars) -->
 			<span class="text-xs text-muted-foreground">Show available:</span>
 			<input type="date" bind:value={filterCheckIn}
 				oninput={() => { if (filterCheckOut && filterCheckOut <= filterCheckIn) filterCheckOut = ''; }}
@@ -607,65 +647,17 @@
 				placeholder="Check-out" />
 			{#if filterCheckIn || filterCheckOut}
 				<button onclick={() => { filterCheckIn = ''; filterCheckOut = ''; }}
-					class="text-xs text-muted-foreground hover:text-foreground">✕ Clear</button>
+					class="text-xs text-muted-foreground hover:text-foreground">✕</button>
 				{#if ghostMap.size > 0}
-					<span class="text-xs text-teal-700 font-medium">{ghostMap.size} room{ghostMap.size === 1 ? '' : 's'} available</span>
+					<span class="text-xs text-teal-700 font-medium">{ghostMap.size} available</span>
 				{:else if filterCheckIn && filterCheckOut}
-					<span class="text-xs text-muted-foreground">No rooms free for that range</span>
+					<span class="text-xs text-muted-foreground">None free</span>
 				{/if}
 			{/if}
 		</div>
 	</div>
 
-	<!-- Legend bar -->
-	<div class="border-border flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-3 py-1 text-xs text-muted-foreground">
-		<!-- Channel colours -->
-		<span class="font-medium">Booking source:</span>
-		<span class="flex items-center gap-1">
-			<span class="inline-block h-2 w-3 rounded-sm bg-teal-500"></span>Direct
-		</span>
-		<span class="flex items-center gap-1">
-			<span class="inline-block h-2 w-3 rounded-sm bg-amber-500"></span>Expedia
-		</span>
-		<span class="flex items-center gap-1">
-			<span class="inline-block h-2 w-3 rounded-sm bg-blue-600"></span>Booking.com
-		</span>
-		<span class="flex items-center gap-1">
-			<span class="inline-block h-2 w-3 rounded-sm bg-purple-500"></span>Other OTA
-		</span>
-		<span class="flex items-center gap-1">
-			<span class="inline-block h-1.5 w-1.5 rounded-full bg-green-300 ring-1 ring-green-600/30"></span>Checked in
-		</span>
-		<span class="flex items-center gap-1">
-			<span class="inline-block h-2 w-3 rounded-sm bg-gray-400 opacity-60" style="background-image:repeating-linear-gradient(45deg,transparent,transparent 2px,rgba(0,0,0,.2) 2px,rgba(0,0,0,.2) 4px)"></span>Block
-		</span>
-
-		<span class="mx-2 text-border">|</span>
-
-		<!-- Housekeeping -->
-		<span class="font-medium">Housekeeping:</span>
-		{#each HK_CYCLE as s}
-			<span class="flex items-center gap-1">
-				<span class="inline-block h-[5px] w-[5px] rounded-full" style="background:{HK_COLORS[s]}"></span>
-				{HK_LABELS[s]}
-			</span>
-		{/each}
-		<span class="mx-2 text-border">|</span>
-	<span class="font-medium">Payment:</span>
-	<span class="flex items-center gap-1">
-		<span class="inline-block rounded bg-red-500/80 px-[3px] py-0.5 text-[9px] font-bold text-white">$?</span>Unpaid
-	</span>
-	<span class="flex items-center gap-1">
-		<span class="inline-block rounded bg-yellow-400/90 px-[3px] py-0.5 text-[9px] font-bold text-stone-900">½$</span>Partial
-	</span>
-	<span class="flex items-center gap-1">
-		<span class="inline-block rounded bg-green-500/70 px-[3px] py-0.5 text-[9px] font-bold text-white">✓$</span>Paid
-	</span>
-	<span class="flex items-center gap-1">
-		<span class="inline-block rounded bg-white/25 ring-1 ring-black/20 px-[3px] py-0.5 text-[9px] font-bold">G</span>Group booking
-	</span>
-	<span class="ml-auto opacity-60">Dot in cell corner · click room dot to cycle</span>
-	</div>
+	<!-- (legend moved to floating panel) -->
 
 	<div class="overflow-x-auto">
 		<table class="border-separate border-spacing-0 text-xs">
@@ -991,6 +983,68 @@
 						class="rounded bg-slate-600 text-white px-3 py-1.5 text-xs hover:bg-slate-700">Block Room</button>
 				</div>
 			</form>
+		</div>
+	</div>
+{/if}
+
+<!-- Floating draggable legend panel -->
+{#if legendOpen}
+	<div
+		class="fixed z-50 w-72 rounded-lg border border-border bg-background shadow-xl text-xs select-none"
+		style="left:{legendX}px; top:{legendY}px;"
+	>
+		<!-- Drag handle / title bar -->
+		<div
+			class="flex items-center justify-between rounded-t-lg bg-muted/60 px-3 py-2 cursor-grab active:cursor-grabbing"
+			role="none"
+			onmousedown={onLegendMouseDown}
+		>
+			<span class="font-semibold text-foreground">{propertyName} — Legend</span>
+			<button type="button" onclick={toggleLegend}
+				class="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground leading-none">✕</button>
+		</div>
+
+		<div class="space-y-3 p-3 text-muted-foreground">
+			<!-- Booking source -->
+			<div>
+				<p class="mb-1.5 font-medium text-foreground">Booking source</p>
+				<div class="grid grid-cols-2 gap-x-3 gap-y-1">
+					<span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-4 rounded-sm bg-teal-500 shrink-0"></span>Direct</span>
+					<span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-4 rounded-sm bg-amber-500 shrink-0"></span>Expedia</span>
+					<span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-4 rounded-sm bg-blue-600 shrink-0"></span>Booking.com</span>
+					<span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-4 rounded-sm bg-purple-500 shrink-0"></span>Other OTA</span>
+					<span class="flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full bg-green-300 ring-1 ring-green-600/30 shrink-0"></span>Checked in</span>
+					<span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-4 rounded-sm bg-gray-400 opacity-60 shrink-0" style="background-image:repeating-linear-gradient(45deg,transparent,transparent 2px,rgba(0,0,0,.2) 2px,rgba(0,0,0,.2) 4px)"></span>Block</span>
+				</div>
+			</div>
+
+			<div class="border-t border-border"></div>
+
+			<!-- Housekeeping -->
+			<div>
+				<p class="mb-1.5 font-medium text-foreground">Housekeeping <span class="font-normal opacity-60">(dot · click to cycle)</span></p>
+				<div class="grid grid-cols-2 gap-x-3 gap-y-1">
+					{#each HK_CYCLE as s}
+						<span class="flex items-center gap-1.5">
+							<span class="inline-block h-2 w-2 rounded-full shrink-0" style="background:{HK_COLORS[s]}"></span>
+							{HK_LABELS[s]}
+						</span>
+					{/each}
+				</div>
+			</div>
+
+			<div class="border-t border-border"></div>
+
+			<!-- Payment -->
+			<div>
+				<p class="mb-1.5 font-medium text-foreground">Payment status</p>
+				<div class="grid grid-cols-2 gap-x-3 gap-y-1">
+					<span class="flex items-center gap-1.5"><span class="inline-block rounded bg-red-500/80 px-[3px] py-0.5 text-[9px] font-bold text-white shrink-0">$?</span>Unpaid</span>
+					<span class="flex items-center gap-1.5"><span class="inline-block rounded bg-yellow-400/90 px-[3px] py-0.5 text-[9px] font-bold text-stone-900 shrink-0">½$</span>Partial</span>
+					<span class="flex items-center gap-1.5"><span class="inline-block rounded bg-green-500/70 px-[3px] py-0.5 text-[9px] font-bold text-white shrink-0">✓$</span>Paid</span>
+					<span class="flex items-center gap-1.5"><span class="inline-block rounded bg-white/25 ring-1 ring-black/20 px-[3px] py-0.5 text-[9px] font-bold shrink-0">G</span>Group booking</span>
+				</div>
+			</div>
 		</div>
 	</div>
 {/if}
