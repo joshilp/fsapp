@@ -130,21 +130,22 @@
 		if (!bookingId) return;
 		cancelBusy = true;
 		try {
-			// Dry-run: get policy preview (we do this by sending a GET-equivalent using the cancel logic)
-			// We calculate locally from the known booking data
-			const checkInMs = new Date(checkIn + 'T12:00:00').getTime();
-			const todayMs   = (() => { const d = new Date(); d.setHours(12,0,0,0); return d.getTime(); })();
-			const daysToCheckin = Math.round((checkInMs - todayMs) / 86400000);
-			const netPaid = collected - refunded;
-			// We don't know the property's exact policy here, so we show a preview with defaults;
-			// the server will apply the real policy.
-			cancelPreview = {
-				daysToCheckin,
-				depositPaidCents: netPaid,
-				cancellationFeeCents: 2500,   // default shown; server applies real value
-				refundCents: 0,               // populated after server response
-				noRefund: daysToCheckin >= 0 && daysToCheckin < 30
-			};
+			// Fetch real policy preview from server
+			const r = await fetch(`/api/booking/${bookingId}/cancel`);
+			if (r.ok) {
+				cancelPreview = await r.json();
+			} else {
+				// Fallback: local estimate
+				const checkInMs = new Date(checkIn + 'T12:00:00').getTime();
+				const todayMs   = (() => { const d = new Date(); d.setHours(12,0,0,0); return d.getTime(); })();
+				cancelPreview = {
+					daysToCheckin: Math.round((checkInMs - todayMs) / 86400000),
+					depositPaidCents: collected - refunded,
+					cancellationFeeCents: 2500,
+					refundCents: 0,
+					noRefund: false
+				};
+			}
 			cancelOpen = true;
 		} finally { cancelBusy = false; }
 	}
@@ -213,18 +214,11 @@
 	const grandTotal = $derived(rateTotal + taxTotal);
 	const collected  = $derived(payments.filter(p => p.type !== 'refund').reduce((s, p) => s + p.amount, 0));
 	const refunded   = $derived(payments.filter(p => p.type === 'refund').reduce((s, p) => s + p.amount, 0));
-
-	// Auto-suggest deposit: first rate line's unit price (1 night) when deposit field is empty
-	$effect(() => {
-		if (!isNew || depositAmt) return;
-		const firstUnit = parseFloat(rateLines[0]?.unit || '');
-		if (firstUnit > 0) depositAmt = firstUnit.toFixed(2);
-	});
 	const balanceCents = $derived(Math.round(grandTotal * 100) - collected + refunded);
 	const isOta      = $derived(['bookingcom','expedia','airbnb','other'].includes(bookingType));
 	const isNew      = $derived(!bookingId);
 
-	// Auto-suggest deposit: first rate line's unit price (1 night) when deposit field is empty
+	// Auto-suggest deposit when rate lines change (only if no deposit set yet)
 	$effect(() => {
 		if (!isNew || depositAmt) return;
 		const firstUnit = parseFloat(rateLines[0]?.unit || '');
@@ -399,6 +393,10 @@
 					label: `${l.seasonName} · ${l.nights} night${l.nights===1?'':'s'}`,
 					qty: String(l.nights), unit: (l.unitCents/100).toFixed(2), total: (l.totalCents/100).toFixed(2)
 				}));
+				// Set deposit suggestion from API (policy-aware), only if empty
+				if (!depositAmt && d.suggestedDepositCents > 0) {
+					depositAmt = (d.suggestedDepositCents / 100).toFixed(2);
+				}
 			}
 		} catch { /* ignore */ } finally { rateLoading = false; }
 	}
@@ -936,7 +934,7 @@
 					<div class="flex justify-between"><span class="text-muted-foreground">Deposit / payments received</span><span class="font-medium">{fmtMoney(cancelPreview.depositPaidCents)}</span></div>
 					<div class="flex justify-between"><span class="text-muted-foreground">Cancellation fee</span><span class="font-medium text-red-700">{fmtMoney(cancelPreview.cancellationFeeCents)}</span></div>
 					{#if cancelPreview.noRefund}
-						<div class="flex justify-between font-semibold text-red-700"><span>No refund</span><span>Within {30}-day window</span></div>
+						<div class="flex justify-between font-semibold text-red-700"><span>No refund</span><span>Within no-refund window</span></div>
 					{:else if cancelPreview.refundCents > 0}
 						<div class="flex justify-between font-semibold text-green-700"><span>Refund</span><span>{fmtMoney(cancelPreview.refundCents)}</span></div>
 					{:else}

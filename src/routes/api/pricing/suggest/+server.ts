@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { and, eq, lte, gte } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { rateSeasons, rateTiers, rooms } from '$lib/server/db/schema';
+import { properties, rateSeasons, rateTiers, rooms } from '$lib/server/db/schema';
 
 export type RateLine = {
 	seasonId: string;
@@ -17,6 +17,8 @@ export type RateLine = {
 export type PricingSuggestion = {
 	lines: RateLine[];
 	subtotalCents: number;
+	/** Suggested deposit based on property policy */
+	suggestedDepositCents: number;
 	/** Nights in a season that requires more nights than booked */
 	minNightWarning: string | null;
 	nightsTotal: number;
@@ -49,6 +51,17 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		columns: { id: true, propertyId: true, roomTypeId: true }
 	});
 	if (!room) return json({ error: 'Room not found' }, { status: 404 });
+
+	// Load property for deposit policy
+	const property = await db.query.properties.findFirst({
+		where: eq(properties.id, room.propertyId),
+		columns: {
+			depositCalcMethod: true,
+			depositNights: true,
+			depositPercent: true,
+			depositFlatCents: true
+		}
+	});
 
 	// Load all rate seasons for this property that overlap the stay
 	const seasons = await db.query.rateSeasons.findMany({
@@ -109,6 +122,27 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 	const subtotalCents = lines.reduce((s, l) => s + l.totalCents, 0);
 
+	// ── Calculate suggested deposit based on property policy ─────────────────
+	const method = property?.depositCalcMethod ?? 'first_night';
+	const depNights = property?.depositNights ?? 1;
+	let suggestedDepositCents = 0;
+	if (method === 'flat') {
+		suggestedDepositCents = property?.depositFlatCents ?? 0;
+	} else if (method === 'percentage') {
+		suggestedDepositCents = Math.round(subtotalCents * (property?.depositPercent ?? 20) / 100);
+	} else if (method === 'average') {
+		const avgNight = nightsTotal > 0 ? subtotalCents / nightsTotal : 0;
+		suggestedDepositCents = Math.round(avgNight * depNights);
+	} else {
+		// first_night (default): sum the first depNights nights of rate
+		let counted = 0;
+		for (const n of perNight) {
+			if (counted >= depNights) break;
+			suggestedDepositCents += n.rate;
+			counted++;
+		}
+	}
+
 	// Check if any season in this stay has a min-night requirement not met
 	let minNightWarning: string | null = null;
 	for (const line of lines) {
@@ -118,5 +152,5 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		}
 	}
 
-	return json({ lines, subtotalCents, minNightWarning, nightsTotal } satisfies PricingSuggestion);
+	return json({ lines, subtotalCents, suggestedDepositCents, minNightWarning, nightsTotal } satisfies PricingSuggestion);
 };

@@ -75,7 +75,10 @@ export const actions: Actions = {
 				policyText: g('policyText'),
 				depositNights: parseInt(g('depositNights') ?? '1') || 1,
 				cancellationFeeCents: Math.round((parseFloat(g('cancellationFeeDollars') ?? '25') || 25) * 100),
-				noRefundDays: parseInt(g('noRefundDays') ?? '30') || 30
+				noRefundDays: parseInt(g('noRefundDays') ?? '30') || 30,
+				depositCalcMethod: g('depositCalcMethod') ?? 'first_night',
+				depositPercent: parseInt(g('depositPercent') ?? '20') || 20,
+				depositFlatCents: Math.round((parseFloat(g('depositFlatDollars') ?? '0') || 0) * 100)
 			})
 			.where(eq(properties.id, id));
 

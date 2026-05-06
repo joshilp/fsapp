@@ -27,6 +27,8 @@
 		bookingId?: string;
 		// Payment events loaded from existing group
 		payments: PaymentEvent[];
+		// Suggested deposit cents from pricing API (policy-aware)
+		suggestedDepositCents?: number;
 	};
 
 	type PaymentEvent = {
@@ -273,6 +275,13 @@
 						label: `${l.seasonName} · ${l.nights} night${l.nights === 1 ? '' : 's'}`,
 						qty: String(l.nights), unit: (l.unitCents / 100).toFixed(2), total: (l.totalCents / 100).toFixed(2)
 					}));
+				}
+				// Update per-room suggested deposit from API (policy-aware)
+				roomSpecs[idx].suggestedDepositCents = d.suggestedDepositCents ?? 0;
+				// Re-compute overall suggested deposit as sum of all rooms' suggestions
+				if (!depositAmt || depositAmt === '0.00') {
+					const total = roomSpecs.reduce((s, rs) => s + (rs.suggestedDepositCents ?? 0), 0);
+					if (total > 0) depositAmt = (total / 100).toFixed(2);
 				}
 			}
 		} catch { /* ignore */ }

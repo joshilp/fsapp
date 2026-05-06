@@ -414,6 +414,8 @@ export type TodayBooking = {
 	numAdults: number;
 	numChildren: number;
 	notes: string | null;
+	/** 'paid' | 'partial' | 'unpaid' — derived from paymentEvents vs lineItems */
+	paymentStatus: 'paid' | 'partial' | 'unpaid';
 };
 
 export async function getTodayData(today: string): Promise<{
@@ -446,7 +448,9 @@ export async function getTodayData(today: string): Promise<{
 						roomType: { columns: { category: true } },
 						property: { columns: { id: true, name: true } }
 					}
-				}
+				},
+				paymentEvents: { columns: { type: true, amount: true } },
+				lineItems: { columns: { type: true, totalAmount: true } }
 			},
 			columns: {
 				id: true,
@@ -484,21 +488,34 @@ export async function getTodayData(today: string): Promise<{
 		})
 	]);
 
-	const toTodayBooking = (r: (typeof rows)[0]): TodayBooking => ({
-		id: r.id,
-		propertyId: r.propertyId,
-		propertyName: r.room?.property?.name ?? r.propertyId,
-		roomNumber: r.room?.roomNumber ?? '?',
-		roomTypeCategory: r.room?.roomType?.category ?? null,
-		guestName: r.guest?.name ?? null,
-		channelName: r.channel?.name ?? null,
-		status: r.status,
-		checkInDate: r.checkInDate,
-		checkOutDate: r.checkOutDate,
-		numAdults: r.numAdults,
-		numChildren: r.numChildren,
-		notes: r.notes
-	});
+	const toTodayBooking = (r: (typeof rows)[0]): TodayBooking => {
+		const netPaid = (r.paymentEvents ?? []).reduce(
+			(s, p) => s + (p.type === 'refund' ? -p.amount : p.amount), 0
+		);
+		const totalCharged = (r.lineItems ?? [])
+			.filter(li => li.type === 'rate' || li.type === 'extra' || li.type === 'tax')
+			.reduce((s, li) => s + li.totalAmount, 0);
+		const paymentStatus: TodayBooking['paymentStatus'] =
+			netPaid >= totalCharged && totalCharged > 0 ? 'paid'
+			: netPaid > 0 ? 'partial'
+			: 'unpaid';
+		return {
+			id: r.id,
+			propertyId: r.propertyId,
+			propertyName: r.room?.property?.name ?? r.propertyId,
+			roomNumber: r.room?.roomNumber ?? '?',
+			roomTypeCategory: r.room?.roomType?.category ?? null,
+			guestName: r.guest?.name ?? null,
+			channelName: r.channel?.name ?? null,
+			status: r.status,
+			checkInDate: r.checkInDate,
+			checkOutDate: r.checkOutDate,
+			numAdults: r.numAdults,
+			numChildren: r.numChildren,
+			notes: r.notes,
+			paymentStatus
+		};
+	};
 
 	const unassigned: UnassignedBooking[] = unassignedRows.map(r => {
 		const quotedTotal = r.lineItems

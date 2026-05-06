@@ -361,6 +361,24 @@
 			{/if}
 			{#if property?.cancellationPolicy}
 				<p class="mt-1"><strong>Cancellation:</strong> {property.cancellationPolicy}</p>
+			{:else if property}
+				{@const feeDollars = ((property.cancellationFeeCents ?? 0) / 100).toFixed(2)}
+				{@const noRefund = property.noRefundDays ?? 0}
+				<p class="mt-1">
+					<strong>Cancellation policy:</strong>
+					{#if noRefund > 0}
+						Cancellations within {noRefund} day{noRefund === 1 ? '' : 's'} of check-in receive no refund.
+					{/if}
+					{#if (property.cancellationFeeCents ?? 0) > 0}
+						A ${feeDollars} cancellation fee applies to all cancellations.
+					{/if}
+					{#if noRefund === 0 && (property.cancellationFeeCents ?? 0) === 0}
+						No cancellation fee.
+					{/if}
+				</p>
+			{/if}
+			{#if property?.depositNights && property.depositNights > 0}
+				<p class="mt-1 text-gray-500">Deposit: {property.depositNights} night{property.depositNights === 1 ? '' : 's'} required at time of booking.</p>
 			{/if}
 			<p class="mt-2 italic">Please present this confirmation upon arrival. Thank you for choosing {property?.name}!</p>
 		</div>

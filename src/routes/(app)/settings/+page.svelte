@@ -67,6 +67,7 @@
 			<Tabs.Trigger value="rooms">Rooms</Tabs.Trigger>
 			<Tabs.Trigger value="pricing">Pricing</Tabs.Trigger>
 			<Tabs.Trigger value="channels">Channels</Tabs.Trigger>
+			<Tabs.Trigger value="email">Email</Tabs.Trigger>
 		</Tabs.List>
 
 		<!-- ── Properties ─────────────────────────────────────────────────── -->
@@ -135,15 +136,8 @@
 							</div>
 							<!-- Cancellation policy numbers -->
 							<div class="col-span-2">
-								<Label class="mb-2 block">Cancellation policy</Label>
+								<Label class="mb-2 block">Cancellation &amp; Deposit Policy</Label>
 								<div class="grid grid-cols-3 gap-3">
-									<div class="flex flex-col gap-1">
-										<Label for="depNights-{prop.id}" class="text-xs text-muted-foreground">Deposit nights</Label>
-										<Input id="depNights-{prop.id}" name="depositNights" type="number" min="0" step="1"
-											value={prop.depositNights ?? 1}
-											class="w-full" />
-										<p class="text-[11px] text-muted-foreground">Nights to charge as deposit</p>
-									</div>
 									<div class="flex flex-col gap-1">
 										<Label for="cancelFee-{prop.id}" class="text-xs text-muted-foreground">Cancellation fee ($)</Label>
 										<Input id="cancelFee-{prop.id}" name="cancellationFeeDollars" type="number" min="0" step="0.01"
@@ -157,6 +151,49 @@
 											value={prop.noRefundDays ?? 30}
 											class="w-full" />
 										<p class="text-[11px] text-muted-foreground">Days before check-in with no refund</p>
+									</div>
+								</div>
+								<!-- Deposit calculation -->
+								<div class="mt-3 grid grid-cols-3 gap-3">
+									<div class="flex flex-col gap-1">
+										<Label for="depCalc-{prop.id}" class="text-xs text-muted-foreground">Deposit method</Label>
+										<select
+											id="depCalc-{prop.id}"
+											name="depositCalcMethod"
+											class="border-input bg-background focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
+										>
+											{#each [
+												{ value: 'first_night', label: 'First N nights rate' },
+												{ value: 'average', label: 'Average N nights rate' },
+												{ value: 'percentage', label: 'Percentage of total' },
+												{ value: 'flat', label: 'Flat amount' }
+											] as opt}
+												<option value={opt.value} selected={opt.value === (prop.depositCalcMethod ?? 'first_night')}>
+													{opt.label}
+												</option>
+											{/each}
+										</select>
+									</div>
+									<div class="flex flex-col gap-1">
+										<Label for="depNights-{prop.id}" class="text-xs text-muted-foreground">Deposit nights <span class="text-[10px]">(first/avg methods)</span></Label>
+										<Input id="depNights-{prop.id}" name="depositNights" type="number" min="0" step="1"
+											value={prop.depositNights ?? 1}
+											class="w-full" />
+										<p class="text-[11px] text-muted-foreground">Nights charged as deposit</p>
+									</div>
+									<div class="flex flex-col gap-1">
+										<Label for="depPct-{prop.id}" class="text-xs text-muted-foreground">Deposit % <span class="text-[10px]">(pct method)</span></Label>
+										<Input id="depPct-{prop.id}" name="depositPercent" type="number" min="0" max="100" step="1"
+											value={prop.depositPercent ?? 20}
+											class="w-full" />
+										<p class="text-[11px] text-muted-foreground">% of total stay</p>
+									</div>
+									<div class="flex flex-col gap-1">
+										<Label for="depFlat-{prop.id}" class="text-xs text-muted-foreground">Flat deposit ($) <span class="text-[10px]">(flat method)</span></Label>
+										<Input id="depFlat-{prop.id}" name="depositFlatDollars" type="number" min="0" step="0.01"
+											value={((prop.depositFlatCents ?? 0) / 100).toFixed(2)}
+											class="w-full" />
+										<p class="text-[11px] text-muted-foreground">Fixed deposit amount</p>
 									</div>
 								</div>
 							</div>
@@ -772,6 +809,40 @@
 					</Button>
 				</form>
 			</div>
-		</Tabs.Content>
+	</Tabs.Content>
+
+	<!-- ── Email Configuration ─────────────────────────────────────────── -->
+	<Tabs.Content value="email">
+		<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
+			<h2 class="mb-1 font-semibold">Email Notifications</h2>
+			<p class="text-muted-foreground mb-4 text-sm">
+				Configure email sending via Resend. Set <code class="bg-muted rounded px-1">RESEND_API_KEY</code>,
+				<code class="bg-muted rounded px-1">RESEND_FROM_EMAIL</code>, and optionally
+				<code class="bg-muted rounded px-1">RESEND_OPERATOR_EMAIL</code> in your <code class="bg-muted rounded px-1">.env</code> file.
+			</p>
+			<div class="space-y-4 text-sm">
+				<div class="rounded-md border p-4">
+					<h3 class="mb-2 font-medium">When emails are sent</h3>
+					<ul class="text-muted-foreground list-disc pl-5 space-y-1">
+						<li><strong>Booking confirmation</strong> — sent to guest when a new booking is created (if guest email is on file)</li>
+						<li><strong>Online booking alert</strong> — sent to <code class="bg-muted rounded px-1">RESEND_OPERATOR_EMAIL</code> when a guest books online and room assignment is needed</li>
+						<li><strong>Cancellation notice</strong> — sent to guest when a booking is cancelled</li>
+					</ul>
+				</div>
+				<div class="rounded-md border p-4">
+					<h3 class="mb-2 font-medium">Environment variables</h3>
+					<div class="space-y-2 font-mono text-xs">
+						<div><span class="font-semibold">RESEND_API_KEY</span>=re_xxxxxxxxxxxxxxxxxxxx</div>
+						<div><span class="font-semibold">RESEND_FROM_EMAIL</span>=reservations@yourmotel.com <span class="text-muted-foreground">(must be verified domain in Resend)</span></div>
+						<div><span class="font-semibold">RESEND_OPERATOR_EMAIL</span>=owner@yourmotel.com <span class="text-muted-foreground">(optional — receives new online booking alerts)</span></div>
+					</div>
+				</div>
+				<p class="text-muted-foreground text-xs">
+					If <code class="bg-muted rounded px-1">RESEND_API_KEY</code> is blank, email sending is silently disabled — no errors will occur.
+					Get a free API key at <a href="https://resend.com" target="_blank" class="underline">resend.com</a>.
+				</p>
+			</div>
+		</div>
+	</Tabs.Content>
 	</Tabs.Root>
 </div>

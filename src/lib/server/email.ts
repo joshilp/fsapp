@@ -183,3 +183,67 @@ export async function sendOperatorAlert(p: OperatorAlertParams): Promise<void> {
 		html
 	});
 }
+
+type CancellationNoticeParams = {
+	guestName: string;
+	guestEmail: string;
+	propertyName: string;
+	checkInDate: string;
+	checkOutDate: string;
+	refundCents: number;
+	cancellationFeeCents: number;
+};
+
+export async function sendCancellationNotice(p: CancellationNoticeParams): Promise<void> {
+	const from = env.RESEND_FROM_EMAIL || 'noreply@example.com';
+
+	const html = `
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px;color:#1a1a1a">
+  <h2 style="margin-bottom:4px">${p.propertyName}</h2>
+  <p style="color:#c00;margin-top:0;font-weight:600">Booking Cancellation Notice</p>
+  <hr style="border:none;border-top:1px solid #ddd;margin:16px 0">
+
+  <p>Hi ${p.guestName},</p>
+  <p>Your booking has been cancelled. Here's a summary:</p>
+
+  <table style="width:100%;border-collapse:collapse;margin:16px 0">
+    <tr>
+      <td style="padding:6px 12px 6px 0;color:#666;width:40%">Property</td>
+      <td style="padding:6px 0"><strong>${p.propertyName}</strong></td>
+    </tr>
+    <tr style="background:#f9f9f9">
+      <td style="padding:6px 12px 6px 0;color:#666">Was: Check-in</td>
+      <td style="padding:6px 0">${fmtDate(p.checkInDate)}</td>
+    </tr>
+    <tr>
+      <td style="padding:6px 12px 6px 0;color:#666">Was: Check-out</td>
+      <td style="padding:6px 0">${fmtDate(p.checkOutDate)}</td>
+    </tr>
+    ${p.cancellationFeeCents > 0 ? `
+    <tr style="background:#fff3cd">
+      <td style="padding:6px 12px 6px 0;color:#666">Cancellation fee</td>
+      <td style="padding:6px 0;color:#c00"><strong>${fmtMoney(p.cancellationFeeCents)}</strong></td>
+    </tr>` : ''}
+    <tr style="background:#e8f5e9">
+      <td style="padding:6px 12px 6px 0;color:#666">Refund</td>
+      <td style="padding:6px 0;color:#2e7d32"><strong>${p.refundCents > 0 ? fmtMoney(p.refundCents) : 'None'}</strong></td>
+    </tr>
+  </table>
+
+  <p style="color:#555;font-size:14px">
+    If you have any questions, please contact us directly.
+  </p>
+
+  <p style="color:#555;font-size:14px">Thank you for choosing ${p.propertyName}.</p>
+</body>
+</html>`;
+
+	await send({
+		from,
+		to: [p.guestEmail],
+		subject: `Booking Cancelled — ${p.propertyName}`,
+		html
+	});
+}

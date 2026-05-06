@@ -46,6 +46,14 @@ export const properties = sqliteTable('properties', {
 	cancellationFeeCents: integer('cancellation_fee_cents').notNull().default(2500),
 	// Days before check-in inside which no refund is given (0 = always refund minus fee)
 	noRefundDays: integer('no_refund_days').notNull().default(30),
+	// ── Deposit calculation method ────────────────────────────────────────────
+	// first_night: depositNights × first nightly rate
+	// average:     depositNights × (totalStay / nights)
+	// percentage:  depositPercent% of total stay
+	// flat:        depositFlatCents fixed amount
+	depositCalcMethod: text('deposit_calc_method').notNull().default('first_night'),
+	depositPercent: integer('deposit_percent'),      // e.g. 20 = 20%, used when method = 'percentage'
+	depositFlatCents: integer('deposit_flat_cents'), // fixed cents, used when method = 'flat'
 	...timestamps
 });
 

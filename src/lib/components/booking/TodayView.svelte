@@ -1,6 +1,10 @@
 <script lang="ts">
 	import type { TodayBooking, UnassignedBooking } from '$lib/server/booking-queries';
 	import UnassignedPanel from './UnassignedPanel.svelte';
+	import BookingCard from './BookingCard.svelte';
+
+	type Channel = { id: string; name: string };
+	type User    = { id: string; name: string };
 
 	type Props = {
 		arrivals: TodayBooking[];
@@ -8,9 +12,20 @@
 		inHouse: TodayBooking[];
 		unassigned: UnassignedBooking[];
 		today: string;
+		channels?: Channel[];
+		users?: User[];
+		currentUserId?: string;
 	};
 
-	let { arrivals, departures, inHouse, unassigned, today }: Props = $props();
+	let { arrivals, departures, inHouse, unassigned, today, channels = [], users = [], currentUserId = '' }: Props = $props();
+
+	let cardOpen = $state(false);
+	let cardBookingId = $state<string | undefined>(undefined);
+
+	function openCard(bookingId: string) {
+		cardBookingId = bookingId;
+		cardOpen = true;
+	}
 
 	const todayLabel = $derived(
 		new Date(today + 'T12:00:00').toLocaleDateString('en-CA', {
@@ -36,8 +51,25 @@
 		return parts.join(' ');
 	}
 
+	const payBadge = (ps: TodayBooking['paymentStatus']) =>
+		ps === 'paid'    ? { text: '✓$', cls: 'bg-green-100 text-green-700' }
+		: ps === 'partial' ? { text: '½$', cls: 'bg-amber-100 text-amber-700' }
+		:                    { text: '$?', cls: 'bg-red-100 text-red-700' };
+
+	const payBadgeText = (ps: TodayBooking['paymentStatus']) => payBadge(ps).text;
+	const payBadgeCls  = (ps: TodayBooking['paymentStatus']) => payBadge(ps).cls;
+
 	const totalInHouseAfter = $derived(arrivals.length + inHouse.length);
 </script>
+
+<!-- Unified booking card modal -->
+<BookingCard
+	bind:open={cardOpen}
+	bookingId={cardBookingId}
+	{channels}
+	{users}
+	{currentUserId}
+/>
 
 {#if unassigned.length > 0}
 	<UnassignedPanel bookings={unassigned} {today} />
@@ -88,48 +120,52 @@
 						<th class="pb-1 pr-3 text-left font-medium">Guest</th>
 						<th class="pb-1 pr-3 text-left font-medium">Stay</th>
 						<th class="pb-1 pr-3 text-left font-medium">Via</th>
+						<th class="pb-1 pr-3 text-left font-medium">Paid</th>
 						<th class="pb-1 text-right font-medium">Action</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each arrivals as b}
-						<tr class="hover:bg-muted/40 border-border border-b text-sm last:border-0">
-							<td class="py-2 pr-3 font-mono font-medium">
-								{b.roomNumber}
-								{#if b.roomTypeCategory}
-									<span class="text-muted-foreground ml-0.5 text-[10px] font-normal">{b.roomTypeCategory}</span>
-								{/if}
-							</td>
-							<td class="py-2 pr-3 text-xs text-gray-400">{b.propertyName.replace(' Motel', '')}</td>
-							<td class="py-2 pr-3">
-								<div class="font-medium">{b.guestName ?? '—'}</div>
-								{#if occupants(b)}
-									<div class="text-muted-foreground text-xs">{occupants(b)}</div>
-								{/if}
-								{#if b.notes}
-									<div class="mt-0.5 max-w-[180px] truncate text-[10px] italic text-amber-600" title={b.notes}>{b.notes}</div>
-								{/if}
-							</td>
-							<td class="py-2 pr-3 text-xs text-gray-500 whitespace-nowrap">
-								{nights(b.checkInDate, b.checkOutDate)} nights → {formatDate(b.checkOutDate)}
-							</td>
-							<td class="py-2 pr-3">
-								{#if b.channelName && b.channelName !== 'Direct'}
-									<span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 uppercase">
-										{b.channelName === 'Expedia' ? 'E' : b.channelName[0]}
-									</span>
-								{/if}
-							</td>
-							<td class="py-2 text-right">
-								<a
-									href="/booking/{b.id}/checkin"
-									class="bg-primary text-primary-foreground hover:bg-primary/90 rounded px-2.5 py-1 text-xs font-medium"
-								>
-									Check In →
-								</a>
-							</td>
-						</tr>
-					{/each}
+					<tr class="hover:bg-muted/40 border-border border-b text-sm last:border-0">
+						<td class="py-2 pr-3 font-mono font-medium">
+							{b.roomNumber}
+							{#if b.roomTypeCategory}
+								<span class="text-muted-foreground ml-0.5 text-[10px] font-normal">{b.roomTypeCategory}</span>
+							{/if}
+						</td>
+						<td class="py-2 pr-3 text-xs text-gray-400">{b.propertyName.replace(' Motel', '')}</td>
+						<td class="py-2 pr-3">
+							<div class="font-medium">{b.guestName ?? '—'}</div>
+							{#if occupants(b)}
+								<div class="text-muted-foreground text-xs">{occupants(b)}</div>
+							{/if}
+							{#if b.notes}
+								<div class="mt-0.5 max-w-[180px] truncate text-[10px] italic text-amber-600" title={b.notes}>{b.notes}</div>
+							{/if}
+						</td>
+						<td class="py-2 pr-3 text-xs text-gray-500 whitespace-nowrap">
+							{nights(b.checkInDate, b.checkOutDate)} nights → {formatDate(b.checkOutDate)}
+						</td>
+						<td class="py-2 pr-3">
+							{#if b.channelName && b.channelName !== 'Direct'}
+								<span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 uppercase">
+									{b.channelName === 'Expedia' ? 'E' : b.channelName[0]}
+								</span>
+							{/if}
+						</td>
+						<td class="py-2 pr-2">
+							<span class="rounded px-1.5 py-0.5 text-[10px] font-bold {payBadgeCls(b.paymentStatus)}">{payBadgeText(b.paymentStatus)}</span>
+						</td>
+						<td class="py-2 text-right">
+							<button
+								onclick={() => openCard(b.id)}
+								class="bg-primary text-primary-foreground hover:bg-primary/90 rounded px-2.5 py-1 text-xs font-medium"
+							>
+								Check In →
+							</button>
+						</td>
+					</tr>
+				{/each}
 				</tbody>
 			</table>
 		</section>
@@ -152,6 +188,7 @@
 						<th class="pb-1 pr-3 text-left font-medium">Guest</th>
 						<th class="pb-1 pr-3 text-left font-medium">Stay</th>
 						<th class="pb-1 pr-3 text-left font-medium">Via</th>
+						<th class="pb-1 pr-3 text-left font-medium">Paid</th>
 						<th class="pb-1 text-right font-medium">Action</th>
 					</tr>
 				</thead>
@@ -184,13 +221,16 @@
 									</span>
 								{/if}
 							</td>
+							<td class="py-2 pr-2">
+								<span class="rounded px-1.5 py-0.5 text-[10px] font-bold {payBadgeCls(b.paymentStatus)}">{payBadgeText(b.paymentStatus)}</span>
+							</td>
 							<td class="py-2 text-right">
-								<a
-									href="/booking/{b.id}/checkin"
+								<button
+									onclick={() => openCard(b.id)}
 									class="rounded border border-orange-300 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100"
 								>
 									Check Out →
-								</a>
+								</button>
 							</td>
 						</tr>
 					{/each}
@@ -217,6 +257,7 @@
 						<th class="pb-1 pr-3 text-left font-medium">Guest</th>
 						<th class="pb-1 pr-3 text-left font-medium">Checkout</th>
 						<th class="pb-1 pr-3 text-left font-medium">Via</th>
+						<th class="pb-1 pr-3 text-left font-medium">Paid</th>
 						<th class="pb-1 text-right font-medium"></th>
 					</tr>
 				</thead>
@@ -249,13 +290,16 @@
 									</span>
 								{/if}
 							</td>
+							<td class="py-2 pr-2">
+								<span class="rounded px-1.5 py-0.5 text-[10px] font-bold {payBadgeCls(b.paymentStatus)}">{payBadgeText(b.paymentStatus)}</span>
+							</td>
 							<td class="py-2 text-right">
-								<a
-									href="/booking/{b.id}/checkin"
+								<button
+									onclick={() => openCard(b.id)}
 									class="text-muted-foreground rounded border px-2.5 py-1 text-xs hover:bg-muted"
 								>
 									View
-								</a>
+								</button>
 							</td>
 						</tr>
 					{/each}

@@ -110,6 +110,9 @@
 		inHouse={data.todayData.inHouse}
 		unassigned={data.todayData.unassigned}
 		today={data.today}
+		channels={data.channels}
+		users={data.users}
+		currentUserId={data.currentUserId}
 	/>
 {:else if data.falcon && data.spanish}
 	<div class="flex min-h-0 flex-1 flex-col">
