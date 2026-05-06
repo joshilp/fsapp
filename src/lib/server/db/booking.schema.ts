@@ -310,6 +310,9 @@ export const bookings = sqliteTable(
 		// Guest signed the registration card / waiver
 		waiverSigned: integer('waiver_signed', { mode: 'boolean' }).default(false),
 
+		// Tracks when a confirmation email was last sent to the guest
+		confirmationSentAt: integer('confirmation_sent_at', { mode: 'timestamp_ms' }),
+
 		...timestamps
 	},
 	(t) => [

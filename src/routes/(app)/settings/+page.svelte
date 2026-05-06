@@ -109,14 +109,19 @@
 									<Label for="postal-{prop.id}">Postal code</Label>
 									<Input id="postal-{prop.id}" name="postalCode" value={prop.postalCode ?? ''} />
 								</div>
-								<div class="flex flex-col gap-1.5">
-									<Label for="phone-{prop.id}">Phone</Label>
-									<Input id="phone-{prop.id}" name="phone" type="tel" value={prop.phone ?? ''} />
-								</div>
-								<div class="flex flex-col gap-1.5">
-									<Label for="gst-{prop.id}">GST number</Label>
-									<Input id="gst-{prop.id}" name="gstNumber" value={prop.gstNumber ?? ''} />
-								</div>
+							<div class="flex flex-col gap-1.5">
+								<Label for="phone-{prop.id}">Phone</Label>
+								<Input id="phone-{prop.id}" name="phone" type="tel" value={prop.phone ?? ''} />
+							</div>
+							<div class="flex flex-col gap-1.5">
+								<Label for="gst-{prop.id}">GST number</Label>
+								<Input id="gst-{prop.id}" name="gstNumber" value={prop.gstNumber ?? ''} />
+							</div>
+							<div class="col-span-2 flex flex-col gap-1.5">
+								<Label for="logo-{prop.id}">Logo URL</Label>
+								<Input id="logo-{prop.id}" name="logoUrl" type="url" placeholder="https://…/logo.png" value={prop.logoUrl ?? ''} />
+								<p class="text-xs text-muted-foreground">Appears on confirmation emails and the print slip. Paste any public image URL.</p>
+							</div>
 								<div class="flex flex-col gap-1.5">
 									<Label>Check-in / Check-out times</Label>
 									<div class="flex items-center gap-2">

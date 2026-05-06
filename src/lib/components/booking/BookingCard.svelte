@@ -10,6 +10,7 @@
 	import GroupCard from './GroupCard.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
+	import { toast } from 'svelte-sonner';
 
 	type Channel = { id: string; name: string };
 	type User    = { id: string; name: string };
@@ -126,6 +127,78 @@
 	} | null>(null);
 	let cancelOpen = $state(false);
 
+	// ── Send Confirmation ──────────────────────────────────────────────────────
+	let confirmBusy  = $state(false);
+	let confirmSentAt = $state<string | null>(null); // ISO string or null
+	// Property details for the email preview
+	let propLogoUrl  = $state<string | null>(null);
+	let propAddress  = $state<string | null>(null);
+	let propPhone    = $state<string | null>(null);
+	let propCheckInTime  = $state('2:00 PM');
+	let propCheckOutTime = $state('10:30 AM');
+
+	function buildEmailSubject() {
+		return `Booking Confirmation — ${propName || 'Your Reservation'}`;
+	}
+
+	function buildEmailBody() {
+		const fmtDate = (iso: string) => new Date(iso + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+		const n = nights;
+		const totalDollars = grandTotal > 0 ? `$${grandTotal.toFixed(2)}` : 'TBD';
+		const paid = (collected - refunded) / 100;
+		const balance = Math.max(0, grandTotal - (collected - refunded) / 100);
+		const lines: string[] = [];
+		lines.push(`Hi ${guestName || 'Guest'},`);
+		lines.push('');
+		lines.push(`Your booking at ${propName} is confirmed. Here are the details:`);
+		lines.push('');
+		lines.push(`  Check-in:   ${checkIn ? fmtDate(checkIn) : '—'}  (after ${propCheckInTime || '2:00 PM'})`);
+		lines.push(`  Check-out:  ${checkOut ? fmtDate(checkOut) : '—'}  (by ${propCheckOutTime || '10:30 AM'})`);
+		lines.push(`  Duration:   ${n} night${n === 1 ? '' : 's'}`);
+		if (roomNumber_) lines.push(`  Room:       ${roomNumber_}${roomTypeName ? ' – ' + roomTypeName : ''}`);
+		lines.push('');
+		if (grandTotal > 0) {
+			lines.push(`  Total:      ${totalDollars}`);
+			if (paid > 0) lines.push(`  Deposit:    $${paid.toFixed(2)} received`);
+			if (balance > 0) lines.push(`  Balance due: $${balance.toFixed(2)} on arrival`);
+		}
+		if (propAddress) { lines.push(''); lines.push(`Address: ${propAddress}`); }
+		if (propPhone)   lines.push(`Phone:   ${propPhone}`);
+		lines.push('');
+		lines.push('Please present this confirmation upon arrival. We look forward to your stay!');
+		lines.push('');
+		lines.push(`— ${propName}`);
+		return lines.join('\n');
+	}
+
+	function buildMailtoHref() {
+		const subject = encodeURIComponent(buildEmailSubject());
+		const body = encodeURIComponent(buildEmailBody());
+		const to = encodeURIComponent(guestEmail ?? '');
+		return `mailto:${to}?subject=${subject}&body=${body}`;
+	}
+
+	async function markConfirmationSent() {
+		if (!bookingId) return;
+		confirmBusy = true;
+		try {
+			const r = await fetch(`/api/booking/${bookingId}/send-confirmation`, { method: 'POST' });
+			if (r.ok) {
+				const d = await r.json();
+				confirmSentAt = d.confirmationSentAt;
+			}
+		} catch { /* ignore */ } finally { confirmBusy = false; }
+	}
+
+	async function copyConfirmationText() {
+		try {
+			await navigator.clipboard.writeText(buildEmailBody());
+			toast.success('Copied to clipboard');
+		} catch {
+			toast.error('Could not copy — try selecting the text manually');
+		}
+	}
+
 	async function openCancelDialog() {
 		if (!bookingId) return;
 		cancelBusy = true;
@@ -200,7 +273,8 @@
 		} catch { toggleMsg = 'Network error.'; }
 		finally { toggleBusy = false; await invalidateAll(); }
 	}
-	let suggestions   = $state<{ id: string; name: string; phone: string | null }[]>([]);
+	type GuestSuggestion = { id: string; name: string; phone: string | null; email: string | null; street: string | null; city: string | null; provinceState: string | null };
+	let suggestions   = $state<GuestSuggestion[]>([]);
 	let showSuggest   = $state(false);
 	let nameTimer: ReturnType<typeof setTimeout>;
 
@@ -264,6 +338,8 @@
 		addingPay = false; payAmt = ''; payMethod = 'cash'; payType = 'final_charge'; payNotes = ''; payErr = '';
 		suggestions = []; showSuggest = false;
 		depositAmt = ''; cancelPreview = null; cancelOpen = false; cancelBusy = false;
+		confirmBusy = false; confirmSentAt = null;
+		propLogoUrl = null; propAddress = null; propPhone = null;
 	}
 
 	function initNew(nb: NewBooking) {
@@ -302,20 +378,26 @@
 			if (!r.ok) throw new Error('Load failed');
 			const d = await r.json();
 			const b = d.booking;
-			status = b.status; propId = b.propertyId;
-			propName = b.room?.property?.name ?? propertyName ?? '';
-			roomId_ = b.roomId ?? ''; roomNumber_ = b.room?.roomNumber ?? '';
-			roomTypeName = b.room?.roomType?.name ?? '';
-			roomConfigs_ = b.roomConfigs ?? []; selConfig = b.roomConfig ?? roomConfigs_[0] ?? '';
-			checkIn = b.checkInDate; checkOut = b.checkOutDate;
-			channelId = b.channelId ?? ''; otaRef = b.otaConfirmationNumber ?? '';
-			notes = b.notes ?? ''; checkoutNotes = b.checkoutNotes ?? '';
-			numAdults = b.numAdults; numChildren = b.numChildren;
-			vehMake = b.vehicleMake ?? ''; vehColour = b.vehicleColour ?? ''; vehPlate = b.vehiclePlate ?? '';
-			waiverSigned = b.waiverSigned ?? false;
-			taxPresets = d.presets ?? []; ccInfo = d.cc ?? null;
-			payments = b.paymentEvents ?? [];
-			groupInfo = d.groupInfo ?? null;
+		status = b.status; propId = b.propertyId;
+		propName = b.room?.property?.name ?? propertyName ?? '';
+		propLogoUrl = b.room?.property?.logoUrl ?? null;
+		propAddress = b.room?.property?.address ?? null;
+		propPhone   = b.room?.property?.phone ?? null;
+		propCheckInTime  = b.room?.property?.checkinTime  ?? '2:00 PM';
+		propCheckOutTime = b.room?.property?.checkoutTime ?? '10:30 AM';
+		roomId_ = b.roomId ?? ''; roomNumber_ = b.room?.roomNumber ?? '';
+		roomTypeName = b.room?.roomType?.name ?? '';
+		roomConfigs_ = b.roomConfigs ?? []; selConfig = b.roomConfig ?? roomConfigs_[0] ?? '';
+		checkIn = b.checkInDate; checkOut = b.checkOutDate;
+		channelId = b.channelId ?? ''; otaRef = b.otaConfirmationNumber ?? '';
+		notes = b.notes ?? ''; checkoutNotes = b.checkoutNotes ?? '';
+		numAdults = b.numAdults; numChildren = b.numChildren;
+		vehMake = b.vehicleMake ?? ''; vehColour = b.vehicleColour ?? ''; vehPlate = b.vehiclePlate ?? '';
+		waiverSigned = b.waiverSigned ?? false;
+		taxPresets = d.presets ?? []; ccInfo = d.cc ?? null;
+		payments = b.paymentEvents ?? [];
+		groupInfo = d.groupInfo ?? null;
+		confirmSentAt = b.confirmationSentAt ? new Date(b.confirmationSentAt).toISOString() : null;
 			const chName = b.channel?.name ?? '';
 			const mt = BOOKING_TYPES.find(t => t.channelMatch.toLowerCase() === chName.toLowerCase());
 			bookingType = mt?.id ?? (b.channel?.isOta ? 'bookingcom' : 'phone');
@@ -425,9 +507,13 @@
 		}, 250);
 	}
 
-	function pickGuest(s: { id: string; name: string; phone: string | null }) {
+	function pickGuest(s: GuestSuggestion) {
 		guestId = s.id; guestName = s.name;
 		if (s.phone) guestPhone = s.phone;
+		if (s.email) guestEmail = s.email;
+		if (s.street) guestStreet = s.street;
+		if (s.city) guestCity = s.city;
+		if (s.provinceState) guestProv = s.provinceState;
 		showSuggest = false;
 	}
 
@@ -888,6 +974,128 @@
 						<a href="/booking/{bookingId}/move"
 							class="rounded-md border border-input px-3 py-1.5 text-xs hover:bg-muted">Move room</a>
 					{/if}
+
+					<!-- Send Confirmation — always visible, disabled when no guest email -->
+					<span title={!guestEmail ? 'No guest email on file' : undefined}>
+					<CustomDialog
+						title="Send Confirmation"
+						disabled={!guestEmail}
+						dialogClass="sm:max-w-xl"
+					>
+					{#snippet trigger()}
+						<span class="flex items-center gap-1">
+							✉ Send Confirmation
+							{#if confirmSentAt}
+								<span class="text-[10px] text-muted-foreground font-normal">
+									(sent {new Date(confirmSentAt).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })})
+								</span>
+							{/if}
+						</span>
+					{/snippet}
+						{#snippet content()}
+							<div class="space-y-4">
+								<!-- Email preview card -->
+								<div class="rounded-lg border border-border bg-white text-sm shadow-sm overflow-hidden">
+									<!-- Header with logo -->
+									<div class="bg-gray-50 border-b border-gray-200 px-5 py-4 flex items-center gap-3">
+										{#if propLogoUrl}
+											<img src={propLogoUrl} alt={propName} class="h-10 w-auto object-contain" />
+										{:else}
+											<div class="text-base font-bold tracking-tight text-gray-800">{propName}</div>
+										{/if}
+										<div class="ml-auto text-xs text-gray-400 text-right">
+											<div class="font-semibold text-gray-600">Booking Confirmation</div>
+											{#if propAddress}<div>{propAddress}</div>{/if}
+											{#if propPhone}<div>{propPhone}</div>{/if}
+										</div>
+									</div>
+									<!-- Body -->
+									<div class="px-5 py-4 space-y-3 text-gray-700">
+										<p>Hi <strong>{guestName || 'Guest'}</strong>,</p>
+										<p>Your booking is confirmed. Here are the details:</p>
+										<table class="w-full text-xs mt-2">
+											<tbody>
+												<tr class="border-b border-gray-100">
+													<td class="py-1.5 pr-4 text-gray-500 w-28">Check-in</td>
+													<td class="py-1.5 font-medium">
+														{checkIn ? new Date(checkIn + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+														<span class="text-gray-400 font-normal ml-1">after {propCheckInTime}</span>
+													</td>
+												</tr>
+												<tr class="border-b border-gray-100">
+													<td class="py-1.5 pr-4 text-gray-500">Check-out</td>
+													<td class="py-1.5 font-medium">
+														{checkOut ? new Date(checkOut + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' }) : '—'}
+														<span class="text-gray-400 font-normal ml-1">by {propCheckOutTime}</span>
+													</td>
+												</tr>
+												<tr class="border-b border-gray-100">
+													<td class="py-1.5 pr-4 text-gray-500">Duration</td>
+													<td class="py-1.5">{nights} night{nights === 1 ? '' : 's'}</td>
+												</tr>
+												{#if roomNumber_}
+													<tr class="border-b border-gray-100">
+														<td class="py-1.5 pr-4 text-gray-500">Room</td>
+														<td class="py-1.5">{roomNumber_}{roomTypeName ? ' – ' + roomTypeName : ''}</td>
+													</tr>
+												{/if}
+												{#if grandTotal > 0}
+													<tr class="border-b border-gray-100">
+														<td class="py-1.5 pr-4 text-gray-500">Total</td>
+														<td class="py-1.5 font-semibold">${grandTotal.toFixed(2)}</td>
+													</tr>
+													{#if (collected - refunded) > 0}
+														<tr class="border-b border-gray-100">
+															<td class="py-1.5 pr-4 text-gray-500">Deposit</td>
+															<td class="py-1.5 text-green-700">${((collected - refunded) / 100).toFixed(2)} received</td>
+														</tr>
+														{@const balDue = Math.max(0, grandTotal - (collected - refunded) / 100)}
+														{#if balDue > 0}
+															<tr>
+																<td class="py-1.5 pr-4 text-gray-500">Balance due</td>
+																<td class="py-1.5 font-semibold text-amber-700">${balDue.toFixed(2)} on arrival</td>
+															</tr>
+														{/if}
+													{/if}
+												{/if}
+											</tbody>
+										</table>
+										<p class="text-xs text-gray-500 pt-1 italic">Please bring this confirmation upon arrival. We look forward to your stay!</p>
+									</div>
+									<!-- Footer -->
+									<div class="bg-gray-50 border-t border-gray-200 px-5 py-2 text-xs text-gray-400">
+										{propName}{propAddress ? ' · ' + propAddress : ''}{propPhone ? ' · ' + propPhone : ''}
+									</div>
+								</div>
+								<!-- Sending to -->
+								<p class="text-xs text-muted-foreground">
+									Sending to: <strong class="text-foreground">{guestEmail}</strong>
+									{#if confirmSentAt}
+										· Last sent {new Date(confirmSentAt).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
+									{/if}
+								</p>
+							</div>
+						{/snippet}
+						{#snippet footer()}
+							<div class="flex w-full items-center justify-between gap-2">
+								<button type="button"
+									onclick={copyConfirmationText}
+									class="rounded-md border border-input px-3 py-2 text-sm hover:bg-muted">
+									Copy text
+								</button>
+								<a
+									href={buildMailtoHref()}
+									target="_blank"
+									rel="noopener"
+									onclick={() => markConfirmationSent()}
+									class="rounded-md bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 text-sm font-medium flex items-center gap-1.5">
+									✉ Open in Mail App
+								</a>
+							</div>
+						{/snippet}
+					</CustomDialog>
+					</span>
+
 					{#if status !== 'cancelled' && status !== 'checked_out'}
 						<button type="button" onclick={openCancelDialog} disabled={cancelBusy}
 							class="rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">

@@ -10,12 +10,10 @@ import {
 	ccStaging,
 	guests,
 	paymentEvents,
-	properties,
 	rooms
 } from '$lib/server/db/schema';
 import { user } from '$lib/server/db/auth.schema';
 import { encryptCc } from '$lib/server/cc';
-import { sendGuestConfirmation } from '$lib/server/email';
 
 // ─── Load ─────────────────────────────────────────────────────────────────────
 
@@ -520,27 +518,7 @@ export const actions: Actions = {
 				}
 			}
 
-			// Send confirmation email to guest (non-blocking)
-			if (guestEmail && guestEmail.includes('@') && guestId) {
-				const property = await db.query.properties.findFirst({
-					where: eq(properties.id, propertyId!),
-					columns: { name: true }
-				});
-				const nights = Math.round((new Date(checkOut! + 'T12:00:00').getTime() - new Date(checkIn! + 'T12:00:00').getTime()) / 86400000);
-				const totalCents = newItems.filter(li => li.type === 'rate' || li.type === 'extra').reduce((s, li) => s + (li.totalAmount ?? 0), 0);
-				void sendGuestConfirmation({
-					guestName: guestName ?? 'Guest',
-					guestEmail,
-					propertyName: property?.name ?? '',
-					checkInDate: checkIn!,
-					checkOutDate: checkOut!,
-					nights,
-					requestedRoomType: null,
-					quotedTotalCents: totalCents > 0 ? totalCents : null,
-					publicToken: newId,
-					confirmationUrl: ''
-				});
-			}
+			// Confirmation email is sent manually via "Send Confirmation" button in BookingCard
 
 			redirect(303, `/booking?month=${checkIn!.slice(0, 7)}`);
 		} else {

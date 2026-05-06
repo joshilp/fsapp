@@ -88,6 +88,7 @@
 		.no-print { display: none !important; }
 		:global(body) { font-size: 11pt; }
 		@page { margin: 0.6in; size: letter; }
+		* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 	}
 </style>
 

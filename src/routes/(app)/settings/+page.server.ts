@@ -63,14 +63,15 @@ export const actions: Actions = {
 		await db
 			.update(properties)
 			.set({
-				name: g('name') ?? undefined,
-				address: g('address') ?? undefined,
-				city: g('city') ?? undefined,
-				province: g('province') ?? undefined,
-				postalCode: g('postalCode'),
-				phone: g('phone'),
-				gstNumber: g('gstNumber'),
-				checkinTime: g('checkinTime') ?? undefined,
+			name: g('name') ?? undefined,
+			address: g('address') ?? undefined,
+			city: g('city') ?? undefined,
+			province: g('province') ?? undefined,
+			postalCode: g('postalCode'),
+			phone: g('phone'),
+			gstNumber: g('gstNumber'),
+			logoUrl: g('logoUrl'),
+			checkinTime: g('checkinTime') ?? undefined,
 				checkoutTime: g('checkoutTime') ?? undefined,
 				policyText: g('policyText'),
 				depositNights: parseInt(g('depositNights') ?? '1') || 1,

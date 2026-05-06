@@ -12,7 +12,7 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 		with: {
 			guest: true,
 			room: { with: { roomType: { columns: { id: true, name: true, category: true } } } },
-			property: { columns: { id: true, name: true, checkinTime: true, checkoutTime: true } },
+			property: { columns: { id: true, name: true, checkinTime: true, checkoutTime: true, logoUrl: true, address: true, phone: true } },
 			lineItems: { orderBy: (li, { asc }) => [asc(li.sortOrder)] },
 			paymentEvents: { orderBy: (pe, { asc }) => [asc(pe.chargedAt)] },
 			channel: { columns: { id: true, name: true, isOta: true } },
