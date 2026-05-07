@@ -20,6 +20,7 @@
 	type AssignedRoom = {
 		roomId: string;
 		roomNumber: string;
+		propertyId: string;
 		propertyName: string;
 		checkIn: string;
 		checkOut: string;
@@ -71,6 +72,7 @@
 			return {
 				roomId,
 				roomNumber: roomNum,
+				propertyId: sel.propertyId,
 				propertyName: sel.propertyName,
 				checkIn: sel.checkIn,
 				checkOut: sel.checkOut,

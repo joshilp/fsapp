@@ -15,19 +15,16 @@
 	type RoomSpec = {
 		roomId: string;
 		roomNumber: string;
+		propertyId: string;       // used for room reassignment picker
 		propertyName: string;
 		checkIn: string;
 		checkOut: string;
 		roomConfigs: string[];
 		rateLines: RateLine[];
 		taxLines:  TaxLine[];
-		// When true, this room pays on their own (excluded from group total)
 		payOwn: boolean;
-		// bookingId needed for payment operations on existing groups
 		bookingId?: string;
-		// Payment events loaded from existing group
 		payments: PaymentEvent[];
-		// Suggested deposit cents from pricing API (policy-aware)
 		suggestedDepositCents?: number;
 	};
 
@@ -48,7 +45,7 @@
 		open: boolean;
 		groupId?: string;   // existing group
 		newRooms?: {        // from draw mode → create new group
-			roomId: string; roomNumber: string; propertyName: string;
+			roomId: string; roomNumber: string; propertyId: string; propertyName: string;
 			checkIn: string; checkOut: string; roomConfigs: string[];
 		}[];
 		channels: Channel[];
@@ -84,6 +81,13 @@
 	let saving   = $state(false);
 	let saveError = $state('');
 	let loading  = $state(false);
+
+	// ── Room ⋮ menu ───────────────────────────────────────────────────────────
+	let roomMenuOpen  = $state<number | null>(null);   // which room's menu is open
+	let reassignFor   = $state<number | null>(null);   // which room is being reassigned
+	let reassignRooms = $state<{ id: string; roomNumber: string; roomTypeName: string }[]>([]);
+	let reassignLoading = $state(false);
+	let removedBookingIds = $state<string[]>([]);      // existing rooms detached on Save
 
 	// ── Folio transfer ────────────────────────────────────────────────────────
 	type TransferForm = {
@@ -158,6 +162,8 @@
 		roomSpecs = []; channelId = ''; depositAmt = ''; depositMethod = 'cash';
 		saving = false; saveError = ''; loading = false;
 		transferForm = null; transferBusy = false; transferError = '';
+		roomMenuOpen = null; reassignFor = null; reassignRooms = []; reassignLoading = false;
+		removedBookingIds = [];
 	}
 
 	function defChannel(pref: string) {
@@ -171,6 +177,7 @@
 		roomSpecs = rooms.map(r => ({
 			roomId: r.roomId,
 			roomNumber: r.roomNumber,
+			propertyId: r.propertyId,
 			propertyName: r.propertyName,
 			checkIn: r.checkIn,
 			checkOut: r.checkOut,
@@ -218,10 +225,11 @@
 						label: li.label,
 						total: (li.totalAmount / 100).toFixed(2)
 					}));
-				const roomData = b.room as { roomNumber: string } | null;
-			return {
+			const roomData = b.room as { roomNumber: string; propertyId: string } | null;
+		return {
 				roomId: (b.roomId as string) ?? '',
 				roomNumber: roomData?.roomNumber ?? '',
+				propertyId: roomData?.propertyId ?? '',
 				propertyName: '',
 				checkIn: b.checkInDate as string,
 				checkOut: b.checkOutDate as string,
@@ -328,6 +336,47 @@
 		line.total = (base * preset.ratePercent / 100).toFixed(2);
 	}
 
+	// ── Room ⋮ menu helpers ───────────────────────────────────────────────────
+
+	function removeRoom(idx: number) {
+		const spec = roomSpecs[idx];
+		if (spec.bookingId) {
+			// Queue for detach-from-group on next Save
+			removedBookingIds = [...removedBookingIds, spec.bookingId];
+		}
+		roomSpecs = roomSpecs.filter((_, i) => i !== idx);
+		if (reassignFor === idx) reassignFor = null;
+		roomMenuOpen = null;
+	}
+
+	async function openReassign(idx: number) {
+		const spec = roomSpecs[idx];
+		roomMenuOpen = null;
+		reassignFor = idx;
+		reassignRooms = [];
+		if (!spec.propertyId && !spec.roomId) return;
+		reassignLoading = true;
+		try {
+			const params = new URLSearchParams({
+				checkIn: spec.checkIn,
+				checkOut: spec.checkOut,
+				excludeRoomId: spec.roomId
+			});
+			if (spec.propertyId) params.set('propertyId', spec.propertyId);
+			const r = await fetch(`/api/rooms/available?${params}`);
+			if (r.ok) reassignRooms = await r.json();
+		} catch { /* ignore */ }
+		finally { reassignLoading = false; }
+	}
+
+	function applyReassign(idx: number, roomId: string, roomNumber: string) {
+		roomSpecs[idx].roomId = roomId;
+		roomSpecs[idx].roomNumber = roomNumber;
+		reassignFor = null;
+		// Re-suggest rate for the new room
+		suggestRoomRate(idx, true);
+	}
+
 	// ── Save ──────────────────────────────────────────────────────────────────
 	async function save() {
 		if (!groupName.trim()) { saveError = 'Group name is required.'; return; }
@@ -342,6 +391,7 @@
 					organizerPhone: organizerPhone.trim() || null,
 					organizerEmail: organizerEmail.trim() || null,
 					billingType, notes: groupNotes.trim() || null,
+					removeBookingIds: removedBookingIds,
 					rooms: roomSpecs
 						.filter(s => s.bookingId)
 						.map(s => ({
@@ -553,8 +603,57 @@
 										<input type="date" bind:value={spec.checkOut}
 											class="rounded border border-input bg-background px-1.5 py-0.5 text-xs w-32" />
 									</div>
+									<!-- ⋮ room menu -->
+									<div class="relative">
+										<button type="button"
+											onclick={() => roomMenuOpen = roomMenuOpen === i ? null : i}
+											class="rounded px-1 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground leading-none text-sm"
+										>⋮</button>
+										{#if roomMenuOpen === i}
+											<button type="button" class="fixed inset-0 z-40 cursor-default" onclick={() => roomMenuOpen = null}
+												aria-label="Close menu"></button>
+											<div class="absolute right-0 top-full z-50 min-w-[160px] rounded-md border border-border bg-background py-1 shadow-lg">
+												<button type="button"
+													onclick={() => openReassign(i)}
+													class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted">
+													🔄 Reassign room…
+												</button>
+												<div class="my-1 border-t border-border"></div>
+												<button type="button"
+													onclick={() => { if (window.confirm(`Remove Room ${spec.roomNumber} from this group?`)) removeRoom(i); }}
+													class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted">
+													Remove room
+												</button>
+											</div>
+										{/if}
+									</div>
 								</div>
 							</div>
+
+						<!-- Reassign room panel -->
+						{#if reassignFor === i}
+							<div class="mb-3 rounded-md border border-teal-300 bg-teal-50/60 dark:bg-teal-950/20 p-2.5 text-xs">
+								<p class="font-medium text-teal-800 dark:text-teal-300 mb-1.5">Pick a replacement room</p>
+								{#if reassignLoading}
+									<p class="text-muted-foreground animate-pulse">Loading available rooms…</p>
+								{:else if reassignRooms.length === 0}
+									<p class="text-amber-700">No other rooms available for these dates.</p>
+								{:else}
+									<div class="flex flex-wrap gap-1.5">
+										{#each reassignRooms as r}
+											<button type="button"
+												onclick={() => applyReassign(i, r.id, r.roomNumber)}
+												class="rounded border border-teal-300 bg-white px-2 py-1 text-xs hover:bg-teal-100 font-medium">
+												Rm {r.roomNumber}
+												{#if r.roomTypeName}<span class="text-muted-foreground font-normal"> · {r.roomTypeName}</span>{/if}
+											</button>
+										{/each}
+									</div>
+								{/if}
+								<button type="button" onclick={() => reassignFor = null}
+									class="mt-1.5 text-[10px] text-muted-foreground hover:text-foreground">Cancel</button>
+							</div>
+						{/if}
 
 							<!-- Rate lines -->
 							<div class="space-y-1">

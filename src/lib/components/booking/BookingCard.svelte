@@ -153,6 +153,12 @@
 	let toggleBusy = $state(false);
 	let toggleMsg  = $state('');
 
+	// ── Left-panel tab ─────────────────────────────────────────────────────────
+	let leftTab = $state<'guest' | 'stay' | 'notes'>('guest');
+
+	// ── Payment row ⋮ menu ─────────────────────────────────────────────────────
+	let openPayMenu = $state<string | null>(null);
+
 	// ── Cancel booking ─────────────────────────────────────────────────────────
 	let cancelBusy   = $state(false);
 	let cancelPreview = $state<{
@@ -375,6 +381,7 @@
 		depositAmt = ''; cancelPreview = null; cancelOpen = false; cancelBusy = false;
 		confirmBusy = false; confirmSentAt = null;
 		propLogoUrl = null; propAddress = null; propPhone = null;
+		leftTab = 'guest'; openPayMenu = null;
 	}
 
 	function initNew(nb: NewBooking) {
@@ -594,6 +601,25 @@
 		} catch { payErr = 'Network error'; }
 		payBusy = false;
 	}
+
+	async function markPaymentReceived(payId: string) {
+		if (!bookingId) return;
+		const r = await fetch(`/api/payment-events/${payId}/receive`, { method: 'PATCH' });
+		if (r.ok) {
+			const d = await r.json();
+			if (d.promoted) status = 'confirmed';
+			await fetchCard(bookingId);
+		}
+	}
+
+	async function deletePayment(payId: string) {
+		if (!bookingId) return;
+		if (!window.confirm('Delete this payment record? This cannot be undone.')) return;
+		try {
+			await fetch(`/api/payment-events/${payId}`, { method: 'DELETE' });
+			await fetchCard(bookingId);
+		} catch { /* ignore */ }
+	}
 </script>
 
 <CustomDialog bind:open title={cardTitle} description={cardDesc} dialogClass="sm:max-w-2xl" interactOutsideBehavior="ignore">
@@ -671,37 +697,52 @@
 				<input type="hidden" name="bookingType" value={bookingType} />
 				<input type="hidden" name="guestId"     value={guestId} />
 				<input type="hidden" name="clerkUserId" value={currentUserId} />
-				<input type="hidden" name="rateCount"   value={rateLines.length} />
-				<input type="hidden" name="taxCount"    value={taxLines.length} />
-				<div class="grid gap-4 p-4 lg:grid-cols-2">
+			<input type="hidden" name="rateCount"   value={rateLines.length} />
+			<input type="hidden" name="taxCount"    value={taxLines.length} />
 
-				<!-- ── LEFT: Source · Guest · Stay · Assign Room ────────────────────── -->
-				<div class="flex flex-col gap-4">
+			<!-- Source — full-width chip strip above both panels -->
+			<div class="flex flex-wrap gap-1.5 px-4 pt-4">
+				{#each BOOKING_TYPES as bt}
+					<button type="button" onclick={() => pickType(bt.id)}
+						class={['rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+							bookingType === bt.id
+								? 'bg-foreground text-background border-foreground'
+								: 'bg-background text-muted-foreground border-border hover:border-foreground/40'
+						].join(' ')}>
+						{bt.label}
+					</button>
+				{/each}
+			</div>
 
-					<!-- Source — compact chip strip -->
-					<div class="flex flex-wrap gap-1.5">
-						{#each BOOKING_TYPES as bt}
-							<button type="button" onclick={() => pickType(bt.id)}
-								class={['rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
-									bookingType === bt.id
-										? 'bg-foreground text-background border-foreground'
-										: 'bg-background text-muted-foreground border-border hover:border-foreground/40'
-								].join(' ')}>
-								{bt.label}
-							</button>
-						{/each}
-					</div>
+			<div class="grid gap-4 px-4 pb-4 pt-3 lg:grid-cols-2">
 
-					<!-- Guest -->
+			<!-- ── LEFT: tabs(Guest | Stay | Notes) ─────────────────────────────── -->
+			<div class="flex flex-col gap-3">
+
+				<!-- Tab bar -->
+				<div class="flex border-b border-border">
+					{#each (['guest', 'stay', 'notes'] as const) as tab}
+						<button type="button" onclick={() => leftTab = tab}
+							class={['px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors',
+								leftTab === tab
+									? 'border-foreground text-foreground'
+									: 'border-transparent text-muted-foreground hover:text-foreground'
+							].join(' ')}>
+							{tab === 'guest' ? 'Guest' : tab === 'stay' ? 'Stay' : 'Notes'}
+						</button>
+					{/each}
+				</div>
+
+					<!-- Guest tab -->
+					{#if leftTab === 'guest'}
 					<section class="rounded-lg border border-border bg-card p-3">
-						<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Guest</h3>
 						<div class="space-y-2">
 							<div class="relative">
 								<Input name="guestName" placeholder="Full name" bind:value={guestName}
 									oninput={onNameInput}
 									onfocus={() => { if (suggestions.length) showSuggest = true; }}
 									onblur={() => setTimeout(() => showSuggest = false, 150)}
-									autocomplete="off"
+									autocomplete="new-password"
 									class="h-9" />
 								{#if showSuggest}
 									<div class="absolute left-0 right-0 top-full z-30 rounded-md border border-border bg-background shadow-lg">
@@ -719,13 +760,13 @@
 								<span class={['inline-block rounded-full px-2 py-0.5 text-xs font-medium', RATING[guestRating].cls].join(' ')}>{RATING[guestRating].label}</span>
 							{/if}
 							<div class="grid grid-cols-2 gap-2">
-								<Input name="guestPhone" type="tel" placeholder="Phone" bind:value={guestPhone}
-									oninput={onPhoneInput}
-									onfocus={() => { if (suggestions.length) showSuggest = true; }}
-									onblur={() => setTimeout(() => showSuggest = false, 150)}
-									autocomplete="off"
-									class="h-9" />
-								<Input name="guestEmail" type="email" placeholder="Email (optional)" bind:value={guestEmail} autocomplete="off" class="h-9" />
+					<Input name="guestPhone" type="tel" placeholder="Phone" bind:value={guestPhone}
+								oninput={onPhoneInput}
+								onfocus={() => { if (suggestions.length) showSuggest = true; }}
+								onblur={() => setTimeout(() => showSuggest = false, 150)}
+								autocomplete="new-password"
+								class="h-9" />
+							<Input name="guestEmail" type="email" placeholder="Email (optional)" bind:value={guestEmail} autocomplete="new-password" class="h-9" />
 							</div>
 							<div class="flex gap-3">
 								<div class="flex-1"><label class="mb-1 block text-xs text-muted-foreground">Adults</label>
@@ -760,10 +801,11 @@
 							{/if}
 						</div>
 					</section>
+					{/if}
 
-					<!-- Stay -->
+					<!-- Stay tab -->
+					{#if leftTab === 'stay'}
 					<section class="rounded-lg border border-border bg-card p-3">
-						<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stay</h3>
 						<div class="grid grid-cols-2 gap-3">
 							<div>
 								<label class="mb-1 block text-xs text-muted-foreground" for="bc-ci">Check-in</label>
@@ -834,10 +876,24 @@
 							{/if}
 						</section>
 					{/if}
+					{/if}
 
-					</div><!-- /left -->
+					<!-- Notes tab -->
+					{#if leftTab === 'notes'}
+					<section class="rounded-lg border border-border bg-card p-3">
+						<textarea name="notes" bind:value={notes} rows="5" placeholder="Special requests, info…"
+							class="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"></textarea>
+						{#if status === 'checked_out' && checkoutNotes}
+							<div class="mt-2 rounded bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+								<span class="font-semibold">Checkout notes:</span> {checkoutNotes}
+							</div>
+						{/if}
+					</section>
+					{/if}
 
-				<!-- ── RIGHT: Folio · Notes ────────────────────────────────────────── -->
+				</div><!-- /left -->
+
+				<!-- ── RIGHT: Folio ──────────────────────────────────────────────── -->
 				<div class="flex flex-col gap-4">
 
 					<!-- Folio -->
@@ -956,34 +1012,51 @@
 									<input type="hidden" name="depositReceived" value="false" />
 								{/if}
 							{:else}
-								<!-- Existing booking: payment history as ledger rows -->
-								{#if payments.length}
-									<div class="mb-2 space-y-0.5">
-										{#each payments as p}
-											<div class={['flex items-center justify-between gap-1 rounded px-2 py-1 text-xs',
-												(p as { status?: string }).status === 'pending'
-													? 'bg-amber-50 border border-amber-200'
-													: 'hover:bg-muted/40'
-											].join(' ')}>
-												<span class="text-muted-foreground">{fmtPayType(p.type)} · {p.paymentMethod}</span>
-												{#if (p as { status?: string }).status === 'pending'}
-													<span class="text-[10px] font-semibold text-amber-700 rounded-full bg-amber-100 px-1.5 py-0.5">PENDING</span>
-												{/if}
-												<span class={p.type === 'refund' ? 'text-destructive font-medium' : (p as { status?: string }).status === 'pending' ? 'text-amber-600 font-medium' : 'text-green-700 font-medium'}>
-													{p.type === 'refund' ? '+' : '−'}{fmtMoney(p.amount)}
-												</span>
-												{#if (p as { status?: string }).status === 'pending'}
-													<button type="button"
-														onclick={async () => {
-															const r = await fetch(`/api/payment-events/${p.id}/receive`, { method: 'PATCH' });
-															if (r.ok) { const d = await r.json(); if (d.promoted) status = 'confirmed'; await fetchCard(bookingId!); }
-														}}
-														class="shrink-0 rounded border border-amber-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-50"
-													>Mark received</button>
+							<!-- Existing booking: payment history as ledger rows -->
+							{#if payments.length}
+								<div class="mb-2 space-y-0.5">
+									{#each payments as p}
+										<div class={['flex items-center gap-1 rounded px-2 py-1 text-xs',
+											(p as { status?: string }).status === 'pending'
+												? 'bg-amber-50 border border-amber-200'
+												: 'hover:bg-muted/40'
+										].join(' ')}>
+											<span class="text-muted-foreground">{fmtPayType(p.type)} · {p.paymentMethod}</span>
+											{#if (p as { status?: string }).status === 'pending'}
+												<span class="text-[10px] font-semibold text-amber-700 rounded-full bg-amber-100 px-1.5 py-0.5">PENDING</span>
+											{/if}
+											<span class={['ml-auto font-medium', p.type === 'refund' ? 'text-destructive' : (p as { status?: string }).status === 'pending' ? 'text-amber-600' : 'text-green-700'].join(' ')}>
+												{p.type === 'refund' ? '+' : '−'}{fmtMoney(p.amount)}
+											</span>
+											<!-- ⋮ context menu -->
+											<div class="relative shrink-0">
+												<button type="button"
+													onclick={() => openPayMenu = openPayMenu === p.id ? null : p.id}
+													class="rounded px-1 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground leading-none"
+												>⋮</button>
+												{#if openPayMenu === p.id}
+													<button type="button" class="fixed inset-0 z-40 cursor-default" onclick={() => openPayMenu = null}
+														aria-label="Close menu"></button>
+													<div class="absolute right-0 top-full z-50 min-w-[148px] rounded-md border border-border bg-background py-1 shadow-lg">
+														{#if (p as { status?: string }).status === 'pending'}
+															<button type="button"
+																onclick={() => { markPaymentReceived(p.id); openPayMenu = null; }}
+																class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted">
+																✓ Mark received
+															</button>
+															<div class="my-1 border-t border-border"></div>
+														{/if}
+														<button type="button"
+															onclick={() => { deletePayment(p.id); openPayMenu = null; }}
+															class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted">
+															Delete payment
+														</button>
+													</div>
 												{/if}
 											</div>
-										{/each}
-									</div>
+										</div>
+									{/each}
+								</div>
 								{:else}
 									<p class="mb-2 text-xs text-muted-foreground italic">No payments recorded yet.</p>
 								{/if}
@@ -1049,21 +1122,9 @@
 						{/if}
 					</section>
 
-					<!-- Notes -->
-					<section class="rounded-lg border border-border bg-card p-3">
-						<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notes</h3>
-						<textarea name="notes" bind:value={notes} rows="2" placeholder="Special requests, info…"
-							class="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"></textarea>
-						{#if status === 'checked_out' && checkoutNotes}
-							<div class="mt-1 rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground"><strong>Checkout:</strong> {checkoutNotes}</div>
-						{/if}
-					</section>
-
-				</div><!-- /right -->
+					</div><!-- /right -->
 
 				</div><!-- /grid -->
-
-				<!-- Checkout bar -->
 				{#if showCheckoutBar && status === 'checked_in'}
 					<div class="border-t border-border bg-muted/30 px-4 py-3 space-y-2">
 						<label class="block text-xs font-medium">Checkout notes (optional)</label>

@@ -164,14 +164,14 @@
 	let assignSelections = $state<AssignSelection[]>([]);
 
 	// Called by RoomAssignmentDialog when operator has picked rooms and clicks Continue
-	function onRoomsAssigned(rooms: { roomId: string; roomNumber: string; propertyName: string; checkIn: string; checkOut: string; roomConfigs: string[] }[]) {
+	function onRoomsAssigned(rooms: { roomId: string; roomNumber: string; propertyId: string; propertyName: string; checkIn: string; checkOut: string; roomConfigs: string[] }[]) {
 		groupNewRooms = rooms;
 		groupOpen = true;
 	}
 
 	// ─── Group Card ────────────────────────────────────────────────────────────
 	let groupOpen     = $state(false);
-	let groupNewRooms = $state<{ roomId: string; roomNumber: string; propertyName: string; checkIn: string; checkOut: string; roomConfigs: string[] }[]>([]);
+	let groupNewRooms = $state<{ roomId: string; roomNumber: string; propertyId: string; propertyName: string; checkIn: string; checkOut: string; roomConfigs: string[] }[]>([]);
 
 	// ─── Booking Card ──────────────────────────────────────────────────────────
 	let cardOpen = $state(false);

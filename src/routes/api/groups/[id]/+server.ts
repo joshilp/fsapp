@@ -13,7 +13,10 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 		with: {
 			bookings: {
 				with: {
-					room: { columns: { roomNumber: true }, with: { roomType: { columns: { name: true, category: true } } } },
+					room: {
+						columns: { roomNumber: true, propertyId: true },
+						with: { roomType: { columns: { name: true, category: true } } }
+					},
 					guest: { columns: { id: true, name: true, phone: true, email: true } },
 					lineItems: { orderBy: (li, { asc }) => [asc(li.sortOrder)] },
 					paymentEvents: { orderBy: (pe, { asc }) => [asc(pe.createdAt)] }
@@ -81,6 +84,16 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
 			});
 		});
 		if (items.length > 0) await db.insert(bookingLineItems).values(items);
+	}
+
+	// Detach bookings that were explicitly removed from the group
+	const removeIds: string[] = body.removeBookingIds ?? [];
+	for (const bId of removeIds) {
+		const bk = await db.query.bookings.findFirst({
+			where: and(eq(bookings.id, bId), eq(bookings.groupId, params.id)),
+			columns: { id: true }
+		});
+		if (bk) await db.update(bookings).set({ groupId: null }).where(eq(bookings.id, bId));
 	}
 
 	return json({ ok: true });
