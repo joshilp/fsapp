@@ -14,10 +14,11 @@
 
 <header class="border-border bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 border-b backdrop-blur">
 	<div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
-		<a href="/" class="font-semibold tracking-tight">fsapp</a>
+		<a href={user ? '/dashboard' : '/'} class="font-semibold tracking-tight">fsapp</a>
 
 		<nav class="flex items-center gap-2">
 		{#if user}
+			<Button href="/dashboard" variant="ghost" size="sm">Dashboard</Button>
 			<Button href="/booking" variant="ghost" size="sm">Grid</Button>
 			<Button href="/inventory" variant="ghost" size="sm">Inventory</Button>
 			<Button href="/housekeeping" variant="ghost" size="sm">HK</Button>

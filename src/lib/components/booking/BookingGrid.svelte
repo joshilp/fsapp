@@ -30,6 +30,8 @@
 		onDrawSelectionsChange?: (sels: DrawSel[]) => void;
 		/** Called when operator wants to book a cross-property group (goes to page-level card) */
 		onGroupBook?: (rooms: GroupRoom[]) => void;
+		/** Deep-link: auto-open a specific booking card on mount */
+		initialOpenId?: string;
 	};
 
 	let {
@@ -39,6 +41,7 @@
 		drawMode = $bindable(false),
 		onDrawSelectionsChange,
 		onGroupBook,
+		initialOpenId,
 	}: Props = $props();
 
 	const { startDate, numDays, rooms: allRooms, propertyName, propertyId } = $derived(grid);
@@ -56,6 +59,11 @@
 
 	const HK_CYCLE = ['clean', 'dirty', 'in_progress', 'out_of_order'] as const;
 	type HkStatus = (typeof HK_CYCLE)[number];
+
+	// Deep-link: open a specific booking when mounted (e.g. from the dashboard)
+	$effect(() => {
+		if (initialOpenId) openExistingCard(initialOpenId);
+	});
 
 	const HK_COLORS: Record<HkStatus, string> = {
 		clean:        '#22c55e', // green

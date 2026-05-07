@@ -154,10 +154,18 @@
 	let toggleMsg  = $state('');
 
 	// ── Left-panel tab ─────────────────────────────────────────────────────────
-	let leftTab = $state<'guest' | 'stay' | 'notes'>('guest');
+	let leftTab = $state<'guest' | 'stay' | 'notes' | 'history'>('guest');
 
 	// ── Payment row ⋮ menu ─────────────────────────────────────────────────────
 	let openPayMenu = $state<string | null>(null);
+
+	// ── History timeline (populated from fetchCard) ────────────────────────────
+	let bookingCreatedAt   = $state<number | null>(null);
+	let bookingClerkName   = $state('');
+	let bookingCheckedInAt  = $state<number | null>(null);
+	let bookingCheckedOutAt = $state<number | null>(null);
+	let bookingCancelledAt  = $state<number | null>(null);
+	let priorStay_ = $state<{ roomNumber: string | null; checkInDate: string; checkOutDate: string } | null>(null);
 
 	// ── Cancel booking ─────────────────────────────────────────────────────────
 	let cancelBusy   = $state(false);
@@ -382,6 +390,8 @@
 		confirmBusy = false; confirmSentAt = null;
 		propLogoUrl = null; propAddress = null; propPhone = null;
 		leftTab = 'guest'; openPayMenu = null;
+		bookingCreatedAt = null; bookingClerkName = ''; bookingCheckedInAt = null;
+		bookingCheckedOutAt = null; bookingCancelledAt = null; priorStay_ = null;
 	}
 
 	function initNew(nb: NewBooking) {
@@ -393,6 +403,9 @@
 		checkIn = nb.checkIn; checkOut = nb.checkOut;
 		channelId = defChannel('phone');
 		requestedRoomTypeId_ = nb.requestedRoomTypeId ?? '';
+		// Open directly to Stay tab when booking from inventory grid so the
+		// room assignment picker is immediately visible
+		if (requestedRoomTypeId_) leftTab = 'stay';
 		fetchTaxPresets();
 		if (requestedRoomTypeId_) {
 			loadAvailableRooms();
@@ -447,6 +460,12 @@
 		payments = b.paymentEvents ?? [];
 		groupInfo = d.groupInfo ?? null;
 		confirmSentAt = b.confirmationSentAt ? new Date(b.confirmationSentAt).toISOString() : null;
+			bookingCreatedAt   = b.createdAt ?? null;
+			bookingClerkName   = b.clerk?.name ?? '';
+			bookingCheckedInAt  = b.checkedInAt ?? null;
+			bookingCheckedOutAt = b.checkedOutAt ?? null;
+			bookingCancelledAt  = b.cancelledAt ?? null;
+			priorStay_ = d.priorStay ?? null;
 			const chName = b.channel?.name ?? '';
 			const mt = BOOKING_TYPES.find(t => t.channelMatch.toLowerCase() === chName.toLowerCase());
 			bookingType = mt?.id ?? (b.channel?.isOta ? 'bookingcom' : 'phone');
@@ -721,14 +740,17 @@
 
 				<!-- Tab bar -->
 				<div class="flex border-b border-border">
-					{#each (['guest', 'stay', 'notes'] as const) as tab}
+					{#each (['guest', 'stay', 'notes', 'history'] as const) as tab}
 						<button type="button" onclick={() => leftTab = tab}
-							class={['px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors',
+							class={['relative px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors',
 								leftTab === tab
 									? 'border-foreground text-foreground'
 									: 'border-transparent text-muted-foreground hover:text-foreground'
 							].join(' ')}>
-							{tab === 'guest' ? 'Guest' : tab === 'stay' ? 'Stay' : 'Notes'}
+							{tab === 'guest' ? 'Guest' : tab === 'stay' ? 'Stay' : tab === 'notes' ? 'Notes' : 'History'}
+							{#if tab === 'notes' && notes.trim()}
+								<span class="absolute top-1.5 right-1 h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+							{/if}
 						</button>
 					{/each}
 				</div>
@@ -878,18 +900,61 @@
 					{/if}
 					{/if}
 
-					<!-- Notes tab -->
-					{#if leftTab === 'notes'}
-					<section class="rounded-lg border border-border bg-card p-3">
-						<textarea name="notes" bind:value={notes} rows="5" placeholder="Special requests, info…"
-							class="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"></textarea>
-						{#if status === 'checked_out' && checkoutNotes}
-							<div class="mt-2 rounded bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
-								<span class="font-semibold">Checkout notes:</span> {checkoutNotes}
-							</div>
-						{/if}
-					</section>
+				<!-- Notes tab -->
+				{#if leftTab === 'notes'}
+				<section class="rounded-lg border border-border bg-card p-3">
+					<textarea name="notes" bind:value={notes} rows="5" placeholder="Special requests, info…"
+						class="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"></textarea>
+					{#if status === 'checked_out' && checkoutNotes}
+						<div class="mt-2 rounded bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+							<span class="font-semibold">Checkout notes:</span> {checkoutNotes}
+						</div>
 					{/if}
+				</section>
+				{/if}
+
+				<!-- History tab -->
+				{#if leftTab === 'history'}
+				{#if isNew}
+					<p class="text-xs text-muted-foreground italic px-1">History is available after the booking is saved.</p>
+				{:else}
+					<div class="space-y-0 text-xs">
+						{#snippet event(ts: number | null, label: string, sub?: string, cls?: string)}
+							<div class="flex gap-3 pb-3 relative">
+								<div class="flex flex-col items-center">
+									<span class={['mt-0.5 h-2 w-2 rounded-full shrink-0 border-2', cls ?? 'border-border bg-background'].join(' ')}></span>
+									<div class="w-px flex-1 bg-border"></div>
+								</div>
+								<div class="pb-0.5 min-w-0">
+									<p class="font-medium text-foreground">{label}</p>
+									{#if sub}<p class="text-muted-foreground">{sub}</p>{/if}
+									{#if ts}<p class="text-muted-foreground/70 mt-0.5">{new Date(ts).toLocaleString('en-CA', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</p>{/if}
+								</div>
+							</div>
+						{/snippet}
+
+						{#if priorStay_}
+							{@render event(null, 'Moved from Room ' + (priorStay_.roomNumber ?? '?'), `${fmt(priorStay_.checkInDate)} → ${fmt(priorStay_.checkOutDate)}`, 'border-orange-400 bg-orange-100')}
+						{/if}
+						{@render event(bookingCreatedAt, 'Booking created', bookingClerkName ? `by ${bookingClerkName}` : undefined, 'border-blue-400 bg-blue-100')}
+						{#if confirmSentAt}
+							{@render event(new Date(confirmSentAt).getTime(), 'Confirmation sent', guestEmail || undefined, 'border-teal-400 bg-teal-100')}
+						{/if}
+						{#each payments as p}
+							{@render event(p.chargedAt, `${fmtPayType(p.type)} · ${fmtMoney(p.amount)}`, `${p.paymentMethod}${(p as {status?:string}).status === 'pending' ? ' (pending)' : ''}`, p.type === 'refund' ? 'border-red-400 bg-red-100' : 'border-green-400 bg-green-100')}
+						{/each}
+						{#if bookingCheckedInAt}
+							{@render event(bookingCheckedInAt, 'Checked in', undefined, 'border-green-500 bg-green-200')}
+						{/if}
+						{#if bookingCheckedOutAt}
+							{@render event(bookingCheckedOutAt, 'Checked out', undefined, 'border-gray-400 bg-gray-200')}
+						{/if}
+						{#if bookingCancelledAt}
+							{@render event(bookingCancelledAt, 'Cancelled', undefined, 'border-red-500 bg-red-200')}
+						{/if}
+					</div>
+				{/if}
+				{/if}
 
 				</div><!-- /left -->
 

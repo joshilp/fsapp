@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import { page } from '$app/stores';
 	import BookingGrid from '$lib/components/booking/BookingGrid.svelte';
 	import BookingFilters from '$lib/components/booking/BookingFilters.svelte';
 	import BookingCard from '$lib/components/booking/BookingCard.svelte';
@@ -154,6 +155,7 @@
 						bind:drawMode={sharedDrawMode}
 						onDrawSelectionsChange={(s) => { falconSelections = s; }}
 						onGroupBook={openGroupCard}
+						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
 					/>
 				</div>
 				<div class="min-w-0 flex-1">
@@ -168,6 +170,7 @@
 						bind:drawMode={sharedDrawMode}
 						onDrawSelectionsChange={(s) => { spanishSelections = s; }}
 						onGroupBook={openGroupCard}
+						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
 					/>
 				</div>
 			</div>
@@ -206,6 +209,7 @@
 						bind:drawMode={sharedDrawMode}
 						onDrawSelectionsChange={(s) => { falconSelections = s; }}
 						onGroupBook={openGroupCard}
+						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
 					/>
 				{:else}
 					<BookingGrid
@@ -219,6 +223,7 @@
 						bind:drawMode={sharedDrawMode}
 						onDrawSelectionsChange={(s) => { spanishSelections = s; }}
 						onGroupBook={openGroupCard}
+						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
 					/>
 				{/if}
 			</div>
