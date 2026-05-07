@@ -6,9 +6,10 @@
 	type Props = {
 		user?: User | null;
 		pendingUserCount?: number;
+		isMockMode?: boolean;
 	};
 
-	let { user, pendingUserCount = 0 }: Props = $props();
+	let { user, pendingUserCount = 0, isMockMode = false }: Props = $props();
 </script>
 
 <header class="border-border bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 border-b backdrop-blur">
@@ -24,6 +25,9 @@
 			<Button href="/guests" variant="ghost" size="sm">Guests</Button>
 			<Button href="/reports" variant="ghost" size="sm">Reports</Button>
 			<Button href="/settings" variant="ghost" size="sm">Settings</Button>
+			{#if isMockMode}
+				<Button href="/dev/channex" variant="ghost" size="sm" class="text-amber-600 hover:text-amber-800">Dev</Button>
+			{/if}
 				<Button href="/admin/users" variant="ghost" size="sm" class="relative">
 				Users
 				{#if pendingUserCount > 0}

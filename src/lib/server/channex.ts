@@ -16,8 +16,13 @@
  */
 
 import { env } from '$env/dynamic/private';
+import { logARIPush } from './channex-mock';
 
 const BASE_URL = 'https://api.channex.io/api/v1';
+
+function isMockMode(): boolean {
+	return (env.CHANNEX_MOCK ?? '') === 'true';
+}
 
 export type ARIUpdate = {
 	channexPropertyId: string;
@@ -71,7 +76,16 @@ function isConfigured(): boolean {
  * Returns true on success, false if Channex is not configured or the push fails.
  */
 export async function pushARI(updates: ARIUpdate[]): Promise<boolean> {
-	if (!isConfigured() || updates.length === 0) return false;
+	if (updates.length === 0) return false;
+
+	// Mock mode: log the call locally instead of hitting the real API
+	if (isMockMode()) {
+		logARIPush(updates);
+		console.log(`[channex mock] ARI push: ${updates.length} update(s) logged`);
+		return true;
+	}
+
+	if (!isConfigured()) return false;
 
 	// Channex ARI upload endpoint (v1)
 	// Format: array of per-room-type-range updates

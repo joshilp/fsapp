@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { LayoutServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { user } from '$lib/server/db/auth.schema';
+import { env } from '$env/dynamic/private';
 
 export const load: LayoutServerLoad = async (event) => {
 	if (!event.locals.user) redirect(303, '/auth/login');
@@ -23,5 +24,5 @@ export const load: LayoutServerLoad = async (event) => {
 		pendingUserCount = pending.length;
 	}
 
-	return { user: currentUser, pendingUserCount };
+	return { user: currentUser, pendingUserCount, isMockMode: (env.CHANNEX_MOCK ?? '') === 'true' };
 };

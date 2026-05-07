@@ -332,7 +332,8 @@
 
 	// Auto-suggest deposit is handled inside suggestRate() once rate lines are fetched.
 	const cardTitle = $derived(roomNumber_ ? `Room ${roomNumber_}${propName ? ' · '+propName : ''}` : 'New Booking');
-	const cardDesc  = $derived(checkIn && checkOut ? `${fmt(checkIn)} → ${fmt(checkOut)} · ${nights} night${nights===1?'':'s'}` : '');
+	// Only show date summary in header for existing bookings — new bookings have dates right in the Stay section
+	const cardDesc  = $derived(!isNew && checkIn && checkOut ? `${fmt(checkIn)} → ${fmt(checkOut)} · ${nights} night${nights===1?'':'s'}` : '');
 
 	const statusLabel = $derived(({ reserved:'Reserved', confirmed:'Confirmed', checked_in:'Checked In', checked_out:'Checked Out', cancelled:'Cancelled', blocked:'Blocked' } as Record<string,string>)[status] ?? status);
 	const statusCls   = $derived(({ reserved:'bg-amber-100 text-amber-700 border-amber-200', confirmed:'bg-blue-100 text-blue-700 border-blue-200', checked_in:'bg-green-100 text-green-700 border-green-200', checked_out:'bg-gray-100 text-gray-600 border-gray-200', cancelled:'bg-red-100 text-red-600 border-red-200' } as Record<string,string>)[status] ?? 'bg-muted text-muted-foreground border-border');
@@ -595,7 +596,7 @@
 	}
 </script>
 
-<CustomDialog bind:open title={cardTitle} description={cardDesc} dialogClass="sm:max-w-3xl" interactOutsideBehavior="ignore">
+<CustomDialog bind:open title={cardTitle} description={cardDesc} dialogClass="sm:max-w-2xl" interactOutsideBehavior="ignore">
 
 	{#snippet actions()}
 		<span class={['rounded-full border px-2.5 py-0.5 text-xs font-semibold', statusCls].join(' ')}>{statusLabel}</span>
@@ -672,19 +673,98 @@
 				<input type="hidden" name="clerkUserId" value={currentUserId} />
 				<input type="hidden" name="rateCount"   value={rateLines.length} />
 				<input type="hidden" name="taxCount"    value={taxLines.length} />
-				{#if !isOta}<input type="hidden" name="otaConfirmationNumber" value="" />{/if}
+				<div class="grid gap-4 p-4 lg:grid-cols-2">
 
-				<div class="grid gap-5 p-4 sm:grid-cols-2">
+				<!-- ── LEFT: Source · Guest · Stay · Assign Room ────────────────────── -->
+				<div class="flex flex-col gap-4">
 
-					<!-- ╔═══════════════════════════════════════╗
-					     ║  LEFT: Stay · Source · Guest          ║
-					     ╚═══════════════════════════════════════╝ -->
-					<div class="space-y-5">
+					<!-- Source — compact chip strip -->
+					<div class="flex flex-wrap gap-1.5">
+						{#each BOOKING_TYPES as bt}
+							<button type="button" onclick={() => pickType(bt.id)}
+								class={['rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+									bookingType === bt.id
+										? 'bg-foreground text-background border-foreground'
+										: 'bg-background text-muted-foreground border-border hover:border-foreground/40'
+								].join(' ')}>
+								{bt.label}
+							</button>
+						{/each}
+					</div>
 
-						<!-- Stay -->
-						<section class="rounded-lg border border-border bg-card p-3">
-							<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stay</h3>
-					<div class="grid grid-cols-2 gap-3">
+					<!-- Guest -->
+					<section class="rounded-lg border border-border bg-card p-3">
+						<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Guest</h3>
+						<div class="space-y-2">
+							<div class="relative">
+								<Input name="guestName" placeholder="Full name" bind:value={guestName}
+									oninput={onNameInput}
+									onfocus={() => { if (suggestions.length) showSuggest = true; }}
+									onblur={() => setTimeout(() => showSuggest = false, 150)}
+									autocomplete="off"
+									class="h-9" />
+								{#if showSuggest}
+									<div class="absolute left-0 right-0 top-full z-30 rounded-md border border-border bg-background shadow-lg">
+										{#each suggestions as s}
+											<button type="button" onclick={() => pickGuest(s)}
+												class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted">
+												<span class="font-medium">{s.name}</span>
+												{#if s.phone}<span class="text-muted-foreground text-xs">{s.phone}</span>{/if}
+											</button>
+										{/each}
+									</div>
+								{/if}
+							</div>
+							{#if guestRating && RATING[guestRating]}
+								<span class={['inline-block rounded-full px-2 py-0.5 text-xs font-medium', RATING[guestRating].cls].join(' ')}>{RATING[guestRating].label}</span>
+							{/if}
+							<div class="grid grid-cols-2 gap-2">
+								<Input name="guestPhone" type="tel" placeholder="Phone" bind:value={guestPhone}
+									oninput={onPhoneInput}
+									onfocus={() => { if (suggestions.length) showSuggest = true; }}
+									onblur={() => setTimeout(() => showSuggest = false, 150)}
+									autocomplete="off"
+									class="h-9" />
+								<Input name="guestEmail" type="email" placeholder="Email (optional)" bind:value={guestEmail} autocomplete="off" class="h-9" />
+							</div>
+							<div class="flex gap-3">
+								<div class="flex-1"><label class="mb-1 block text-xs text-muted-foreground">Adults</label>
+									<input name="numAdults" type="number" min="1" max="20" bind:value={numAdults} class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm" /></div>
+								<div class="flex-1"><label class="mb-1 block text-xs text-muted-foreground">Children</label>
+									<input name="numChildren" type="number" min="0" max="20" bind:value={numChildren} class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm" /></div>
+							</div>
+							<button type="button" onclick={() => showAddress = !showAddress}
+								class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+								<span>{showAddress ? '▼' : '▶'}</span>
+								<span>{showAddress ? 'Hide address / vehicle' : 'Address, vehicle & waiver'}</span>
+							</button>
+							{#if showAddress}
+								<div class="space-y-2 pt-1">
+									<Input name="guestStreet" placeholder="Street" bind:value={guestStreet} class="h-8 text-sm" />
+									<div class="grid grid-cols-2 gap-2">
+										<Input name="guestCity" placeholder="City" bind:value={guestCity} class="h-8 text-sm" />
+										<Input name="guestProvince" placeholder="Province/State" bind:value={guestProv} class="h-8 text-sm" />
+									</div>
+									<Input name="guestCountry" placeholder="Country" bind:value={guestCountry} class="h-8 text-sm" />
+									<div class="grid grid-cols-3 gap-2">
+										<Input name="vehicleMake" placeholder="Make" bind:value={vehMake} class="h-8 text-sm" />
+										<Input name="vehicleColour" placeholder="Colour" bind:value={vehColour} class="h-8 text-sm" />
+										<Input name="vehiclePlate" placeholder="Plate" bind:value={vehPlate} class="h-8 text-sm" />
+									</div>
+									<label class="flex cursor-pointer select-none items-center gap-2 text-sm">
+										<input type="checkbox" name="waiverSigned" bind:checked={waiverSigned} class="h-4 w-4 rounded" />
+										<span>Waiver signed</span>
+										{#if waiverSigned}<span class="text-green-600 text-xs">✓</span>{/if}
+									</label>
+								</div>
+							{/if}
+						</div>
+					</section>
+
+					<!-- Stay -->
+					<section class="rounded-lg border border-border bg-card p-3">
+						<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stay</h3>
+						<div class="grid grid-cols-2 gap-3">
 							<div>
 								<label class="mb-1 block text-xs text-muted-foreground" for="bc-ci">Check-in</label>
 								<input id="bc-ci" name="checkIn" type="date" bind:value={checkIn}
@@ -701,144 +781,64 @@
 									class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" required />
 							</div>
 						</div>
-
-						<!-- Room config (for rooms with multiple configurations) -->
 						{#if roomConfigs_.length > 1}
-								<div class="mt-2">
-									<label class="mb-1 block text-xs text-muted-foreground">Room config</label>
-									<select name="roomConfig" bind:value={selConfig} class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-										{#each roomConfigs_ as c}<option value={c}>{c}</option>{/each}
-									</select>
-								</div>
-							{:else}
-								<input type="hidden" name="roomConfig" value={selConfig} />
-							{/if}
-						</section>
-
-						<!-- Room assignment (inventory-sourced bookings only) -->
-						{#if requestedRoomTypeId_ && isNew}
-							<section class="rounded-lg border-2 border-teal-400 bg-teal-50/60 dark:bg-teal-950/20 p-3">
-								<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-400 flex items-center gap-1.5">
-									<span>🛏</span> Assign a Room
-									<span class="font-normal normal-case text-[10px] text-teal-600/70 ml-1">optional — leave blank to queue for later</span>
-								</h3>
-								<p class="text-xs text-teal-800 dark:text-teal-300 mb-2">
-									Booking from inventory grid for <strong>{roomNumber_}</strong>. Pick a specific room or save as unassigned.
-								</p>
-								{#if availRoomsLoading}
-									<p class="text-xs text-muted-foreground animate-pulse py-1">Checking availability…</p>
-								{:else}
-									<select id="bc-room-pick"
-										class="w-full rounded-md border border-teal-300 bg-background px-3 py-2 text-sm focus:ring-teal-400"
-										value={roomId_}
-										onchange={(e) => pickAvailRoom((e.target as HTMLSelectElement).value)}
-									>
-										<option value="">— Save as unassigned (queue) —</option>
-										{#each availRooms as r}
-											<option value={r.id}>Room {r.roomNumber} – {r.roomTypeName}</option>
-										{/each}
-									</select>
-									{#if availRooms.length === 0 && checkIn && checkOut}
-										<p class="text-[10px] text-amber-600 mt-1">All rooms of this type are booked for these dates — will save as unassigned.</p>
-									{:else if !roomId_}
-										<p class="text-[10px] text-teal-600 mt-1">{availRooms.length} room{availRooms.length === 1 ? '' : 's'} available · choose one or leave unassigned</p>
-									{:else}
-										<p class="text-[10px] text-teal-700 font-medium mt-1">✓ Room {roomNumber_} selected</p>
-									{/if}
-								{/if}
-							</section>
+							<div class="mt-2">
+								<label class="mb-1 block text-xs text-muted-foreground">Room config</label>
+								<select name="roomConfig" bind:value={selConfig} class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+									{#each roomConfigs_ as c}<option value={c}>{c}</option>{/each}
+								</select>
+							</div>
+						{:else}
+							<input type="hidden" name="roomConfig" value={selConfig} />
 						{/if}
-
-						<!-- Source -->
-						<section class="rounded-lg border border-border bg-card p-3">
-							<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Source</h3>
-							<div class="flex flex-wrap gap-1.5">
-								{#each BOOKING_TYPES as bt}
-									<button type="button" onclick={() => pickType(bt.id)}
-										class={['rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors', bookingType===bt.id ? 'bg-foreground text-background border-foreground' : 'bg-background text-muted-foreground border-border hover:border-foreground/40'].join(' ')}>
-										{bt.label}
-									</button>
-								{/each}
+						{#if isOta}
+							<div class="mt-2">
+								<label class="mb-1 block text-xs text-muted-foreground">OTA confirmation #</label>
+								<Input name="otaConfirmationNumber" placeholder="e.g. BDC-12345" bind:value={otaRef} class="h-8 text-sm" />
 							</div>
-							{#if isOta}
-								<div class="mt-2">
-									<Input name="otaConfirmationNumber" placeholder="OTA confirmation #" bind:value={otaRef} class="h-8 text-sm" />
-								</div>
+						{:else}
+							<input type="hidden" name="otaConfirmationNumber" value="" />
+						{/if}
+					</section>
+
+					<!-- Room assignment (inventory-sourced bookings only) -->
+					{#if requestedRoomTypeId_ && isNew}
+						<section class="rounded-lg border-2 border-teal-400 bg-teal-50/60 dark:bg-teal-950/20 p-3">
+							<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-400 flex items-center gap-1.5">
+								<span>🛏</span> Assign a Room
+								<span class="font-normal normal-case text-[10px] text-teal-600/70 ml-1">optional — leave blank to queue for later</span>
+							</h3>
+							<p class="text-xs text-teal-800 dark:text-teal-300 mb-2">
+								Booking from inventory grid for <strong>{roomNumber_}</strong>. Pick a specific room or save as unassigned.
+							</p>
+							{#if availRoomsLoading}
+								<p class="text-xs text-muted-foreground animate-pulse py-1">Checking availability…</p>
+							{:else}
+								<select id="bc-room-pick"
+									class="w-full rounded-md border border-teal-300 bg-background px-3 py-2 text-sm focus:ring-teal-400"
+									value={roomId_}
+									onchange={(e) => pickAvailRoom((e.target as HTMLSelectElement).value)}
+								>
+									<option value="">— Save as unassigned (queue) —</option>
+									{#each availRooms as r}
+										<option value={r.id}>Room {r.roomNumber} – {r.roomTypeName}</option>
+									{/each}
+								</select>
+								{#if availRooms.length === 0 && checkIn && checkOut}
+									<p class="text-[10px] text-amber-600 mt-1">All rooms of this type are booked for these dates — will save as unassigned.</p>
+								{:else if !roomId_}
+									<p class="text-[10px] text-teal-600 mt-1">{availRooms.length} room{availRooms.length === 1 ? '' : 's'} available · choose one or leave unassigned</p>
+								{:else}
+									<p class="text-[10px] text-teal-700 font-medium mt-1">✓ Room {roomNumber_} selected</p>
+								{/if}
 							{/if}
 						</section>
+					{/if}
 
-						<!-- Guest -->
-						<section class="rounded-lg border border-border bg-card p-3">
-							<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Guest</h3>
-							<div class="space-y-2">
-								<div class="relative">
-								<Input name="guestName" placeholder="Full name" bind:value={guestName}
-									oninput={onNameInput}
-									onfocus={() => { if (suggestions.length) showSuggest = true; }}
-									onblur={() => setTimeout(() => showSuggest = false, 150)}
-									autocomplete="off"
-									class="h-9" />
-									{#if showSuggest}
-										<div class="absolute left-0 right-0 top-full z-30 rounded-md border border-border bg-background shadow-lg">
-											{#each suggestions as s}
-												<button type="button" onclick={() => pickGuest(s)}
-													class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted">
-													<span class="font-medium">{s.name}</span>
-													{#if s.phone}<span class="text-muted-foreground text-xs">{s.phone}</span>{/if}
-												</button>
-											{/each}
-										</div>
-									{/if}
-								</div>
-								{#if guestRating && RATING[guestRating]}
-									<span class={['inline-block rounded-full px-2 py-0.5 text-xs font-medium', RATING[guestRating].cls].join(' ')}>{RATING[guestRating].label}</span>
-								{/if}
-								<Input name="guestPhone" type="tel" placeholder="Phone" bind:value={guestPhone}
-									oninput={onPhoneInput}
-									onfocus={() => { if (suggestions.length) showSuggest = true; }}
-									onblur={() => setTimeout(() => showSuggest = false, 150)}
-									autocomplete="off"
-									class="h-9" />
-								<Input name="guestEmail" type="email" placeholder="Email (optional)" bind:value={guestEmail} autocomplete="off" class="h-9" />
-								<div class="flex gap-3">
-									<div class="flex-1"><label class="mb-1 block text-xs text-muted-foreground">Adults</label>
-										<input name="numAdults" type="number" min="1" max="20" bind:value={numAdults} class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm" /></div>
-									<div class="flex-1"><label class="mb-1 block text-xs text-muted-foreground">Children</label>
-										<input name="numChildren" type="number" min="0" max="20" bind:value={numChildren} class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm" /></div>
-								</div>
-								<button type="button" onclick={() => showAddress = !showAddress}
-									class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-									<span>{showAddress ? '▼' : '▶'}</span>
-									<span>{showAddress ? 'Hide address / vehicle' : 'Address, vehicle & waiver'}</span>
-								</button>
-								{#if showAddress}
-									<div class="space-y-2 pt-1">
-										<Input name="guestStreet" placeholder="Street" bind:value={guestStreet} class="h-8 text-sm" />
-										<div class="grid grid-cols-2 gap-2">
-											<Input name="guestCity" placeholder="City" bind:value={guestCity} class="h-8 text-sm" />
-											<Input name="guestProvince" placeholder="Province/State" bind:value={guestProv} class="h-8 text-sm" />
-										</div>
-										<Input name="guestCountry" placeholder="Country" bind:value={guestCountry} class="h-8 text-sm" />
-										<div class="grid grid-cols-3 gap-2">
-											<Input name="vehicleMake" placeholder="Make" bind:value={vehMake} class="h-8 text-sm" />
-											<Input name="vehicleColour" placeholder="Colour" bind:value={vehColour} class="h-8 text-sm" />
-											<Input name="vehiclePlate" placeholder="Plate" bind:value={vehPlate} class="h-8 text-sm" />
-										</div>
-										<label class="flex cursor-pointer select-none items-center gap-2 text-sm">
-											<input type="checkbox" name="waiverSigned" bind:checked={waiverSigned} class="h-4 w-4 rounded" />
-											<span>Waiver signed</span>
-											{#if waiverSigned}<span class="text-green-600 text-xs">✓</span>{/if}
-										</label>
-									</div>
-								{/if}
-							</div>
-						</section>
-					</div>
+					</div><!-- /left -->
 
-				<!-- ╔═══════════════════════════════════════╗
-				     ║  RIGHT: Folio ledger                  ║
-				     ╚═══════════════════════════════════════╝ -->
-				<div class="space-y-5">
+				<!-- ── RIGHT: Folio · Notes ────────────────────────────────────────── -->
+				<div class="flex flex-col gap-4">
 
 					<!-- Folio -->
 					<section class="rounded-lg border border-border bg-card p-3">
@@ -1034,16 +1034,16 @@
 
 						<!-- Balance row (always visible for existing bookings) -->
 						{#if !isNew}
-						<div class={['mt-3 flex items-center justify-between rounded-md border px-3 py-2.5 text-sm font-semibold', balanceCents > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-green-200 bg-green-50 text-green-800'].join(' ')}>
-							<div>
-								<span>{balanceCents > 0 ? 'Balance due' : 'Paid in full'}</span>
-								{#if balanceCents > 0}
-									<span class="ml-2 text-xs font-normal opacity-70">(${(collected/100).toFixed(2)} of ${grandTotal.toFixed(2)} received)</span>
-								{/if}
-								{#if pending > 0}
-									<div class="mt-0.5 text-[10px] font-normal text-amber-600">⏳ Deposit pending: ${(pending/100).toFixed(2)} not yet collected</div>
-								{/if}
-							</div>
+							<div class={['mt-3 flex items-center justify-between rounded-md border px-3 py-2.5 text-sm font-semibold', balanceCents > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-green-200 bg-green-50 text-green-800'].join(' ')}>
+								<div>
+									<span>{balanceCents > 0 ? 'Balance due' : 'Paid in full'}</span>
+									{#if balanceCents > 0}
+										<span class="ml-2 text-xs font-normal opacity-70">(${(collected/100).toFixed(2)} of ${grandTotal.toFixed(2)} received)</span>
+									{/if}
+									{#if pending > 0}
+										<div class="mt-0.5 text-[10px] font-normal text-amber-600">⏳ Deposit pending: ${(pending/100).toFixed(2)} not yet collected</div>
+									{/if}
+								</div>
 								<span class="text-base">{balanceCents > 0 ? fmtMoney(balanceCents) : '✓'}</span>
 							</div>
 						{/if}
@@ -1052,7 +1052,7 @@
 					<!-- Notes -->
 					<section class="rounded-lg border border-border bg-card p-3">
 						<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notes</h3>
-						<textarea name="notes" bind:value={notes} rows="3" placeholder="Special requests, info…"
+						<textarea name="notes" bind:value={notes} rows="2" placeholder="Special requests, info…"
 							class="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"></textarea>
 						{#if status === 'checked_out' && checkoutNotes}
 							<div class="mt-1 rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground"><strong>Checkout:</strong> {checkoutNotes}</div>
@@ -1060,6 +1060,7 @@
 					</section>
 
 				</div><!-- /right -->
+
 				</div><!-- /grid -->
 
 				<!-- Checkout bar -->

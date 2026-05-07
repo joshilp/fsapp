@@ -8,7 +8,7 @@
 
 <Toaster richColors position="bottom-right" />
 <div class="flex min-h-screen flex-col">
-	<Navbar user={data.user} pendingUserCount={data.pendingUserCount} />
+	<Navbar user={data.user} pendingUserCount={data.pendingUserCount} isMockMode={data.isMockMode} />
 	<main class="flex flex-1 flex-col">
 		{@render children()}
 	</main>

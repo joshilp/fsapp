@@ -6,6 +6,8 @@
 	import type { ARICell } from './+page.server';
 	import { DragSelect, DrawSelect } from '$lib/utils/drag-select.svelte';
 	import BookingCard from '$lib/components/booking/BookingCard.svelte';
+	import GroupCard from '$lib/components/booking/GroupCard.svelte';
+	import RoomAssignmentDialog from '$lib/components/booking/RoomAssignmentDialog.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -133,11 +135,43 @@
 	}
 
 	function bookDrawSelections() {
-		const s = drawSel.selections[0];
-		if (!s) return;
-		openBookingCard(s.extra.roomTypeId, s.extra.roomTypeName, data.dates[s.minCol], data.dates[s.maxCol + 1] ?? addDaysLocal(data.dates[s.maxCol], 1), s.extra.propertyId, s.extra.propertyName);
-		drawSel.clear();
+		const sels = drawSel.selections;
+		if (!sels.length) return;
+
+		if (sels.length === 1) {
+			// Single selection → open BookingCard directly (room-type booking with optional room assign)
+			const s = sels[0];
+			openBookingCard(s.extra.roomTypeId, s.extra.roomTypeName, data.dates[s.minCol], data.dates[s.maxCol + 1] ?? addDaysLocal(data.dates[s.maxCol], 1), s.extra.propertyId, s.extra.propertyName);
+			drawSel.clear();
+		} else {
+			// Multiple selections → open room assignment dialog first, then GroupCard
+			assignSelections = sels.map(s => ({
+				roomTypeId: s.extra.roomTypeId,
+				roomTypeName: s.extra.roomTypeName,
+				propertyId: s.extra.propertyId,
+				propertyName: s.extra.propertyName,
+				checkIn: data.dates[s.minCol],
+				checkOut: data.dates[s.maxCol + 1] ?? addDaysLocal(data.dates[s.maxCol], 1)
+			}));
+			assignOpen = true;
+			drawSel.clear();
+		}
 	}
+
+	// ─── Room Assignment Dialog → GroupCard flow ───────────────────────────────
+	type AssignSelection = { roomTypeId: string; roomTypeName: string; propertyId: string; propertyName: string; checkIn: string; checkOut: string };
+	let assignOpen  = $state(false);
+	let assignSelections = $state<AssignSelection[]>([]);
+
+	// Called by RoomAssignmentDialog when operator has picked rooms and clicks Continue
+	function onRoomsAssigned(rooms: { roomId: string; roomNumber: string; propertyName: string; checkIn: string; checkOut: string; roomConfigs: string[] }[]) {
+		groupNewRooms = rooms;
+		groupOpen = true;
+	}
+
+	// ─── Group Card ────────────────────────────────────────────────────────────
+	let groupOpen     = $state(false);
+	let groupNewRooms = $state<{ roomId: string; roomNumber: string; propertyName: string; checkIn: string; checkOut: string; roomConfigs: string[] }[]>([]);
 
 	// ─── Booking Card ──────────────────────────────────────────────────────────
 	let cardOpen = $state(false);
@@ -504,7 +538,7 @@
 	</div>
 {/if}
 
-<!-- Booking Card -->
+<!-- Booking Card (single selection) -->
 {#if cardNewBooking}
 	<BookingCard
 		bind:open={cardOpen}
@@ -516,3 +550,20 @@
 		propertyName={cardNewBooking.propertyName}
 	/>
 {/if}
+
+<!-- Room Assignment Dialog (multi-selection step 1) -->
+<RoomAssignmentDialog
+	bind:open={assignOpen}
+	selections={assignSelections}
+	onConfirm={onRoomsAssigned}
+/>
+
+<!-- Group Card (multi-selection step 2) -->
+<GroupCard
+	bind:open={groupOpen}
+	newRooms={groupNewRooms.length ? groupNewRooms : undefined}
+	channels={data.channels}
+	users={data.users}
+	currentUserId={data.currentUserId}
+	{today}
+/>
