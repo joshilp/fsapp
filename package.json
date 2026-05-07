@@ -20,6 +20,7 @@
 		"db:seed:demo": "tsx --env-file=.env scripts/seed-demo.ts",
 		"db:seed:reset": "tsx --env-file=.env scripts/seed-demo.ts --reset",
 		"db:seed:admin": "tsx --env-file=.env scripts/seed-admin.ts",
+		"migrate:channex": "tsx --env-file=.env scripts/migrate-channex.ts",
 		"auth:schema": "better-auth generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes"
 	},
 	"devDependencies": {

@@ -18,6 +18,7 @@
 		<nav class="flex items-center gap-2">
 		{#if user}
 			<Button href="/booking" variant="ghost" size="sm">Grid</Button>
+			<Button href="/availability" variant="ghost" size="sm">Avail</Button>
 			<Button href="/housekeeping" variant="ghost" size="sm">HK</Button>
 			<Button href="/rates" variant="ghost" size="sm">Rates</Button>
 			<Button href="/guests" variant="ghost" size="sm">Guests</Button>

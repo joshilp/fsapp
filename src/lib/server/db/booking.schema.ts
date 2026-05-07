@@ -54,6 +54,9 @@ export const properties = sqliteTable('properties', {
 	depositCalcMethod: text('deposit_calc_method').notNull().default('first_night'),
 	depositPercent: integer('deposit_percent'),      // e.g. 20 = 20%, used when method = 'percentage'
 	depositFlatCents: integer('deposit_flat_cents'), // fixed cents, used when method = 'flat'
+	// ── Channex channel manager ───────────────────────────────────────────────
+	// UUID of this property in your Channex account. Set in Settings → Channels.
+	channexPropertyId: text('channex_property_id'),
 	...timestamps
 });
 
@@ -69,6 +72,11 @@ export const roomTypes = sqliteTable('room_types', {
 	name: text('name').notNull(), // e.g. "1 Bed", "2 Bed + Kitchen"
 	category: text('category').notNull(), // A | B | C | D
 	sortOrder: integer('sort_order').notNull().default(0),
+	// ── Channex channel manager mapping ──────────────────────────────────────
+	// channexRoomTypeId: UUID of the matching Room Type in Channex
+	// channexRatePlanId: UUID of the default Rate Plan in Channex (one per room type)
+	channexRoomTypeId: text('channex_room_type_id'),
+	channexRatePlanId: text('channex_rate_plan_id'),
 	createdAt: integer('created_at', { mode: 'timestamp_ms' })
 		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
 		.notNull()
@@ -152,7 +160,41 @@ export const rateTiers = sqliteTable(
 	(t) => [unique('rate_tiers_season_type_uq').on(t.seasonId, t.roomTypeId)]
 );
 
-// ─── Tax Presets ──────────────────────────────────────────────────────────────
+// ─── Rate Overrides ───────────────────────────────────────────────────────────
+// Per-date override of the season-based rate and/or restrictions for a room type.
+// Used by the ARI calendar for one-off adjustments (e.g. sold-out a specific day,
+// special event premium, stop-sell a date on all channels).
+// Only columns that are non-null override the season default.
+
+export const rateOverrides = sqliteTable(
+	'rate_overrides',
+	{
+		id: id(),
+		roomTypeId: text('room_type_id')
+			.notNull()
+			.references(() => roomTypes.id, { onDelete: 'cascade' }),
+		date: text('date').notNull(), // ISO "YYYY-MM-DD"
+		// null = use season rate; set to override nightly rate for this date
+		rateCents: integer('rate_cents'),
+		// null = use season minNights; set to override minimum stay for this date
+		minNights: integer('min_nights'),
+		// Channel restrictions
+		stopSell: integer('stop_sell', { mode: 'boolean' }).notNull().default(false),
+		closedToArrival: integer('closed_to_arrival', { mode: 'boolean' }).notNull().default(false),
+		closedToDeparture: integer('closed_to_departure', { mode: 'boolean' }).notNull().default(false),
+		updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+			.$onUpdate(() => new Date())
+			.notNull()
+	},
+	(t) => [
+		unique('rate_overrides_type_date_uq').on(t.roomTypeId, t.date),
+		index('rate_overrides_type_idx').on(t.roomTypeId),
+		index('rate_overrides_date_idx').on(t.date)
+	]
+);
+
+
 // Named tax types configured per-property. Soft-deleted (is_active = false)
 // rather than removed so historical bookings retain their tax labels.
 
@@ -444,6 +486,10 @@ export const rateSeasonsRelations = relations(rateSeasons, ({ one, many }) => ({
 export const rateTiersRelations = relations(rateTiers, ({ one }) => ({
 	season: one(rateSeasons, { fields: [rateTiers.seasonId], references: [rateSeasons.id] }),
 	roomType: one(roomTypes, { fields: [rateTiers.roomTypeId], references: [roomTypes.id] })
+}));
+
+export const rateOverridesRelations = relations(rateOverrides, ({ one }) => ({
+	roomType: one(roomTypes, { fields: [rateOverrides.roomTypeId], references: [roomTypes.id] })
 }));
 
 export const taxPresetsRelations = relations(taxPresets, ({ one }) => ({

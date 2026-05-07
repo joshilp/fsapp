@@ -753,67 +753,159 @@
 		</Tabs.Content>
 
 		<!-- ── Channels ────────────────────────────────────────────────────── -->
-		<Tabs.Content value="channels">
-			<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
-				<h2 class="mb-3 font-semibold">Booking Channels</h2>
+	<Tabs.Content value="channels">
+		<div class="space-y-6">
 
-				<!-- Channel list -->
-				{#if data.channelsList.length > 0}
-					<div class="mb-4 space-y-2">
-						{#each data.channelsList as ch}
-							<div class="flex items-center gap-3 rounded-md border p-2.5 text-sm">
-								<span class="flex-1 font-medium">{ch.name}</span>
-								{#if ch.isOta}
-									<span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 uppercase">OTA</span>
-								{/if}
-								<span class="text-muted-foreground text-xs">sort: {ch.sortOrder}</span>
-								<span class={ch.isActive ? 'text-green-600 text-xs' : 'text-muted-foreground text-xs'}>
-									{ch.isActive ? 'Active' : 'Inactive'}
-								</span>
-							</div>
+		<!-- ── Channex Integration ──────────────────────────────────────── -->
+		<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
+			<div class="mb-3 flex items-start justify-between">
+				<div>
+					<h2 class="font-semibold">Channex.io Channel Manager</h2>
+					<p class="text-sm text-muted-foreground mt-0.5">
+						Channex distributes your availability and rates to Booking.com, Expedia, Airbnb, Google Hotels, and more.
+						<a href="https://channex.io" target="_blank" rel="noopener" class="text-primary underline">channex.io</a>
+					</p>
+				</div>
+			</div>
+
+			<div class="rounded-md bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800 mb-4">
+				<strong>Setup steps:</strong>
+				<ol class="list-decimal pl-5 mt-1 space-y-1 text-xs">
+					<li>Create a free account at <a href="https://channex.io" target="_blank" class="underline">channex.io</a></li>
+					<li>Create properties matching your motels, then room types and one rate plan ("Standard") per room type</li>
+					<li>Paste the Channex UUIDs below (find them in the Channex dashboard URL or API)</li>
+					<li>Add <code class="bg-amber-100 rounded px-1">CHANNEX_API_KEY</code> to your .env file</li>
+					<li>Register your webhook URL in Channex: <code class="bg-amber-100 rounded px-1 break-all">https://yourdomain.com/api/channex/webhook</code></li>
+					<li>Connect OTAs (Booking.com, Expedia) in the Channex dashboard — no code needed</li>
+				</ol>
+			</div>
+
+			<!-- Per-property Channex IDs -->
+			{#each data.propertiesList as prop}
+				<div class="mb-4 rounded-md border p-4">
+					<h3 class="font-medium text-sm mb-3">{prop.name}</h3>
+					<form method="POST" action="?/updateProperty"
+						use:enhance={() => {
+							savingProperty = prop.id;
+							return async ({ update }) => { savingProperty = null; await update({ reset: false }); };
+						}}
+					>
+						<input type="hidden" name="id" value={prop.id} />
+						<!-- Pass through required fields as hidden so the action doesn't blank them -->
+						<input type="hidden" name="name" value={prop.name} />
+						<input type="hidden" name="address" value={prop.address ?? ''} />
+						<input type="hidden" name="city" value={prop.city ?? ''} />
+						<input type="hidden" name="province" value={prop.province ?? ''} />
+						<input type="hidden" name="checkinTime" value={prop.checkinTime} />
+						<input type="hidden" name="checkoutTime" value={prop.checkoutTime} />
+						<div class="flex flex-col gap-1.5 mb-3">
+							<Label for="cx-prop-{prop.id}">Channex Property ID</Label>
+							<Input id="cx-prop-{prop.id}" name="channexPropertyId"
+								placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+								value={prop.channexPropertyId ?? ''}
+								class="font-mono text-xs" />
+						</div>
+						<Button type="submit" size="sm" disabled={savingProperty === prop.id}>
+							{savingProperty === prop.id ? 'Saving…' : 'Save'}
+						</Button>
+					</form>
+
+					<!-- Room type Channex IDs -->
+					<div class="mt-4 border-t pt-4">
+						<h4 class="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Room Type Channex IDs</h4>
+						{#each data.roomTypesList.filter(rt => rt.propertyId === prop.id) as rt}
+							<form method="POST" action="?/updateRoomTypeChannex"
+								use:enhance={() => {
+									return async ({ update }) => { await update({ reset: false }); };
+								}}
+								class="flex items-end gap-2 flex-wrap mb-2"
+							>
+								<input type="hidden" name="id" value={rt.id} />
+								<div class="flex flex-col gap-1 flex-1 min-w-0">
+									<label class="text-xs text-muted-foreground">{rt.category}: {rt.name} — Room Type ID</label>
+									<Input name="channexRoomTypeId"
+										placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+										value={rt.channexRoomTypeId ?? ''}
+										class="font-mono text-xs h-8" />
+								</div>
+								<div class="flex flex-col gap-1 flex-1 min-w-0">
+									<label class="text-xs text-muted-foreground">Rate Plan ID</label>
+									<Input name="channexRatePlanId"
+										placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+										value={rt.channexRatePlanId ?? ''}
+										class="font-mono text-xs h-8" />
+								</div>
+								<Button type="submit" size="sm" class="h-8 shrink-0">Save</Button>
+							</form>
 						{/each}
 					</div>
-				{/if}
+				</div>
+			{/each}
+		</div>
 
-				<!-- Add channel -->
-				<form
-					method="POST"
-					action="?/upsertChannel"
-					use:enhance={() => {
-						addingChannel = true;
-						return async ({ update }) => {
-							addingChannel = false;
-							newChannel = { name: '', isOta: false, sortOrder: '10' };
-							await update();
-						};
-					}}
-					class="flex items-end gap-2 flex-wrap"
-				>
-					<div class="flex flex-col gap-1">
-						<Label class="text-xs">Name</Label>
-						<Input name="name" placeholder="e.g. VRBO" bind:value={newChannel.name} class="h-8 w-32" required />
-					</div>
-					<div class="flex flex-col gap-1">
-						<Label class="text-xs">Sort order</Label>
-						<Input name="sortOrder" type="number" bind:value={newChannel.sortOrder} class="h-8 w-16" />
-					</div>
-					<div class="flex items-center gap-1.5 pb-0.5">
-						<input
-							type="checkbox"
-							id="isOta"
-							name="isOta"
-							bind:checked={newChannel.isOta}
-							value="true"
-							class="h-4 w-4"
-						/>
-						<Label for="isOta" class="text-sm cursor-pointer">OTA channel</Label>
-						<input type="hidden" name="isOta" value={String(newChannel.isOta)} />
-					</div>
-					<Button type="submit" size="sm" class="h-8" disabled={addingChannel}>
-						{addingChannel ? '…' : '+ Add channel'}
-					</Button>
-				</form>
-			</div>
+		<!-- ── Booking Channels ──────────────────────────────────────────── -->
+		<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
+			<h2 class="mb-3 font-semibold">Booking Channels</h2>
+
+			<!-- Channel list -->
+			{#if data.channelsList.length > 0}
+				<div class="mb-4 space-y-2">
+					{#each data.channelsList as ch}
+						<div class="flex items-center gap-3 rounded-md border p-2.5 text-sm">
+							<span class="flex-1 font-medium">{ch.name}</span>
+							{#if ch.isOta}
+								<span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 uppercase">OTA</span>
+							{/if}
+							<span class="text-muted-foreground text-xs">sort: {ch.sortOrder}</span>
+							<span class={ch.isActive ? 'text-green-600 text-xs' : 'text-muted-foreground text-xs'}>
+								{ch.isActive ? 'Active' : 'Inactive'}
+							</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			<!-- Add channel -->
+			<form
+				method="POST"
+				action="?/upsertChannel"
+				use:enhance={() => {
+					addingChannel = true;
+					return async ({ update }) => {
+						addingChannel = false;
+						newChannel = { name: '', isOta: false, sortOrder: '10' };
+						await update();
+					};
+				}}
+				class="flex items-end gap-2 flex-wrap"
+			>
+				<div class="flex flex-col gap-1">
+					<Label class="text-xs">Name</Label>
+					<Input name="name" placeholder="e.g. VRBO" bind:value={newChannel.name} class="h-8 w-32" required />
+				</div>
+				<div class="flex flex-col gap-1">
+					<Label class="text-xs">Sort order</Label>
+					<Input name="sortOrder" type="number" bind:value={newChannel.sortOrder} class="h-8 w-16" />
+				</div>
+				<div class="flex items-center gap-1.5 pb-0.5">
+					<input
+						type="checkbox"
+						id="isOta"
+						name="isOta"
+						bind:checked={newChannel.isOta}
+						value="true"
+						class="h-4 w-4"
+					/>
+					<Label for="isOta" class="text-sm cursor-pointer">OTA channel</Label>
+					<input type="hidden" name="isOta" value={String(newChannel.isOta)} />
+				</div>
+				<Button type="submit" size="sm" class="h-8" disabled={addingChannel}>
+					{addingChannel ? '…' : '+ Add channel'}
+				</Button>
+			</form>
+		</div>
+
+		</div>
 	</Tabs.Content>
 
 	<!-- ── Email Configuration ─────────────────────────────────────────── -->

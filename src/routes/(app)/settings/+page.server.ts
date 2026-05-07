@@ -77,12 +77,27 @@ export const actions: Actions = {
 				depositNights: parseInt(g('depositNights') ?? '1') || 1,
 				cancellationFeeCents: Math.round((parseFloat(g('cancellationFeeDollars') ?? '25') || 25) * 100),
 				noRefundDays: parseInt(g('noRefundDays') ?? '30') || 30,
-				depositCalcMethod: g('depositCalcMethod') ?? 'first_night',
-				depositPercent: parseInt(g('depositPercent') ?? '20') || 20,
-				depositFlatCents: Math.round((parseFloat(g('depositFlatDollars') ?? '0') || 0) * 100)
-			})
-			.where(eq(properties.id, id));
+		depositCalcMethod: g('depositCalcMethod') ?? 'first_night',
+			depositPercent: parseInt(g('depositPercent') ?? '20') || 20,
+			depositFlatCents: Math.round((parseFloat(g('depositFlatDollars') ?? '0') || 0) * 100),
+			channexPropertyId: g('channexPropertyId')
+		})
+		.where(eq(properties.id, id));
 
+		return { success: true };
+	},
+
+	// Update Channex IDs for a room type
+	updateRoomTypeChannex: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		if (!id) return fail(400, { error: 'Missing room type ID' });
+		await db.update(roomTypes).set({
+			channexRoomTypeId: g('channexRoomTypeId'),
+			channexRatePlanId: g('channexRatePlanId')
+		}).where(eq(roomTypes.id, id));
 		return { success: true };
 	},
 
