@@ -479,28 +479,36 @@ export const actions: Actions = {
 		}
 
 		const now = new Date();
-		// Status: walk-in always starts checked_in; checkIn/checkOut intents transition
-		let status = 'confirmed';
+		// Status: walk-in/OTA → confirmed immediately; phone/website → reserved until deposit collected
+		const isOtaBooking = ['bookingcom', 'expedia', 'airbnb', 'ota'].includes(bookingType);
+		let status = (bookingType === 'walkin' || intent === 'checkIn' || isOtaBooking)
+			? 'confirmed' : 'reserved';
 		let checkedInAt: Date | undefined;
 		let checkedOutAt: Date | undefined;
 		if (bookingType === 'walkin' || intent === 'checkIn') { status = 'checked_in'; checkedInAt = now; }
 		if (intent === 'checkOut') { status = 'checked_out'; checkedOutAt = now; }
 
+		const requestedRoomTypeId = g('requestedRoomTypeId');
+
 		if (!bookingId) {
 			// ── CREATE ────────────────────────────────────────────────────────
-			if (!propertyId || !roomId || !channelId) return fail(400, { error: 'Property, room, and channel are required' });
-			const conflict = await db.query.bookings.findFirst({
-				where: and(eq(bookings.roomId, roomId), lt(bookings.checkInDate, checkOut!), gt(bookings.checkOutDate, checkIn!), ne(bookings.status, 'cancelled'))
-			});
-			if (conflict) return fail(400, { error: `Room already booked ${conflict.checkInDate} → ${conflict.checkOutDate}` });
+			if (!propertyId || !channelId) return fail(400, { error: 'Property and channel are required' });
+			// roomId is optional — null means unassigned (like OTA bookings)
+			if (roomId) {
+				const conflict = await db.query.bookings.findFirst({
+					where: and(eq(bookings.roomId, roomId), lt(bookings.checkInDate, checkOut!), gt(bookings.checkOutDate, checkIn!), ne(bookings.status, 'cancelled'))
+				});
+				if (conflict) return fail(400, { error: `Room already booked ${conflict.checkInDate} → ${conflict.checkOutDate}` });
+			}
 
 			const newId = crypto.randomUUID();
 			await db.insert(bookings).values({
-				id: newId, propertyId, roomId, guestId, channelId,
+				id: newId, propertyId, roomId: roomId ?? null, guestId, channelId,
 				clerkId: clerkUserId || locals.user.id,
 				clerkName: clerkUserId ? null : (clerkName || null),
 				status, checkInDate: checkIn!, checkOutDate: checkOut!, roomConfig,
-				otaConfirmationNumber, notes, numAdults, numChildren,
+				otaConfirmationNumber: otaConfirmationNumber ?? (requestedRoomTypeId ? `INV-${requestedRoomTypeId.slice(0, 8)}` : null),
+				notes, numAdults, numChildren,
 				vehicleMake, vehicleColour, vehiclePlate, waiverSigned,
 				checkedInAt, checkedOutAt
 			});
@@ -508,13 +516,23 @@ export const actions: Actions = {
 			if (newItems.length > 0) {
 				await db.insert(bookingLineItems).values(newItems.map(li => ({ ...li, bookingId: newId })));
 			}
-			// Initial deposit from slip
+			// Initial deposit from slip — stored as 'pending' until operator marks received
 			const depositAmountStr = g('depositAmount');
 			const depositMethod = g('depositMethod');
+			const depositReceived = fd.get('depositReceived') === 'true';
 			if (depositAmountStr) {
 				const amt = Math.round(parseFloat(depositAmountStr) * 100);
 				if (!isNaN(amt) && amt > 0) {
-					await db.insert(paymentEvents).values({ id: crypto.randomUUID(), bookingId: newId, type: 'deposit', amount: amt, paymentMethod: depositMethod || 'cash', chargedAt: now });
+					await db.insert(paymentEvents).values({
+						id: crypto.randomUUID(), bookingId: newId, type: 'deposit', amount: amt,
+						paymentMethod: depositMethod || 'cash',
+						status: depositReceived ? 'received' : 'pending',
+						chargedAt: depositReceived ? now : null
+					});
+					// If deposit is received, promote reserved → confirmed
+					if (depositReceived && status === 'reserved') {
+						await db.update(bookings).set({ status: 'confirmed' }).where(eq(bookings.id, newId));
+					}
 				}
 			}
 

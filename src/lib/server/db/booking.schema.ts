@@ -287,13 +287,15 @@ export const groups = sqliteTable('groups', {
 // Central record for the full booking lifecycle.
 //
 // Status flow:
-//   confirmed  → phone/advance booking (slip stage)
-//   checked_in → guest on property (registration card stage)
+//   reserved    → phone/advance booking (deposit not yet collected; tentative hold)
+//   confirmed   → deposit received; booking committed
+//   checked_in  → guest on property (registration card stage)
 //   checked_out → guest has departed
-//   cancelled  → booking voided (never hard-deleted; kept for history)
+//   cancelled   → booking voided (never hard-deleted; kept for history)
 //
-// Walk-ins are created as confirmed and immediately transitioned to checked_in.
-// The "slip view" and "card view" are UI states of this same record.
+// Walk-ins skip 'reserved' and are created directly as 'confirmed' (payment immediate).
+// OTA bookings arrive as 'confirmed' (OTA guarantees the payment).
+// Recording a received deposit on a 'reserved' booking auto-promotes it to 'confirmed'.
 
 export const bookings = sqliteTable(
 	'bookings',
@@ -307,8 +309,8 @@ export const bookings = sqliteTable(
 		channelId: text('channel_id').references(() => bookingChannels.id, { onDelete: 'set null' }),
 		clerkId: text('clerk_id').references(() => user.id, { onDelete: 'set null' }),
 
-		// confirmed | checked_in | checked_out | cancelled
-		status: text('status').notNull().default('confirmed'),
+		// reserved | confirmed | checked_in | checked_out | cancelled | blocked
+		status: text('status').notNull().default('reserved'),
 
 		checkInDate: text('check_in_date').notNull(), // "YYYY-MM-DD"
 		checkOutDate: text('check_out_date').notNull(),
@@ -401,6 +403,7 @@ export const bookingLineItems = sqliteTable(
 // ─── Payment Events ───────────────────────────────────────────────────────────
 // Immutable record of every charge, deposit, and refund against a booking.
 // type: "deposit" | "final_charge" | "refund"
+// status: "pending" (recorded but not yet collected) | "received" (money in hand)
 // Amounts in cents; refunds stored as positive values with type="refund".
 
 export const paymentEvents = sqliteTable(
@@ -411,6 +414,8 @@ export const paymentEvents = sqliteTable(
 			.notNull()
 			.references(() => bookings.id, { onDelete: 'cascade' }),
 		type: text('type').notNull(), // deposit | final_charge | refund
+		// pending = noted but not yet collected; received = money confirmed in hand
+		status: text('status').notNull().default('received'), // pending | received
 		amount: integer('amount').notNull(), // cents
 		paymentMethod: text('payment_method').notNull(), // card | cash | check | other
 		receiptNumber: text('receipt_number'),

@@ -34,6 +34,7 @@
 	type PaymentEvent = {
 		id: string;
 		type: 'deposit' | 'final_charge' | 'refund';
+		status: 'pending' | 'received';
 		amount: number;     // cents
 		paymentMethod: string;
 		notes: string | null;
@@ -101,6 +102,20 @@
 	let taxPresets = $state<{ id: string; label: string; ratePercent: number }[]>([]);
 
 	// ── Derived ───────────────────────────────────────────────────────────────
+
+	// Master date range — earliest check-in to latest check-out across all rooms
+	const masterCheckIn = $derived(
+		roomSpecs.length ? roomSpecs.reduce((min, r) => r.checkIn < min ? r.checkIn : min, roomSpecs[0].checkIn) : ''
+	);
+	const masterCheckOut = $derived(
+		roomSpecs.length ? roomSpecs.reduce((max, r) => r.checkOut > max ? r.checkOut : max, roomSpecs[0].checkOut) : ''
+	);
+	const masterDateLabel = $derived(
+		masterCheckIn && masterCheckOut
+			? `${fmtDate(masterCheckIn)} → ${fmtDate(masterCheckOut)}`
+			: ''
+	);
+
 	const totalCharges = $derived(
 		roomSpecs.reduce((sum, r) => {
 			if (r.payOwn) return sum; // excluded from group bill
@@ -110,12 +125,17 @@
 		}, 0)
 	);
 	const depositCents = $derived(Math.round((parseFloat(depositAmt) || 0) * 100));
-	// For existing groups: sum all payment events across all rooms
+	// For existing groups: sum all *received* payment events across all rooms
 	const groupCollectedCents = $derived(
 		roomSpecs.reduce((sum, r) => {
-			const paid = r.payments.filter(p => p.type !== 'refund').reduce((s, p) => s + p.amount, 0);
+			const paid = r.payments.filter(p => p.type !== 'refund' && p.status === 'received').reduce((s, p) => s + p.amount, 0);
 			const refunded = r.payments.filter(p => p.type === 'refund').reduce((s, p) => s + p.amount, 0);
 			return sum + paid - refunded;
+		}, 0)
+	);
+	const groupPendingCents = $derived(
+		roomSpecs.reduce((sum, r) => {
+			return sum + r.payments.filter(p => p.status === 'pending').reduce((s, p) => s + p.amount, 0);
 		}, 0)
 	);
 	// Balance uses either the new deposit input (new group) or collected payments (existing group)
@@ -211,11 +231,12 @@
 				payOwn: false,
 				bookingId: b.id as string,
 				payments: ((b.paymentEvents ?? []) as {
-					id: string; type: string; amount: number;
+					id: string; type: string; status?: string; amount: number;
 					paymentMethod: string; notes: string | null; chargedAt: string | null
 				}[]).map(p => ({
 					id: p.id,
 					type: p.type as PaymentEvent['type'],
+					status: (p.status ?? 'received') as PaymentEvent['status'],
 					amount: p.amount,
 					paymentMethod: p.paymentMethod,
 					notes: p.notes,
@@ -313,37 +334,69 @@
 		if (!channelId) { saveError = 'Channel is required.'; return; }
 		saving = true; saveError = '';
 		try {
-			const body = {
-				groupName: groupName.trim(),
-				organizerName: organizerName.trim() || null,
-				organizerPhone: organizerPhone.trim() || null,
-				organizerEmail: organizerEmail.trim() || null,
-				billingType, notes: groupNotes.trim() || null,
-				channelId,
-				clerkId: currentUserId,
-				guestName: organizerName.trim() || null,
-				guestPhone: organizerPhone.trim() || null,
-				guestEmail: organizerEmail.trim() || null,
-				depositAmount: depositCents > 0 ? depositCents : 0,
-				depositMethod,
-				rooms: roomSpecs.map(s => ({
-					roomId: s.roomId,
-					checkIn: s.checkIn,
-					checkOut: s.checkOut,
-					rateLines: s.rateLines.map(l => ({
-						label: l.label, qty: parseFloat(l.qty) || null,
-						unit: parseFloat(l.unit) || null, total: parseFloat(l.total) || 0
-					})).filter(l => l.label && l.total),
-					taxLines: s.taxLines.map(l => ({
-						label: l.label, total: parseFloat(l.total) || 0
-					})).filter(l => l.label && l.total)
-				}))
-			};
-			const res = await fetch('/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-			if (!res.ok) {
-				const err = await res.json();
-				saveError = err.error ?? 'Save failed.';
-				return;
+			if (groupId) {
+				// ── UPDATE existing group ─────────────────────────────────────
+				const body = {
+					name: groupName.trim(),
+					organizerName: organizerName.trim() || null,
+					organizerPhone: organizerPhone.trim() || null,
+					organizerEmail: organizerEmail.trim() || null,
+					billingType, notes: groupNotes.trim() || null,
+					rooms: roomSpecs
+						.filter(s => s.bookingId)
+						.map(s => ({
+							bookingId: s.bookingId!,
+							checkIn: s.checkIn,
+							checkOut: s.checkOut,
+							rateLines: s.rateLines.map(l => ({
+								label: l.label, qty: parseFloat(l.qty) || null,
+								unit: parseFloat(l.unit) || null, total: parseFloat(l.total) || 0
+							})).filter(l => l.label && l.total),
+							taxLines: s.taxLines.map(l => ({
+								label: l.label, total: parseFloat(l.total) || 0
+							})).filter(l => l.label && l.total)
+						}))
+				};
+				const res = await fetch(`/api/groups/${groupId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+				if (!res.ok) {
+					const err = await res.json();
+					saveError = err.error ?? 'Save failed.';
+					return;
+				}
+			} else {
+				// ── CREATE new group ─────────────────────────────────────────
+				const body = {
+					groupName: groupName.trim(),
+					organizerName: organizerName.trim() || null,
+					organizerPhone: organizerPhone.trim() || null,
+					organizerEmail: organizerEmail.trim() || null,
+					billingType, notes: groupNotes.trim() || null,
+					channelId,
+					clerkId: currentUserId,
+					guestName: organizerName.trim() || null,
+					guestPhone: organizerPhone.trim() || null,
+					guestEmail: organizerEmail.trim() || null,
+					depositAmount: depositCents > 0 ? depositCents : 0,
+					depositMethod,
+					rooms: roomSpecs.map(s => ({
+						roomId: s.roomId,
+						checkIn: s.checkIn,
+						checkOut: s.checkOut,
+						rateLines: s.rateLines.map(l => ({
+							label: l.label, qty: parseFloat(l.qty) || null,
+							unit: parseFloat(l.unit) || null, total: parseFloat(l.total) || 0
+						})).filter(l => l.label && l.total),
+						taxLines: s.taxLines.map(l => ({
+							label: l.label, total: parseFloat(l.total) || 0
+						})).filter(l => l.label && l.total)
+					}))
+				};
+				const res = await fetch('/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+				if (!res.ok) {
+					const err = await res.json();
+					saveError = err.error ?? 'Save failed.';
+					return;
+				}
 			}
 			open = false;
 			await invalidateAll();
@@ -406,7 +459,7 @@
 <CustomDialog
 	bind:open
 	title={groupId ? groupName || 'Group Booking' : 'New Group Booking'}
-	description={`${roomSpecs.length} room${roomSpecs.length === 1 ? '' : 's'} · ${billingType === 'master' ? 'Master billing' : 'Individual billing'}`}
+	description={`${roomSpecs.length} room${roomSpecs.length === 1 ? '' : 's'} · ${billingType === 'master' ? 'Master billing' : 'Individual billing'}${masterDateLabel ? ' · ' + masterDateLabel : ''}`}
 	dialogClass="sm:max-w-4xl"
 	closeOnOutsideClick={false}
 	interactOutsideBehavior="ignore"
@@ -625,20 +678,34 @@
 				{:else}
 					<div class="space-y-0.5">
 						{#each allPayments as p}
-							<div class="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/40">
+							<div class={['flex items-center gap-2 rounded px-2 py-1 text-xs',
+								p.status === 'pending' ? 'bg-amber-50 border border-amber-200' : 'hover:bg-muted/40'
+							].join(' ')}>
 								<span class="w-10 shrink-0 font-medium">Rm {p.roomNumber}</span>
 								<span class="text-muted-foreground capitalize">{p.type.replace('_', ' ')}</span>
 								<span class="text-muted-foreground">· {p.paymentMethod}</span>
+								{#if p.status === 'pending'}
+									<span class="text-[10px] font-semibold text-amber-700 rounded-full bg-amber-100 px-1.5 py-0.5">PENDING</span>
+								{/if}
 								{#if p.notes}
 									<span class="text-muted-foreground truncate flex-1 italic">{p.notes}</span>
 								{:else}
 									<span class="flex-1"></span>
 								{/if}
-								<span class={p.type === 'refund' ? 'text-red-600 font-medium' : 'text-green-700 font-medium'}>
+								<span class={p.type === 'refund' ? 'text-red-600 font-medium' : p.status === 'pending' ? 'text-amber-600 font-medium' : 'text-green-700 font-medium'}>
 									{p.type === 'refund' ? '+' : '−'}{fmtMoney(p.amount)}
 								</span>
-								<!-- Only show transfer button for non-refund payments when there are other rooms -->
-								{#if p.type !== 'refund' && roomSpecs.length > 1}
+								{#if p.status === 'pending'}
+									<button type="button"
+										onclick={async () => {
+											const r = await fetch(`/api/payment-events/${p.id}/receive`, { method: 'PATCH' });
+											if (r.ok && groupId) await loadGroup(groupId);
+										}}
+										class="shrink-0 rounded border border-amber-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-50"
+									>Mark received</button>
+								{/if}
+								<!-- Only show transfer button for received non-refund payments when there are other rooms -->
+								{#if p.type !== 'refund' && p.status === 'received' && roomSpecs.length > 1}
 									<button type="button"
 										onclick={() => {
 											const srcSpec = roomSpecs.find(s => s.bookingId === p.bookingId);
@@ -712,6 +779,12 @@
 				<div class="flex justify-between text-green-700">
 					<span>Total collected</span>
 					<span>− {fmtMoney(groupCollectedCents)}</span>
+				</div>
+			{/if}
+			{#if groupId && groupPendingCents > 0}
+				<div class="flex justify-between text-amber-600 text-xs">
+					<span>⏳ Deposit pending (not yet received)</span>
+					<span>{fmtMoney(groupPendingCents)}</span>
 				</div>
 			{/if}
 			<div class={['flex justify-between font-semibold border-t border-border pt-1 mt-1',

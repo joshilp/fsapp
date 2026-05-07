@@ -11,6 +11,21 @@
 
 	let { data }: { data: PageData } = $props();
 
+	// ── Layout mode ───────────────────────────────────────────────────────────
+
+	const LAYOUT_KEY = 'grid-layout';
+	function loadLayout(): 'split' | 'focus' {
+		if (typeof localStorage === 'undefined') return 'split';
+		return (localStorage.getItem(LAYOUT_KEY) as 'split' | 'focus') || 'split';
+	}
+	let layoutMode = $state<'split' | 'focus'>(loadLayout());
+	let focusProp  = $state<'falcon' | 'spanish'>('falcon');
+
+	function toggleLayout() {
+		layoutMode = layoutMode === 'split' ? 'focus' : 'split';
+		if (typeof localStorage !== 'undefined') localStorage.setItem(LAYOUT_KEY, layoutMode);
+	}
+
 	// ── Shared cross-grid state ────────────────────────────────────────────────
 
 	let sharedCheckIn  = $state('');
@@ -86,6 +101,13 @@
 	<BookingFilters startDate={data.startDate} numDays={data.numDays} viewMode={data.viewMode as 'grid' | 'today'}>
 		{#snippet actions()}
 			<button
+				onclick={toggleLayout}
+				class="rounded-md border border-input px-3 py-1.5 text-xs font-medium hover:bg-muted flex items-center gap-1.5 h-8"
+				title={layoutMode === 'split' ? 'Switch to focus mode (one property full-width)' : 'Switch to split mode (both properties side-by-side)'}
+			>
+				{layoutMode === 'split' ? '⊞ Split' : '⊟ Focus'}
+			</button>
+			<button
 				onclick={() => { otaImportOpen = true; }}
 				class="rounded-md border border-input px-3 py-1.5 text-xs font-medium hover:bg-muted flex items-center gap-1.5 h-8"
 			>
@@ -116,36 +138,91 @@
 	/>
 {:else if data.falcon && data.spanish}
 	<div class="flex min-h-0 flex-1 flex-col">
-		<div class="flex min-w-0 flex-col divide-y lg:flex-row lg:divide-x lg:divide-y-0">
-			<div class="min-w-0 flex-1">
-				<BookingGrid
-					grid={data.falcon}
-					today={data.today}
-					channels={data.channels}
-					users={data.users}
-					currentUserId={data.currentUserId}
-					bind:filterCheckIn={sharedCheckIn}
-					bind:filterCheckOut={sharedCheckOut}
-					bind:drawMode={sharedDrawMode}
-					onDrawSelectionsChange={(s) => { falconSelections = s; }}
-					onGroupBook={openGroupCard}
-				/>
+
+		{#if layoutMode === 'split'}
+			<!-- Split: both grids side by side -->
+			<div class="flex min-w-0 flex-col divide-y lg:flex-row lg:divide-x lg:divide-y-0">
+				<div class="min-w-0 flex-1">
+					<BookingGrid
+						grid={data.falcon}
+						today={data.today}
+						channels={data.channels}
+						users={data.users}
+						currentUserId={data.currentUserId}
+						bind:filterCheckIn={sharedCheckIn}
+						bind:filterCheckOut={sharedCheckOut}
+						bind:drawMode={sharedDrawMode}
+						onDrawSelectionsChange={(s) => { falconSelections = s; }}
+						onGroupBook={openGroupCard}
+					/>
+				</div>
+				<div class="min-w-0 flex-1">
+					<BookingGrid
+						grid={data.spanish}
+						today={data.today}
+						channels={data.channels}
+						users={data.users}
+						currentUserId={data.currentUserId}
+						bind:filterCheckIn={sharedCheckIn}
+						bind:filterCheckOut={sharedCheckOut}
+						bind:drawMode={sharedDrawMode}
+						onDrawSelectionsChange={(s) => { spanishSelections = s; }}
+						onGroupBook={openGroupCard}
+					/>
+				</div>
+			</div>
+
+		{:else}
+			<!-- Focus: one property at a time, full width, with property tab switcher -->
+			<div class="flex items-center gap-1 border-b border-border px-3 py-1.5 bg-muted/20">
+				<span class="text-xs text-muted-foreground mr-1">Property:</span>
+				{#each [{ key: 'falcon' as const, grid: data.falcon }, { key: 'spanish' as const, grid: data.spanish }] as p}
+					<button
+						onclick={() => { focusProp = p.key; }}
+						class={[
+							'rounded-full border px-3 py-0.5 text-xs font-medium transition-colors',
+							focusProp === p.key
+								? 'bg-foreground text-background border-foreground'
+								: 'border-border text-muted-foreground hover:border-foreground/40'
+						].join(' ')}
+					>{p.grid.propertyName}</button>
+				{/each}
+				{#if allDrawSelections.length > 0}
+					<span class="ml-3 text-xs text-orange-700 font-medium">
+						{allDrawSelections.length} room{allDrawSelections.length === 1 ? '' : 's'} selected across properties
+					</span>
+				{/if}
 			</div>
 			<div class="min-w-0 flex-1">
-				<BookingGrid
-					grid={data.spanish}
-					today={data.today}
-					channels={data.channels}
-					users={data.users}
-					currentUserId={data.currentUserId}
-					bind:filterCheckIn={sharedCheckIn}
-					bind:filterCheckOut={sharedCheckOut}
-					bind:drawMode={sharedDrawMode}
-					onDrawSelectionsChange={(s) => { spanishSelections = s; }}
-					onGroupBook={openGroupCard}
-				/>
+				{#if focusProp === 'falcon'}
+					<BookingGrid
+						grid={data.falcon}
+						today={data.today}
+						channels={data.channels}
+						users={data.users}
+						currentUserId={data.currentUserId}
+						bind:filterCheckIn={sharedCheckIn}
+						bind:filterCheckOut={sharedCheckOut}
+						bind:drawMode={sharedDrawMode}
+						onDrawSelectionsChange={(s) => { falconSelections = s; }}
+						onGroupBook={openGroupCard}
+					/>
+				{:else}
+					<BookingGrid
+						grid={data.spanish}
+						today={data.today}
+						channels={data.channels}
+						users={data.users}
+						currentUserId={data.currentUserId}
+						bind:filterCheckIn={sharedCheckIn}
+						bind:filterCheckOut={sharedCheckOut}
+						bind:drawMode={sharedDrawMode}
+						onDrawSelectionsChange={(s) => { spanishSelections = s; }}
+						onGroupBook={openGroupCard}
+					/>
+				{/if}
 			</div>
-		</div>
+		{/if}
 
 		<!-- Draw mode summary panel (collects from BOTH grids) -->
 		{#if allDrawSelections.length > 0}

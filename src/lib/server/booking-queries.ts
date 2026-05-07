@@ -172,7 +172,7 @@ export async function getGridData(
 					}),
 					db.query.paymentEvents.findMany({
 						where: inArray(paymentEvents.bookingId, bookingIds),
-						columns: { bookingId: true, type: true, amount: true, paymentMethod: true, chargedAt: true }
+						columns: { bookingId: true, type: true, amount: true, paymentMethod: true, chargedAt: true, status: true }
 					})
 				])
 			: [[], []];
@@ -182,7 +182,7 @@ export async function getGridData(
 	for (const li of chargeRows) {
 		chargesByBooking.set(li.bookingId, (chargesByBooking.get(li.bookingId) ?? 0) + li.totalAmount);
 	}
-	// Net payments per booking (deposits + final charges − refunds), and last method
+	// Net received payments per booking (deposits + final charges − refunds; pending excluded)
 	const paidByBooking = new Map<string, number>();
 	const lastMethodByBooking = new Map<string, string>();
 	// Sort by chargedAt so last entry wins for method
@@ -190,6 +190,8 @@ export async function getGridData(
 		(a, b) => ((a.chargedAt?.getTime() ?? 0) - (b.chargedAt?.getTime() ?? 0))
 	);
 	for (const pe of sortedPayments) {
+		// Only count received payments toward balance
+		if ((pe as { status?: string }).status === 'pending') continue;
 		const delta = pe.type === 'refund' ? -pe.amount : pe.amount;
 		paidByBooking.set(pe.bookingId, (paidByBooking.get(pe.bookingId) ?? 0) + delta);
 		if (pe.type !== 'refund') lastMethodByBooking.set(pe.bookingId, pe.paymentMethod);

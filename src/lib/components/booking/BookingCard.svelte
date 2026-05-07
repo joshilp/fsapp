@@ -14,7 +14,17 @@
 
 	type Channel = { id: string; name: string };
 	type User    = { id: string; name: string };
-	type NewBooking = { propertyId: string; propertyName: string; roomId: string; roomNumber: string; roomConfigs: string[]; checkIn: string; checkOut: string };
+	type NewBooking = {
+		propertyId: string;
+		propertyName: string;
+		roomId?: string;                  // optional — empty for inventory-sourced bookings
+		roomNumber?: string;              // optional — empty for inventory-sourced bookings
+		roomConfigs?: string[];
+		requestedRoomTypeId?: string;     // set when booking from inventory grid
+		requestedRoomTypeName?: string;   // display name for the requested room type
+		checkIn: string;
+		checkOut: string;
+	};
 	type RateLine = { id: string; label: string; qty: string; unit: string; total: string };
 	type TaxLine  = { id: string; presetId: string; label: string; total: string };
 	type Payment  = { id: string; type: string; amount: number; paymentMethod: string; notes: string | null; chargedAt: number | null };
@@ -62,6 +72,33 @@
 	let roomTypeName = $state('');
 	let roomConfigs_ = $state<string[]>([]);
 	let selConfig    = $state('');
+
+	// ── Inventory-sourced booking state ───────────────────────────────────────
+	// Set when the card is opened from the Inventory grid (drag on Available row).
+	// Allows optional room assignment; if left blank the booking is saved as unassigned.
+	let requestedRoomTypeId_ = $state('');
+	let availRooms = $state<{ id: string; roomNumber: string; roomTypeName: string }[]>([]);
+	let availRoomsLoading = $state(false);
+
+	async function loadAvailableRooms() {
+		if (!requestedRoomTypeId_ || !checkIn || !checkOut || checkIn >= checkOut) return;
+		availRoomsLoading = true;
+		try {
+			const r = await fetch(
+				`/api/rooms/available?roomTypeId=${encodeURIComponent(requestedRoomTypeId_)}&checkIn=${checkIn}&checkOut=${checkOut}`
+			);
+			if (r.ok) availRooms = await r.json();
+		} catch { /* ignore */ }
+		finally { availRoomsLoading = false; }
+	}
+
+	function pickAvailRoom(id: string) {
+		const r = availRooms.find((x) => x.id === id);
+		if (!r) { roomId_ = ''; return; }
+		roomId_ = r.id;
+		roomNumber_ = r.roomNumber;
+		suggestRate(true);
+	}
 	let checkIn      = $state(today);
 	let checkOut     = $state('');
 	let channelId    = $state('');
@@ -286,23 +323,19 @@
 	const rateTotal  = $derived(rateLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
 	const taxTotal   = $derived(taxLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
 	const grandTotal = $derived(rateTotal + taxTotal);
-	const collected  = $derived(payments.filter(p => p.type !== 'refund').reduce((s, p) => s + p.amount, 0));
+	const collected  = $derived(payments.filter(p => p.type !== 'refund' && (p as { status?: string }).status !== 'pending').reduce((s, p) => s + p.amount, 0));
+	const pending    = $derived(payments.filter(p => p.type === 'deposit' && (p as { status?: string }).status === 'pending').reduce((s, p) => s + p.amount, 0));
 	const refunded   = $derived(payments.filter(p => p.type === 'refund').reduce((s, p) => s + p.amount, 0));
 	const balanceCents = $derived(Math.round(grandTotal * 100) - collected + refunded);
 	const isOta      = $derived(['bookingcom','expedia','airbnb','other'].includes(bookingType));
 	const isNew      = $derived(!bookingId);
 
-	// Auto-suggest deposit when rate lines change (only if no deposit set yet)
-	$effect(() => {
-		if (!isNew || depositAmt) return;
-		const firstUnit = parseFloat(rateLines[0]?.unit || '');
-		if (firstUnit > 0) depositAmt = firstUnit.toFixed(2);
-	});
+	// Auto-suggest deposit is handled inside suggestRate() once rate lines are fetched.
 	const cardTitle = $derived(roomNumber_ ? `Room ${roomNumber_}${propName ? ' · '+propName : ''}` : 'New Booking');
 	const cardDesc  = $derived(checkIn && checkOut ? `${fmt(checkIn)} → ${fmt(checkOut)} · ${nights} night${nights===1?'':'s'}` : '');
 
-	const statusLabel = $derived(({ confirmed:'Reserved', checked_in:'Checked In', checked_out:'Checked Out', cancelled:'Cancelled', blocked:'Blocked' } as Record<string,string>)[status] ?? status);
-	const statusCls   = $derived(({ confirmed:'bg-blue-100 text-blue-700 border-blue-200', checked_in:'bg-green-100 text-green-700 border-green-200', checked_out:'bg-gray-100 text-gray-600 border-gray-200', cancelled:'bg-red-100 text-red-600 border-red-200' } as Record<string,string>)[status] ?? 'bg-muted text-muted-foreground border-border');
+	const statusLabel = $derived(({ reserved:'Reserved', confirmed:'Confirmed', checked_in:'Checked In', checked_out:'Checked Out', cancelled:'Cancelled', blocked:'Blocked' } as Record<string,string>)[status] ?? status);
+	const statusCls   = $derived(({ reserved:'bg-amber-100 text-amber-700 border-amber-200', confirmed:'bg-blue-100 text-blue-700 border-blue-200', checked_in:'bg-green-100 text-green-700 border-green-200', checked_out:'bg-gray-100 text-gray-600 border-gray-200', cancelled:'bg-red-100 text-red-600 border-red-200' } as Record<string,string>)[status] ?? 'bg-muted text-muted-foreground border-border');
 
 	const RATING: Record<number,{label:string;cls:string}> = {
 		1:{label:'★ Excellent',cls:'bg-green-100 text-green-800'},
@@ -335,6 +368,7 @@
 		waiverSigned = false;
 		rateLines = [{ id: crypto.randomUUID(), label: '', qty: '', unit: '', total: '' }];
 		taxLines = []; taxPresets = []; payments = []; ccInfo = null;
+		requestedRoomTypeId_ = ''; availRooms = [];
 		addingPay = false; payAmt = ''; payMethod = 'cash'; payType = 'final_charge'; payNotes = ''; payErr = '';
 		suggestions = []; showSuggest = false;
 		depositAmt = ''; cancelPreview = null; cancelOpen = false; cancelBusy = false;
@@ -344,12 +378,19 @@
 
 	function initNew(nb: NewBooking) {
 		propId = nb.propertyId; propName = nb.propertyName;
-		roomId_ = nb.roomId; roomNumber_ = nb.roomNumber;
-		roomConfigs_ = nb.roomConfigs; selConfig = nb.roomConfigs[0] ?? '';
+		// Read only from nb (not reactive state) to avoid tracked dependencies inside the $effect
+		roomId_ = nb.roomId ?? '';
+		roomNumber_ = nb.roomNumber || nb.requestedRoomTypeName || '';
+		roomConfigs_ = nb.roomConfigs ?? []; selConfig = nb.roomConfigs?.[0] ?? '';
 		checkIn = nb.checkIn; checkOut = nb.checkOut;
 		channelId = defChannel('phone');
+		requestedRoomTypeId_ = nb.requestedRoomTypeId ?? '';
 		fetchTaxPresets();
-		suggestRate(true); // auto-fill rates silently on open
+		if (requestedRoomTypeId_) {
+			loadAvailableRooms();
+		} else {
+			suggestRate(true); // auto-fill rates silently on open
+		}
 	}
 
 	function initGroup(gr: { roomId: string; roomNumber: string; checkIn: string; checkOut: string; roomConfigs: string[] }[]) {
@@ -597,7 +638,7 @@
 					</button>
 					<button type="button"
 						onclick={toggleCheckout}
-						disabled={toggleBusy || status === 'confirmed'}
+						disabled={toggleBusy || (status !== 'confirmed' && status !== 'reserved')}
 						class={['flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors',
 							status === 'checked_out'
 								? 'border-gray-400 bg-gray-100 text-gray-700'
@@ -620,11 +661,12 @@
 
 			<form id="bc-form" bind:this={formEl} method="POST" action="/booking?/saveCard" use:enhance={handleEnhance} autocomplete="off">
 				<!-- Hidden fields -->
-				<input type="hidden" name="bookingId"   value={bookingId ?? ''} />
-				<input type="hidden" name="intent"      bind:value={intent} />
-				<input type="hidden" name="propertyId"  value={propId} />
-				<input type="hidden" name="roomId"      value={roomId_} />
-				<input type="hidden" name="channelId"   value={channelId} />
+				<input type="hidden" name="bookingId"            value={bookingId ?? ''} />
+				<input type="hidden" name="intent"               bind:value={intent} />
+				<input type="hidden" name="propertyId"           value={propId} />
+				<input type="hidden" name="roomId"               value={roomId_} />
+				<input type="hidden" name="requestedRoomTypeId"  value={requestedRoomTypeId_} />
+				<input type="hidden" name="channelId"            value={channelId} />
 				<input type="hidden" name="bookingType" value={bookingType} />
 				<input type="hidden" name="guestId"     value={guestId} />
 				<input type="hidden" name="clerkUserId" value={currentUserId} />
@@ -642,20 +684,26 @@
 						<!-- Stay -->
 						<section class="rounded-lg border border-border bg-card p-3">
 							<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stay</h3>
-							<div class="grid grid-cols-2 gap-3">
-								<div>
-									<label class="mb-1 block text-xs text-muted-foreground" for="bc-ci">Check-in</label>
-									<input id="bc-ci" name="checkIn" type="date" bind:value={checkIn}
-										oninput={() => { if (checkOut <= checkIn) checkOut = nextDay(checkIn); }}
-										class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" required />
-								</div>
-								<div>
-									<label class="mb-1 block text-xs text-muted-foreground" for="bc-co">Check-out</label>
-									<input id="bc-co" name="checkOut" type="date" bind:value={checkOut}
-										class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" required />
-								</div>
+					<div class="grid grid-cols-2 gap-3">
+							<div>
+								<label class="mb-1 block text-xs text-muted-foreground" for="bc-ci">Check-in</label>
+								<input id="bc-ci" name="checkIn" type="date" bind:value={checkIn}
+									oninput={() => {
+										if (checkOut <= checkIn) checkOut = nextDay(checkIn);
+										if (requestedRoomTypeId_) loadAvailableRooms();
+									}}
+									class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" required />
 							</div>
-							{#if roomConfigs_.length > 1}
+							<div>
+								<label class="mb-1 block text-xs text-muted-foreground" for="bc-co">Check-out</label>
+								<input id="bc-co" name="checkOut" type="date" bind:value={checkOut}
+									oninput={() => { if (requestedRoomTypeId_) loadAvailableRooms(); }}
+									class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" required />
+							</div>
+						</div>
+
+						<!-- Room config (for rooms with multiple configurations) -->
+						{#if roomConfigs_.length > 1}
 								<div class="mt-2">
 									<label class="mb-1 block text-xs text-muted-foreground">Room config</label>
 									<select name="roomConfig" bind:value={selConfig} class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
@@ -666,6 +714,40 @@
 								<input type="hidden" name="roomConfig" value={selConfig} />
 							{/if}
 						</section>
+
+						<!-- Room assignment (inventory-sourced bookings only) -->
+						{#if requestedRoomTypeId_ && isNew}
+							<section class="rounded-lg border-2 border-teal-400 bg-teal-50/60 dark:bg-teal-950/20 p-3">
+								<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-400 flex items-center gap-1.5">
+									<span>🛏</span> Assign a Room
+									<span class="font-normal normal-case text-[10px] text-teal-600/70 ml-1">optional — leave blank to queue for later</span>
+								</h3>
+								<p class="text-xs text-teal-800 dark:text-teal-300 mb-2">
+									Booking from inventory grid for <strong>{roomNumber_}</strong>. Pick a specific room or save as unassigned.
+								</p>
+								{#if availRoomsLoading}
+									<p class="text-xs text-muted-foreground animate-pulse py-1">Checking availability…</p>
+								{:else}
+									<select id="bc-room-pick"
+										class="w-full rounded-md border border-teal-300 bg-background px-3 py-2 text-sm focus:ring-teal-400"
+										value={roomId_}
+										onchange={(e) => pickAvailRoom((e.target as HTMLSelectElement).value)}
+									>
+										<option value="">— Save as unassigned (queue) —</option>
+										{#each availRooms as r}
+											<option value={r.id}>Room {r.roomNumber} – {r.roomTypeName}</option>
+										{/each}
+									</select>
+									{#if availRooms.length === 0 && checkIn && checkOut}
+										<p class="text-[10px] text-amber-600 mt-1">All rooms of this type are booked for these dates — will save as unassigned.</p>
+									{:else if !roomId_}
+										<p class="text-[10px] text-teal-600 mt-1">{availRooms.length} room{availRooms.length === 1 ? '' : 's'} available · choose one or leave unassigned</p>
+									{:else}
+										<p class="text-[10px] text-teal-700 font-medium mt-1">✓ Room {roomNumber_} selected</p>
+									{/if}
+								{/if}
+							</section>
+						{/if}
 
 						<!-- Source -->
 						<section class="rounded-lg border border-border bg-card p-3">
@@ -864,16 +946,41 @@
 										</select>
 									</div>
 								</div>
+								{#if depositAmt && parseFloat(depositAmt) > 0}
+									<label class="mt-2 flex cursor-pointer items-center gap-2 rounded-md border border-input bg-muted/30 px-3 py-2">
+										<input type="checkbox" name="depositReceived" value="true"
+											class="h-4 w-4 rounded border-input accent-teal-600" />
+										<span class="text-xs text-foreground font-medium">Deposit received now</span>
+										<span class="text-[10px] text-muted-foreground">(leave unchecked to note it as pending)</span>
+									</label>
+									<input type="hidden" name="depositReceived" value="false" />
+								{/if}
 							{:else}
 								<!-- Existing booking: payment history as ledger rows -->
 								{#if payments.length}
 									<div class="mb-2 space-y-0.5">
 										{#each payments as p}
-											<div class="flex items-center justify-between rounded px-2 py-1 text-xs hover:bg-muted/40">
+											<div class={['flex items-center justify-between gap-1 rounded px-2 py-1 text-xs',
+												(p as { status?: string }).status === 'pending'
+													? 'bg-amber-50 border border-amber-200'
+													: 'hover:bg-muted/40'
+											].join(' ')}>
 												<span class="text-muted-foreground">{fmtPayType(p.type)} · {p.paymentMethod}</span>
-												<span class={p.type === 'refund' ? 'text-destructive font-medium' : 'text-green-700 font-medium'}>
+												{#if (p as { status?: string }).status === 'pending'}
+													<span class="text-[10px] font-semibold text-amber-700 rounded-full bg-amber-100 px-1.5 py-0.5">PENDING</span>
+												{/if}
+												<span class={p.type === 'refund' ? 'text-destructive font-medium' : (p as { status?: string }).status === 'pending' ? 'text-amber-600 font-medium' : 'text-green-700 font-medium'}>
 													{p.type === 'refund' ? '+' : '−'}{fmtMoney(p.amount)}
 												</span>
+												{#if (p as { status?: string }).status === 'pending'}
+													<button type="button"
+														onclick={async () => {
+															const r = await fetch(`/api/payment-events/${p.id}/receive`, { method: 'PATCH' });
+															if (r.ok) { const d = await r.json(); if (d.promoted) status = 'confirmed'; await fetchCard(bookingId!); }
+														}}
+														class="shrink-0 rounded border border-amber-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-50"
+													>Mark received</button>
+												{/if}
 											</div>
 										{/each}
 									</div>
@@ -927,13 +1034,16 @@
 
 						<!-- Balance row (always visible for existing bookings) -->
 						{#if !isNew}
-							<div class={['mt-3 flex items-center justify-between rounded-md border px-3 py-2.5 text-sm font-semibold', balanceCents > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-green-200 bg-green-50 text-green-800'].join(' ')}>
-								<div>
-									<span>{balanceCents > 0 ? 'Balance due' : 'Paid in full'}</span>
-									{#if balanceCents > 0}
-										<span class="ml-2 text-xs font-normal opacity-70">(${(collected/100).toFixed(2)} of ${grandTotal.toFixed(2)} received)</span>
-									{/if}
-								</div>
+						<div class={['mt-3 flex items-center justify-between rounded-md border px-3 py-2.5 text-sm font-semibold', balanceCents > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-green-200 bg-green-50 text-green-800'].join(' ')}>
+							<div>
+								<span>{balanceCents > 0 ? 'Balance due' : 'Paid in full'}</span>
+								{#if balanceCents > 0}
+									<span class="ml-2 text-xs font-normal opacity-70">(${(collected/100).toFixed(2)} of ${grandTotal.toFixed(2)} received)</span>
+								{/if}
+								{#if pending > 0}
+									<div class="mt-0.5 text-[10px] font-normal text-amber-600">⏳ Deposit pending: ${(pending/100).toFixed(2)} not yet collected</div>
+								{/if}
+							</div>
 								<span class="text-base">{balanceCents > 0 ? fmtMoney(balanceCents) : '✓'}</span>
 							</div>
 						{/if}
@@ -1105,7 +1215,7 @@
 				{/if}
 			</div>
 			<div class="flex items-center gap-2">
-				{#if status === 'confirmed'}
+					{#if status === 'confirmed' || status === 'reserved'}
 					<Button type="button" onclick={() => submitWith('checkIn')} disabled={saving}>Check In →</Button>
 				{:else if status === 'checked_in'}
 					{#if !showCheckoutBar}

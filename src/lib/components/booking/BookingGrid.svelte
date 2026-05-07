@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
+	import { DragSelect, DrawSelect } from '$lib/utils/drag-select.svelte';
 	import type { BookingSummary, BookingSpan as BookingSpanType, FreeSpan, GridData, GridRoom } from '$lib/server/booking-queries';
 	import { bedSlots, totalBeds } from '$lib/utils/room';
 	import BookingCard from './BookingCard.svelte';
@@ -234,52 +234,29 @@
 		)
 	);
 
-	// ─── Drag state ───────────────────────────────────────────────────────────
+	// ─── Drag state (single-row) ─────────────────────────────────────────────
 
-	let drag = $state<{ roomId: string; startDay: number; currentDay: number } | null>(null);
+	const dragSel = new DragSelect();
 
-	const dragRange = $derived(
-		drag
-			? {
-					roomId: drag.roomId,
-					min: Math.min(drag.startDay, drag.currentDay),
-					max: Math.max(drag.startDay, drag.currentDay)
-				}
-			: null
-	);
-
-	const dragHasConflict = $derived(
-		dragRange !== null &&
-			(() => {
-				const occupied = occupiedByRoom.get(dragRange.roomId);
-				if (!occupied) return false;
-				for (let d = dragRange.min; d <= dragRange.max; d++) {
-					if (occupied.has(d)) return true;
-				}
-				return false;
-			})()
-	);
+	const dragHasConflict = $derived.by(() => {
+		const r = dragSel.range;
+		if (!r) return false;
+		const occupied = occupiedByRoom.get(r.rowId);
+		if (!occupied) return false;
+		for (let d = r.minCol; d <= r.maxCol; d++) if (occupied.has(d)) return true;
+		return false;
+	});
 
 	function cellInDrag(roomId: string, day: number): 'selected' | 'conflict' | null {
-		if (!dragRange || dragRange.roomId !== roomId) return null;
-		if (day < dragRange.min || day > dragRange.max) return null;
+		const r = dragSel.range;
+		if (!r || r.rowId !== roomId || day < r.minCol || day > r.maxCol) return null;
 		return dragHasConflict ? 'conflict' : 'selected';
 	}
 
 	function spanInDragConflict(roomId: string, spanDay: number, length: number): boolean {
-		if (!dragRange || dragRange.roomId !== roomId) return false;
-		return spanDay <= dragRange.max && spanDay + length - 1 >= dragRange.min;
-	}
-
-	function startDrag(e: MouseEvent, roomId: string, day: number) {
-		e.preventDefault();
-		drag = { roomId, startDay: day, currentDay: day };
-	}
-
-	function updateDrag(roomId: string, day: number) {
-		if (drag && drag.roomId === roomId) {
-			drag = { ...drag, currentDay: day };
-		}
+		const r = dragSel.range;
+		if (!r || r.rowId !== roomId) return false;
+		return spanDay <= r.maxCol && spanDay + length - 1 >= r.minCol;
 	}
 
 	// ─── Date ISO helpers ─────────────────────────────────────────────────────
@@ -298,23 +275,21 @@
 			finalizeDrawSelection();
 			return;
 		}
-		if (!drag || !dragRange) {
-			drag = null;
-			return;
-		}
+		// Capture before clearing (derived recalculates immediately after)
+		const r = dragSel.range;
+		const hasConflict = dragHasConflict;
+		dragSel.cancel();
+		if (!r) return;
 
-		if (dragHasConflict) {
+		if (hasConflict) {
 			conflictMessage = 'That room is already booked for part of that range.';
 			setTimeout(() => (conflictMessage = ''), 3000);
-			drag = null;
 			return;
 		}
 
-		const room = allRooms.find((r) => r.id === dragRange!.roomId);
-		if (!room) { drag = null; return; }
-
-		openNewCard(room.id, dayToIso(dragRange.min), dayToIso(dragRange.max + 1));
-		drag = null;
+		const room = allRooms.find((rm) => rm.id === r.rowId);
+		if (!room) return;
+		openNewCard(room.id, dayToIso(r.minCol), dayToIso(r.maxCol + 1));
 	}
 
 	// ─── Touch: single-tap on a free cell ────────────────────────────────────
@@ -364,13 +339,13 @@
 	function openGroupCard(rooms_: GroupRoom[]) {
 		if (rooms_.length === 1) {
 			openNewCard(rooms_[0].roomId, rooms_[0].checkIn, rooms_[0].checkOut);
-			drawSelections = [];
+			drawSel.clear();
 			return;
 		}
 		// If parent provided a handler (cross-property group), delegate up
 		if (onGroupBook) {
 			onGroupBook(rooms_);
-			drawSelections = [];
+			drawSel.clear();
 			drawMode = false;
 			return;
 		}
@@ -378,7 +353,7 @@
 		cardNewBooking = null;
 		cardBookingId = null;
 		cardOpen = true;
-		drawSelections = [];
+		drawSel.clear();
 	}
 
 	// ─── Ghost bars ───────────────────────────────────────────────────────────
@@ -409,47 +384,55 @@
 
 	export type DrawSel = { roomId: string; roomNumber: string; startDay: number; endDay: number; configs: string[] | null; propertyId: string; propertyName: string };
 
-	let drawSelections = $state<DrawSel[]>([]);
-	let activeDraw     = $state<{ roomId: string; startDay: number; currentDay: number } | null>(null);
+	type GridDrawExtra = { roomNumber: string; configs: string[] | null; propertyId: string; propertyName: string };
+	const drawSel = new DrawSelect<GridDrawExtra>();
 
 	// Notify parent whenever selections change
 	$effect(() => {
-		onDrawSelectionsChange?.(drawSelections);
+		onDrawSelectionsChange?.(
+			drawSel.selections.map((s) => ({
+				roomId: s.rowId,
+				roomNumber: s.extra.roomNumber,
+				startDay: s.minCol,
+				endDay: s.maxCol,
+				configs: s.extra.configs,
+				propertyId: s.extra.propertyId,
+				propertyName: s.extra.propertyName
+			}))
+		);
 	});
 
 	function toggleDrawMode() {
 		drawMode = !drawMode;
-		if (!drawMode) { drawSelections = []; activeDraw = null; }
+		if (!drawMode) drawSel.clear();
 	}
 
 	function cellInDraw(roomId: string, day: number): 'drawing' | 'drawing-conflict' | null {
-		if (!drawMode || !activeDraw || activeDraw.roomId !== roomId) return null;
-		const min = Math.min(activeDraw.startDay, activeDraw.currentDay);
-		const max = Math.max(activeDraw.startDay, activeDraw.currentDay);
-		if (day < min || day > max) return null;
+		if (!drawMode) return null;
+		const r = drawSel.activeRange;
+		if (!r || r.rowId !== roomId || day < r.minCol || day > r.maxCol) return null;
 		const occ = occupiedByRoom.get(roomId);
-		return (occ && occ.has(day)) ? 'drawing-conflict' : 'drawing';
+		return occ && occ.has(day) ? 'drawing-conflict' : 'drawing';
 	}
 
 	function finalizeDrawSelection() {
-		if (!activeDraw) return;
-		const { roomId, startDay, currentDay } = activeDraw;
-		const minDay = Math.min(startDay, currentDay);
-		const maxDay = Math.max(startDay, currentDay);
-		const occ = occupiedByRoom.get(roomId);
+		const r = drawSel.endGesture();
+		if (!r) return;
+		const occ = occupiedByRoom.get(r.rowId);
 		let hasConflict = false;
-		if (occ) for (let d = minDay; d <= maxDay; d++) { if (occ.has(d)) { hasConflict = true; break; } }
-		const room = allRooms.find((r) => r.id === roomId);
+		if (occ) for (let d = r.minCol; d <= r.maxCol; d++) { if (occ.has(d)) { hasConflict = true; break; } }
+		const room = allRooms.find((rm) => rm.id === r.rowId);
 		if (!hasConflict && room) {
-			drawSelections = [
-				...drawSelections.filter((s) => s.roomId !== roomId),
-				{ roomId, roomNumber: room.roomNumber, startDay: minDay, endDay: maxDay, configs: room.configs, propertyId, propertyName }
-			];
+			drawSel.commit(r.rowId, r.minCol, r.maxCol, {
+				roomNumber: room.roomNumber,
+				configs: room.configs,
+				propertyId,
+				propertyName
+			});
 		} else {
 			conflictMessage = 'Room already booked for part of that range.';
 			setTimeout(() => (conflictMessage = ''), 3000);
 		}
-		activeDraw = null;
 	}
 
 	// Click a ghost bar: in draw mode → add to selections, else open booking card
@@ -459,10 +442,12 @@
 		if (drawMode) {
 			const room = allRooms.find((r) => r.id === roomId);
 			if (room) {
-				drawSelections = [
-					...drawSelections.filter((s) => s.roomId !== roomId),
-					{ roomId, roomNumber: room.roomNumber, startDay: ghost.startDay, endDay: ghost.endDay, configs: room.configs, propertyId, propertyName }
-				];
+				drawSel.commit(roomId, ghost.startDay, ghost.endDay, {
+					roomNumber: room.roomNumber,
+					configs: room.configs,
+					propertyId,
+					propertyName
+				});
 			}
 		} else {
 			openNewCard(roomId, dayToIso(ghost.startDay), dayToIso(ghost.endDay + 1));
@@ -472,10 +457,10 @@
 	// ─── Effective display spans per room (merges ghost/draw into free cells) ──
 
 	function getDisplaySpans(room: GridRoom): EffSpan[] {
-		const drawSel = drawSelections.find((s) => s.roomId === room.id);
+		const drawSelEntry = drawSel.selections.find((s) => s.rowId === room.id);
 		const ghost   = ghostMap.get(room.id);
-		const overlay = drawSel
-			? { type: 'draw'  as const, startDay: drawSel.startDay, endDay: drawSel.endDay }
+		const overlay = drawSelEntry
+			? { type: 'draw'  as const, startDay: drawSelEntry.minCol, endDay: drawSelEntry.maxCol }
 			: ghost
 			? { type: 'ghost' as const, startDay: ghost.startDay,   endDay: ghost.endDay }
 			: null;
@@ -562,7 +547,7 @@
 	</div>
 {/if}
 
-<div class="flex min-w-0 flex-1 flex-col" class:select-none={drag !== null}>
+<div class="flex min-w-0 flex-1 flex-col" class:select-none={dragSel.active}>
 	<!-- Property label + chip filters -->
 	<div class="bg-muted/40 border-border border-b px-3 py-2 space-y-2">
 		<div class="flex items-center gap-2">
@@ -734,8 +719,8 @@
 								!dragState && !drawState ? 'hover:brightness-90' : ''
 							].join(' ')}
 							style="min-width:48px; width:48px; height:50px; background:{freeCellBg(room.roomTypeId, span.day, dragState, drawState)}"
-							onmousedown={(e) => { if (drawMode) { e.preventDefault(); activeDraw = { roomId: room.id, startDay: span.day, currentDay: span.day }; } else { startDrag(e, room.id, span.day); } }}
-							onmouseenter={() => { if (drawMode && activeDraw && activeDraw.roomId === room.id) { activeDraw = { ...activeDraw, currentDay: span.day }; } else if (!drawMode) { updateDrag(room.id, span.day); } }}
+						onmousedown={(e) => { e.preventDefault(); if (drawMode) drawSel.startGesture(room.id, span.day); else dragSel.start(room.id, span.day); }}
+						onmouseenter={() => { if (drawMode) drawSel.moveGesture(room.id, span.day); else dragSel.move(room.id, span.day); }}
 							ontouchend={(e) => { e.preventDefault(); onCellTap(room.id, span.day); }}
 						>
 							<span class="pointer-events-none absolute top-0.5 right-0.5 h-[5px] w-[5px] rounded-full opacity-70"
@@ -764,24 +749,23 @@
 							</div>
 						</td>
 
-					{:else if span.type === 'draw'}
-						<!-- Draw selection bar (finalised) -->
-						{@const drawSel = drawSelections.find(s => s.roomId === room.id)}
-						<td
-							colspan={span.length}
-							class="border-border relative border-b border-r p-0"
-							style="min-width:{span.length * 48}px; height:50px"
-						>
-							<div class="flex h-full items-center gap-1 rounded border-2 border-orange-400 bg-orange-100 px-2 text-orange-800 mx-px">
-								<span class="text-xs font-semibold">Rm {room.roomNumber}</span>
-								{#if span.length > 2}
-									<span class="text-[10px] opacity-70">{span.length}n</span>
-								{/if}
-								<button type="button"
-									onclick={() => { drawSelections = drawSelections.filter(s => s.roomId !== room.id); }}
-									class="ml-auto text-orange-400 hover:text-orange-700 text-sm leading-none">×</button>
-							</div>
-						</td>
+				{:else if span.type === 'draw'}
+					<!-- Draw selection bar (finalised) -->
+					<td
+						colspan={span.length}
+						class="border-border relative border-b border-r p-0"
+						style="min-width:{span.length * 48}px; height:50px"
+					>
+						<div class="flex h-full items-center gap-1 rounded border-2 border-orange-400 bg-orange-100 px-2 text-orange-800 mx-px">
+							<span class="text-xs font-semibold">Rm {room.roomNumber}</span>
+							{#if span.length > 2}
+								<span class="text-[10px] opacity-70">{span.length}n</span>
+							{/if}
+							<button type="button"
+								onclick={() => { drawSel.remove(room.id); }}
+								class="ml-auto text-orange-400 hover:text-orange-700 text-sm leading-none">×</button>
+						</div>
+					</td>
 
 					{:else}
 						{@const s = span as BookingSpanType}
@@ -791,8 +775,8 @@
 							colspan={s.length}
 							class="border-border relative cursor-pointer border-b border-r p-0"
 							style="min-width:{s.length * 48}px; height:50px"
-							onmouseenter={() => updateDrag(room.id, s.day)}
-							onclick={() => !drag && !isBlocked && openDetail(s.booking, room)}
+							onmouseenter={() => dragSel.move(room.id, s.day)}
+							onclick={() => !dragSel.active && !isBlocked && openDetail(s.booking, room)}
 						>
 							{#if inConflict}
 								<div class="absolute inset-0 z-10 rounded bg-red-400/60"></div>
@@ -814,13 +798,19 @@
 									'relative flex h-full items-center overflow-hidden pl-1.5',
 									s.overflowEnd ? 'pr-4' : 'pr-3',
 									channelColour(s.booking.channelName),
-									'text-white'
+									'text-white',
+									s.booking.status === 'reserved' ? 'opacity-70' : ''
 								].join(' ')}
-								style={s.overflowStart
-									? 'border-radius:0 4px 4px 0'
-									: s.overflowEnd
-										? 'border-radius:4px 0 0 4px'
-										: 'border-radius:4px'}
+								style={[
+									s.overflowStart
+										? 'border-radius:0 4px 4px 0'
+										: s.overflowEnd
+											? 'border-radius:4px 0 0 4px'
+											: 'border-radius:4px',
+									s.booking.status === 'reserved'
+										? 'background-image:repeating-linear-gradient(45deg,transparent,transparent 5px,rgba(255,255,255,.15) 5px,rgba(255,255,255,.15) 10px)'
+										: ''
+								].join(';')}
 							>
 								{#if !s.overflowStart}
 									<span class="mr-0.5 shrink-0 opacity-70">›</span>
@@ -840,6 +830,11 @@
 						{#if s.booking.groupId}
 							<span class="ml-1 shrink-0 rounded bg-white/25 px-1 py-0.5 text-[10px] font-bold leading-none"
 								title="Group: {s.booking.groupName ?? 'Group booking'}">G</span>
+						{/if}
+
+						<!-- Reserved badge -->
+						{#if s.booking.status === 'reserved'}
+							<span class="ml-1 shrink-0 rounded bg-white/30 px-1 py-0.5 text-[10px] font-bold leading-none" title="Reserved — deposit pending">R</span>
 						{/if}
 
 			{#if s.booking.status === 'checked_in'}

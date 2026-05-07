@@ -113,7 +113,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			guestId,
 			channelId,
 			clerkId: clerkId ?? locals.user.id,
-			status: 'confirmed',
+			status: 'reserved',
 			checkInDate: checkIn,
 			checkOutDate: checkOut,
 			roomConfig: roomConfig ?? null,
@@ -148,15 +148,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		if (items.length > 0) await db.insert(bookingLineItems).values(items);
 	}
 
-	// ── Deposit against first booking ─────────────────────────────────────────
+	// ── Deposit against first booking — stored as 'pending' until operator marks received ──
 	if (depositAmount && depositAmount > 0 && bookingIds.length > 0) {
 		await db.insert(paymentEvents).values({
 			id: crypto.randomUUID(),
 			bookingId: bookingIds[0],
 			type: 'deposit',
+			status: 'pending',
 			amount: Math.round(depositAmount),
 			paymentMethod: depositMethod ?? 'cash',
-			chargedAt: now
+			chargedAt: null
 		});
 	}
 
