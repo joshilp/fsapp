@@ -128,10 +128,12 @@
 		const hasConflict = r && prop ? hasConflictInRange(r.rowId, prop.id, r.minCol, r.maxCol) : false;
 		dragSel.cancel();
 		if (!r || !prop) return;
-		if (!wasMoved) { openPopover(r.rowId, data.dates[r.minCol]); return; }
 		if (hasConflict) { conflictMessage = 'No availability for part of that range.'; setTimeout(() => (conflictMessage = ''), 3000); return; }
-		const rt = data.propData[prop.id]?.roomTypesList.find((x) => x.id === r.rowId);
-		if (rt) openBookingCard(rt.id, rt.name, data.dates[r.minCol], data.dates[r.maxCol + 1] ?? addDaysLocal(data.dates[r.maxCol], 1), prop.id, prop.name);
+		// Single click or drag: always open the unified popover.
+		// The popover shows occupancy info + New Booking CTA + rate override.
+		const checkIn  = data.dates[r.minCol];
+		const checkOut = data.dates[r.maxCol + 1] ?? addDaysLocal(data.dates[r.maxCol], 1);
+		openPopover(r.rowId, checkIn, wasMoved ? checkOut : undefined);
 	}
 
 	function bookDrawSelections() {
@@ -174,17 +176,16 @@
 	let groupNewRooms = $state<{ roomId: string; roomNumber: string; propertyId: string; propertyName: string; checkIn: string; checkOut: string; roomConfigs: string[] }[]>([]);
 
 	// ─── Booking Card ──────────────────────────────────────────────────────────
-	let cardOpen = $state(false);
+	let cardOpen       = $state(false);
+	let cardBookingId  = $state<string | null>(null);
 	let cardNewBooking = $state<{ propertyId: string; propertyName: string; requestedRoomTypeId?: string; requestedRoomTypeName?: string; checkIn: string; checkOut: string } | null>(null);
-
-	function openBookingCard(rtId: string, rtName: string, checkIn: string, checkOut: string, propId: string, propName: string) {
-		cardNewBooking = { propertyId: propId, propertyName: propName, requestedRoomTypeId: rtId, requestedRoomTypeName: rtName, checkIn, checkOut };
-		cardOpen = true;
-	}
 
 	// ─── Popover ───────────────────────────────────────────────────────────────
 	type CellKey = { roomTypeId: string; date: string };
 	let popoverCell  = $state<CellKey | null>(null);
+	let popoverCheckOut  = $state('');   // pre-filled checkout for "New Booking" CTA
+	let popoverPropId    = $state('');
+	let popoverPropName  = $state('');
 	let editRate     = $state('');
 	let editMin      = $state('');
 	let editStopSell = $state(false);
@@ -192,18 +193,65 @@
 	let editCTD      = $state(false);
 	let savingCell   = $state(false);
 
-	function openPopover(roomTypeId: string, date: string) {
-		if (!roomTypeId || !date) return;
+	// Occupancy data loaded on popover open
+	type CellGuest = { id: string; guestName: string; roomNumber: string | null; nights?: number };
+	let cellCheckingIn     = $state<CellGuest[]>([]);
+	let cellCheckingOut    = $state<CellGuest[]>([]);
+	let cellStayingThrough = $state(0);
+	let cellOccupancyLoading = $state(false);
+
+	async function loadCellOccupancy(roomTypeId: string, date: string) {
+		cellOccupancyLoading = true;
+		cellCheckingIn = []; cellCheckingOut = []; cellStayingThrough = 0;
+		try {
+			const res = await fetch(`/api/inventory/cell?roomTypeId=${encodeURIComponent(roomTypeId)}&date=${encodeURIComponent(date)}`);
+			if (res.ok) {
+				const d = await res.json();
+				cellCheckingIn     = d.checkingIn;
+				cellCheckingOut    = d.checkingOut;
+				cellStayingThrough = d.stayingThrough;
+			}
+		} finally {
+			cellOccupancyLoading = false;
+		}
+	}
+
+	// Also allow opening an existing booking from the cell popover guest list
+	function openBookingDetail(bookingId: string) {
+		cardBookingId  = bookingId;
+		cardNewBooking = null;
+		cardOpen       = true;
+		closePopover();
+	}
+
+	function openBookingCard(rtId: string, rtName: string, checkIn: string, checkOut: string, propId: string, propName: string) {
+		cardNewBooking = { propertyId: propId, propertyName: propName, requestedRoomTypeId: rtId, requestedRoomTypeName: rtName, checkIn, checkOut };
+		cardBookingId  = null;
+		cardOpen = true;
+	}
+
+	function openPopover(roomTypeId: string, checkIn: string, checkOut?: string) {
+		if (!roomTypeId || !checkIn) return;
+		const prop = findRtProp(roomTypeId);
+		if (!prop) return;
 		const ari = Object.values(data.propData).reduce<Record<string, Record<string, ARICell>>>((a, p) => ({ ...a, ...p.ariData }), {});
-		const cell = ari[roomTypeId]?.[date];
-		popoverCell = { roomTypeId, date };
-		editRate = cell?.overrideRateCents != null ? String(cell.overrideRateCents / 100) : '';
-		editMin  = cell?.minNights != null && cell.minNights !== cell.baseMinNights ? String(cell.minNights) : '';
+		const cell = ari[roomTypeId]?.[checkIn];
+		popoverCell     = { roomTypeId, date: checkIn };
+		popoverCheckOut = checkOut ?? addDaysLocal(checkIn, 1);
+		popoverPropId   = prop.id;
+		popoverPropName = prop.name;
+		editRate     = cell?.overrideRateCents != null ? String(cell.overrideRateCents / 100) : '';
+		editMin      = cell?.minNights != null && cell.minNights !== cell.baseMinNights ? String(cell.minNights) : '';
 		editStopSell = cell?.stopSell ?? false;
-		editCTA  = cell?.closedToArrival ?? false;
-		editCTD  = cell?.closedToDeparture ?? false;
+		editCTA      = cell?.closedToArrival ?? false;
+		editCTD      = cell?.closedToDeparture ?? false;
+		loadCellOccupancy(roomTypeId, checkIn);
 	}
 	function closePopover() { popoverCell = null; }
+
+	// Touch helpers — track touchstart position to distinguish tap from scroll
+	let touchStartX = 0;
+	let touchStartY = 0;
 
 	async function saveOverride() {
 		if (!popoverCell) return;
@@ -327,7 +375,7 @@
 			</form>
 
 			<div class="flex items-center gap-3 text-xs text-muted-foreground ml-auto">
-				<span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-teal-100 border border-teal-400"></span> Drag→book</span>
+				<span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-teal-100 border border-teal-400"></span> Click/drag→book</span>
 				<span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-blue-100 border border-blue-300"></span> Override</span>
 				<span class="flex items-center gap-1 text-red-600 font-bold">STOP</span>
 			</div>
@@ -397,16 +445,24 @@
 								{@const wState = cellDrawState(rt.id, prop.id, i)}
 								{@const sel = drawSel.selections.find(s => s.rowId === rt.id)}
 								{@const inSel = sel && i >= sel.minCol && i <= sel.maxCol}
-								<td style="width:{COL_W}px"
-									class={['border-r border-border/20 px-0.5 py-1.5 text-center cursor-crosshair transition-colors',
-										dState === 'selected' ? 'bg-teal-100' : dState === 'conflict' ? 'bg-red-100' :
-										wState === 'drawing' ? 'bg-orange-100' : wState === 'drawing-conflict' ? 'bg-red-100' :
-										inSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-400' : (cell ? cellBg(iso, cell) : '')
-									].join(' ')}
-									onmousedown={(e) => onAvailMouseDown(e, rt.id, i)}
-									onmouseenter={() => onAvailMouseEnter(rt.id, i)}
-									title="Drag to book · click = rate edit"
-								>
+							<td style="width:{COL_W}px"
+								class={['border-r border-border/20 px-0.5 py-1.5 text-center cursor-crosshair transition-colors',
+									dState === 'selected' ? 'bg-teal-100' : dState === 'conflict' ? 'bg-red-100' :
+									wState === 'drawing' ? 'bg-orange-100' : wState === 'drawing-conflict' ? 'bg-red-100' :
+									inSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-400' : (cell ? cellBg(iso, cell) : '')
+								].join(' ')}
+								onmousedown={(e) => onAvailMouseDown(e, rt.id, i)}
+								onmouseenter={() => onAvailMouseEnter(rt.id, i)}
+								ontouchstart={(e) => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }}
+								ontouchend={(e) => {
+									const t = e.changedTouches[0];
+									if (Math.abs(t.clientX - touchStartX) < 10 && Math.abs(t.clientY - touchStartY) < 10) {
+										e.preventDefault();
+										openPopover(rt.id, iso);
+									}
+								}}
+								title="Click = info & book · drag = multi-night"
+							>
 									{#if cell}
 										{#if inSel}
 											<span class="text-[10px] font-bold text-orange-700">✓</span>
@@ -492,64 +548,130 @@
 	{/if}
 </div>
 
-<!-- ── Edit Cell Popover ──────────────────────────────────────────────────────── -->
+<!-- ── Cell Info & Override Popover ──────────────────────────────────────────── -->
 {#if popoverCell}
 	{@const allAri = Object.values(data.propData).reduce((a, p) => ({ ...a, ...p.ariData }), {} as Record<string, Record<string, ARICell>>)}
 	{@const cell = allAri[popoverCell.roomTypeId]?.[popoverCell.date]}
 	{@const allRts = data.propertiesList.flatMap(p => data.propData[p.id]?.roomTypesList ?? [])}
 	{@const rt = allRts.find(r => r.id === popoverCell?.roomTypeId)}
-	<div class="fixed z-30 rounded-xl border border-border bg-background shadow-xl p-4 w-72" style="top:50%;left:50%;transform:translate(-50%,-50%)" role="dialog" aria-label="Edit override">
-		<div class="mb-3 flex items-start justify-between">
+	{@const popNights = Math.round((new Date(popoverCheckOut).getTime() - new Date(popoverCell.date + 'T12:00:00').getTime()) / 86400000)}
+	{@const multiNight = popNights > 1}
+	<div class="fixed z-30 rounded-xl border border-border bg-background shadow-xl w-72 max-h-[90vh] overflow-y-auto" style="top:50%;left:50%;transform:translate(-50%,-50%)" role="dialog" aria-label="Cell info">
+
+		<!-- Header -->
+		<div class="px-4 pt-4 pb-3 flex items-start justify-between">
 			<div>
 				<p class="font-semibold text-sm">{rt?.name}</p>
 				<p class="text-xs text-muted-foreground">
-					{new Date(popoverCell.date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
-					{#if cell?.totalRooms} · {cell.available}/{cell.totalRooms} available{/if}
+					{#if multiNight}
+						{new Date(popoverCell.date + 'T12:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
+						–
+						{new Date(new Date(popoverCheckOut + 'T12:00:00').getTime() - 86400000).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
+						· {popNights} nights
+					{:else}
+						{new Date(popoverCell.date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
+					{/if}
+					{#if cell?.totalRooms} · {cell.available}/{cell.totalRooms} avail{/if}
 				</p>
 			</div>
-			<button onclick={closePopover} class="text-muted-foreground hover:text-foreground text-lg leading-none px-1">×</button>
+			<button onclick={closePopover} class="text-muted-foreground hover:text-foreground text-lg leading-none px-1 shrink-0">×</button>
 		</div>
-		<div class="space-y-3">
-			<div>
-				<label class="text-xs text-muted-foreground font-medium uppercase tracking-wide">Rate override ($/night)</label>
-				<div class="flex items-center gap-2 mt-1">
-					<span class="text-sm text-muted-foreground">$</span>
-					<input type="number" min="0" step="1" bind:value={editRate} placeholder={cell?.baseRateCents ? String(cell.baseRateCents / 100) : 'Season rate'} class="flex-1 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-					{#if editRate}<button onclick={() => editRate = ''} class="text-xs text-muted-foreground hover:text-foreground">✕</button>{/if}
+
+		<div class="px-4 pb-4 space-y-3">
+
+			<!-- ── New Booking CTA ─────────────────────────────────────────────── -->
+			<button
+				onclick={() => {
+					openBookingCard(popoverCell!.roomTypeId, rt?.name ?? '', popoverCell!.date, popoverCheckOut, popoverPropId, popoverPropName);
+					closePopover();
+				}}
+				class="w-full rounded-lg bg-green-600 text-white py-2 text-sm font-semibold hover:bg-green-700 transition-colors"
+			>+ New Booking{multiNight ? ` · ${popNights} nights` : ''}</button>
+
+			<!-- ── Occupancy ───────────────────────────────────────────────────── -->
+			{#if cellOccupancyLoading}
+				<p class="text-xs text-muted-foreground animate-pulse text-center py-1">Loading…</p>
+			{:else if cellCheckingIn.length || cellCheckingOut.length || cellStayingThrough > 0}
+				<div class="rounded-lg border border-border bg-muted/30 p-2.5 space-y-2 text-xs">
+					{#if cellCheckingIn.length}
+						<div>
+							<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Checking in ({cellCheckingIn.length})</p>
+							{#each cellCheckingIn as g}
+								<button type="button" onclick={() => openBookingDetail(g.id)}
+									class="flex items-center gap-1.5 w-full text-left py-0.5 hover:text-primary transition-colors">
+									<span class="text-muted-foreground">→</span>
+									<span class="font-medium truncate">{g.guestName}</span>
+									<span class="text-muted-foreground shrink-0">
+										{g.roomNumber ? `· Rm ${g.roomNumber}` : '· unassigned'}
+										· {g.nights} nt{(g.nights ?? 0) === 1 ? '' : 's'}
+									</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+					{#if cellCheckingOut.length}
+						<div>
+							<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Checking out ({cellCheckingOut.length})</p>
+							{#each cellCheckingOut as g}
+								<button type="button" onclick={() => openBookingDetail(g.id)}
+									class="flex items-center gap-1.5 w-full text-left py-0.5 hover:text-primary transition-colors">
+									<span class="text-muted-foreground">→</span>
+									<span class="font-medium truncate">{g.guestName}</span>
+									{#if g.roomNumber}<span class="text-muted-foreground shrink-0">· Rm {g.roomNumber}</span>{/if}
+								</button>
+							{/each}
+						</div>
+					{/if}
+					{#if cellStayingThrough > 0}
+						<p class="text-muted-foreground">{cellStayingThrough} staying through</p>
+					{/if}
 				</div>
-				{#if cell?.baseRateCents}<p class="text-[10px] text-muted-foreground mt-0.5">Season: {fmt(cell.baseRateCents)}</p>{/if}
-			</div>
-			<div>
-				<label class="text-xs text-muted-foreground font-medium uppercase tracking-wide">Min nights override</label>
-				<input type="number" min="1" max="30" bind:value={editMin} placeholder={String(cell?.baseMinNights ?? 1)} class="mt-1 w-24 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-			</div>
-			<div class="space-y-2">
-				<p class="text-xs text-muted-foreground font-medium uppercase tracking-wide">Restrictions</p>
-				<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editStopSell} class="h-4 w-4 rounded border-input" /><span class="text-sm">Stop sell</span></label>
-				<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTA} class="h-4 w-4 rounded border-input" /><span class="text-sm">Closed to arrival (CTA)</span></label>
-				<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTD} class="h-4 w-4 rounded border-input" /><span class="text-sm">Closed to departure (CTD)</span></label>
+			{:else}
+				<p class="text-xs text-muted-foreground text-center py-0.5">No guests on this date</p>
+			{/if}
+
+			<!-- ── Rate & Restriction Override ────────────────────────────────── -->
+			<div class="border-t border-border pt-3 space-y-3">
+				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Rate & Restrictions Override</p>
+				<div>
+					<label class="text-xs text-muted-foreground font-medium">Rate ($/night)</label>
+					<div class="flex items-center gap-2 mt-1">
+						<span class="text-sm text-muted-foreground">$</span>
+						<input type="number" min="0" step="1" bind:value={editRate} placeholder={cell?.baseRateCents ? String(cell.baseRateCents / 100) : 'Season rate'} class="flex-1 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+						{#if editRate}<button onclick={() => editRate = ''} class="text-xs text-muted-foreground hover:text-foreground">✕</button>{/if}
+					</div>
+					{#if cell?.baseRateCents}<p class="text-[10px] text-muted-foreground mt-0.5">Season: {fmt(cell.baseRateCents)}</p>{/if}
+				</div>
+				<div>
+					<label class="text-xs text-muted-foreground font-medium">Min nights</label>
+					<input type="number" min="1" max="30" bind:value={editMin} placeholder={String(cell?.baseMinNights ?? 1)} class="mt-1 w-24 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+				</div>
+				<div class="space-y-2">
+					<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editStopSell} class="h-4 w-4 rounded border-input" /><span class="text-sm">Stop sell</span></label>
+					<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTA} class="h-4 w-4 rounded border-input" /><span class="text-sm">Closed to arrival (CTA)</span></label>
+					<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTD} class="h-4 w-4 rounded border-input" /><span class="text-sm">Closed to departure (CTD)</span></label>
+				</div>
+				<div class="flex gap-2">
+					<button onclick={saveOverride} disabled={savingCell} class="flex-1 rounded-lg bg-primary text-primary-foreground py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">{savingCell ? 'Saving…' : 'Save override'}</button>
+					{#if cell?.hasOverride}<button onclick={clearOverride} disabled={savingCell} class="rounded-lg border border-border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50">Clear</button>{/if}
+				</div>
+				<p class="text-[10px] text-muted-foreground text-center">Changes sync to Channex automatically</p>
 			</div>
 		</div>
-		<div class="mt-4 flex gap-2">
-			<button onclick={saveOverride} disabled={savingCell} class="flex-1 rounded-lg bg-primary text-primary-foreground py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">{savingCell ? 'Saving…' : 'Save override'}</button>
-			{#if cell?.hasOverride}<button onclick={clearOverride} disabled={savingCell} class="rounded-lg border border-border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50">Clear</button>{/if}
-		</div>
-		<p class="text-[10px] text-muted-foreground text-center mt-2">Changes sync to Channex automatically</p>
 	</div>
 {/if}
 
-<!-- Booking Card (single selection) -->
-{#if cardNewBooking}
-	<BookingCard
-		bind:open={cardOpen}
-		newBooking={cardNewBooking}
-		channels={data.channels}
-		users={data.users}
-		currentUserId={data.currentUserId}
-		{today}
-		propertyName={cardNewBooking.propertyName}
-	/>
-{/if}
+<!-- Booking Card (single selection or existing booking detail) -->
+<BookingCard
+	bind:open={cardOpen}
+	newBooking={cardNewBooking ?? undefined}
+	bookingId={cardBookingId ?? undefined}
+	channels={data.channels}
+	users={data.users}
+	currentUserId={data.currentUserId}
+	{today}
+	propertyName={cardNewBooking?.propertyName}
+/>
 
 <!-- Room Assignment Dialog (multi-selection step 1) -->
 <RoomAssignmentDialog
