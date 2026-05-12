@@ -202,12 +202,65 @@
 									</div>
 								</div>
 							</div>
+						</div>
+						<!-- Online Booking Settings -->
+						<div class="mt-5 pt-5 border-t border-border">
+							<Label class="block font-semibold mb-3">Online Booking Page</Label>
+							{#if prop.publicId}
+								<div class="mb-3 flex flex-col gap-1">
+									<Label class="text-xs text-muted-foreground">Booking URL</Label>
+									<div class="flex items-center gap-2">
+										<code class="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono break-all">/book/{prop.publicId}</code>
+										<a href="/book/{prop.publicId}" target="_blank"
+											class="text-xs text-primary hover:underline shrink-0">Preview ↗</a>
+									</div>
+									<p class="text-[11px] text-muted-foreground">Share this URL with guests. Add it as a "Book Now" button on your website.</p>
+								</div>
+							{/if}
+							<div class="grid grid-cols-2 gap-3">
+								<div class="col-span-2 flex items-center gap-3">
+									<input type="checkbox" id="bookingEnabled-{prop.id}" name="bookingEnabled" value="1"
+										checked={prop.bookingEnabled ?? true}
+										class="h-4 w-4 rounded border-border" />
+									<Label for="bookingEnabled-{prop.id}" class="font-normal cursor-pointer">
+										Online bookings enabled
+									</Label>
+								</div>
+								<div class="col-span-2 flex flex-col gap-1.5">
+									<Label for="bookingDesc-{prop.id}">Booking page description</Label>
+									<textarea
+										id="bookingDesc-{prop.id}"
+										name="bookingDescription"
+										rows="2"
+										placeholder="A short welcome message shown on your booking page…"
+										class="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
+									>{prop.bookingDescription ?? ''}</textarea>
+								</div>
+								<div class="col-span-2 flex flex-col gap-1.5">
+									<Label for="heroImg-{prop.id}">Hero image URL</Label>
+									<Input id="heroImg-{prop.id}" name="heroImageUrl" type="url"
+										placeholder="https://…/banner.jpg"
+										value={prop.heroImageUrl ?? ''} />
+									<p class="text-[11px] text-muted-foreground">Background image shown in the booking page header.</p>
+								</div>
+								<div class="flex flex-col gap-1.5">
+									<Label for="accent-{prop.id}">Accent colour</Label>
+									<div class="flex items-center gap-2">
+										<input type="color" id="accent-{prop.id}" name="accentColour"
+											value={prop.accentColour ?? '#d97706'}
+											class="h-10 w-14 rounded border border-border cursor-pointer p-0.5" />
+										<Input name="accentColourText" value={prop.accentColour ?? '#d97706'}
+											placeholder="#d97706" class="w-28 font-mono text-xs" />
+									</div>
+									<p class="text-[11px] text-muted-foreground">Used for buttons and highlights on the booking page.</p>
+								</div>
 							</div>
-							<div class="mt-4 flex justify-end">
-								<Button type="submit" size="sm" disabled={savingProperty === prop.id}>
-									{savingProperty === prop.id ? 'Saving…' : 'Save'}
-								</Button>
-							</div>
+						</div>
+						<div class="mt-4 flex justify-end">
+							<Button type="submit" size="sm" disabled={savingProperty === prop.id}>
+								{savingProperty === prop.id ? 'Saving…' : 'Save'}
+							</Button>
+						</div>
 						</form>
 					</div>
 				{/each}

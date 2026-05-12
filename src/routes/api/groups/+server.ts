@@ -35,6 +35,7 @@ import { db } from '$lib/server/db';
 import {
 	groups, bookings, guests, bookingLineItems, paymentEvents, rooms as roomsTable
 } from '$lib/server/db/schema';
+import { syncARIForStay } from '$lib/server/ari-sync';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
@@ -161,5 +162,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		});
 	}
 
+	// Re-sync Channex availability for each room's type (non-blocking)
+	for (const spec of roomSpecs) {
+		const rm = await db.query.rooms.findFirst({
+			where: eq(roomsTable.id, spec.roomId),
+			columns: { roomTypeId: true }
+		});
+		if (rm?.roomTypeId) {
+			void syncARIForStay(rm.roomTypeId, spec.checkIn, spec.checkOut).catch(() => {});
+		}
+	}
+
 	return json({ groupId, bookingIds });
-};
+}

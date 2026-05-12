@@ -80,7 +80,11 @@ export const actions: Actions = {
 		depositCalcMethod: g('depositCalcMethod') ?? 'first_night',
 			depositPercent: parseInt(g('depositPercent') ?? '20') || 20,
 			depositFlatCents: Math.round((parseFloat(g('depositFlatDollars') ?? '0') || 0) * 100),
-			channexPropertyId: g('channexPropertyId')
+			channexPropertyId: g('channexPropertyId'),
+			bookingEnabled: (fd.get('bookingEnabled') as string) === '1',
+			bookingDescription: g('bookingDescription'),
+			heroImageUrl: g('heroImageUrl'),
+			accentColour: g('accentColour') || g('accentColourText') || null
 		})
 		.where(eq(properties.id, id));
 

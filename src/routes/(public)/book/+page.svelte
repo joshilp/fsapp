@@ -2,6 +2,8 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import type { PageData, ActionData } from './$types';
+	import type { AvailableRoomType } from '$routes/api/public/availability/+server';
+	import type { PublicPricing } from '$routes/api/public/pricing/+server';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -20,7 +22,7 @@
 		return { ci: ci ?? data.today, co: co ?? advanceDay(ci ?? data.today) };
 	}
 	const initD = initDates();
-	let checkIn = $state(initD.ci);
+	let checkIn  = $state(initD.ci);
 	let checkOut = $state(initD.co);
 	let step1Error = $state('');
 
@@ -38,6 +40,30 @@
 		return new Date(iso + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
 	}
 
+	// ─── Step 2: Room Type (real availability via public API) ──────────────────
+	let selectedTypeId = $state('');
+	let availableTypes = $state<AvailableRoomType[]>([]);
+	let availabilityLoading = $state(false);
+	let availabilityError = $state('');
+
+	const selectedType = $derived(availableTypes.find(rt => rt.id === selectedTypeId) ?? null);
+	const selectedProperty = $derived(data.properties.find(p => p.id === selectedPropertyId) ?? null);
+
+	async function loadAvailability() {
+		if (!selectedPropertyId || !checkIn || !checkOut || checkIn >= checkOut) return;
+		availabilityLoading = true;
+		availabilityError = '';
+		availableTypes = [];
+		try {
+			const res = await fetch(`/api/public/availability?propertyId=${selectedPropertyId}&checkIn=${checkIn}&checkOut=${checkOut}`);
+			if (res.ok) availableTypes = await res.json();
+			else availabilityError = 'Could not load availability. Please try again.';
+		} catch {
+			availabilityError = 'Network error. Please try again.';
+		}
+		availabilityLoading = false;
+	}
+
 	function validateStep1() {
 		if (!selectedPropertyId) { step1Error = 'Please select a property.'; return false; }
 		if (checkIn < data.today) { step1Error = 'Check-in must be today or later.'; return false; }
@@ -46,22 +72,14 @@
 		return true;
 	}
 
-	// ─── Step 2: Room type ─────────────────────────────────────────────────────
-	let selectedTypeId = $state('');
+	function goToStep2() {
+		if (!validateStep1()) return;
+		selectedTypeId = '';
+		step = 2;
+		loadAvailability();
+	}
 
-	const availableTypesForProperty = $derived(
-		data.roomTypes
-			.filter(rt => rt.propertyId === selectedPropertyId)
-			.map(rt => {
-				// Check availability: rooms of this type for this property minus conflicted
-				const propRooms = data.allRooms.filter(r => r.propertyId === selectedPropertyId && r.roomTypeId === rt.id);
-				const minRate = data.minRateByType[rt.id] ?? null;
-				return { ...rt, roomCount: propRooms.length, minRateCents: minRate, beds: propRooms[0] ?? null };
-			})
-			.filter(rt => rt.roomCount > 0)
-	);
-
-	function bedLabel(rt: typeof availableTypesForProperty[0]): string {
+	function bedLabel(rt: AvailableRoomType): string {
 		if (!rt.beds) return '';
 		const parts: string[] = [];
 		if (rt.beds.kingBeds) parts.push(`${rt.beds.kingBeds}K`);
@@ -72,11 +90,8 @@
 		return parts.join(' · ');
 	}
 
-	const selectedType = $derived(availableTypesForProperty.find(rt => rt.id === selectedTypeId) ?? null);
-	const selectedProperty = $derived(data.properties.find(p => p.id === selectedPropertyId) ?? null);
-
-	// Rate fetch for selected type
-	let rateQuote = $state<{ subtotalCents: number; lines: { nights: number; unitCents: number; totalCents: number; colour: string; seasonName: string }[] } | null>(null);
+	// ─── Step 3: Rate quote via public API ────────────────────────────────────
+	let rateQuote  = $state<PublicPricing | null>(null);
 	let rateLoading = $state(false);
 
 	async function fetchRate() {
@@ -84,33 +99,31 @@
 		rateLoading = true;
 		rateQuote = null;
 		try {
-			// Find a representative room of this type to get pricing
-			const repRoom = data.allRooms.find(r => r.roomTypeId === selectedTypeId && r.propertyId === selectedPropertyId);
-			if (!repRoom) return;
-			const res = await fetch(`/api/pricing/suggest?roomId=${repRoom.id}&checkIn=${checkIn}&checkOut=${checkOut}`);
+			const res = await fetch(`/api/public/pricing?roomTypeId=${selectedTypeId}&checkIn=${checkIn}&checkOut=${checkOut}`);
 			if (res.ok) rateQuote = await res.json();
 		} catch { /* ignore */ }
 		rateLoading = false;
 	}
 
-	$effect(() => {
-		if (step === 3 && selectedTypeId) fetchRate();
-	});
+	function goToStep3() {
+		if (!selectedTypeId) return;
+		step = 3;
+		fetchRate();
+	}
 
 	// ─── Step 3: Guest details ─────────────────────────────────────────────────
-	let guestName = $state('');
-	let guestEmail = $state('');
-	let guestPhone = $state('');
-	let numAdults = $state(2);
-	let numChildren = $state(0);
-	let guestNotes = $state('');
+	let guestName     = $state('');
+	let guestEmail    = $state('');
+	let guestPhone    = $state('');
+	let numAdults     = $state(2);
+	let numChildren   = $state(0);
+	let guestNotes    = $state('');
 
 	// ─── Step 4: Submit ────────────────────────────────────────────────────────
 	let submitting = $state(false);
 
 	function fmt(cents: number) { return '$' + (cents / 100).toFixed(2); }
 
-	// Category images matching homepage
 	const categoryImages: Record<string, string> = {
 		A: 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=600&q=75',
 		B: 'https://images.unsplash.com/photo-1631049421450-348ccd7f8949?w=600&q=75',
@@ -218,110 +231,113 @@
 					<p class="text-red-600 text-sm mb-3">{step1Error}</p>
 				{/if}
 
-				<button
-					type="button"
-					onclick={() => { if (validateStep1()) step = 2; }}
-					class="w-full rounded-xl bg-amber-500 py-3 text-sm font-bold text-stone-900 hover:bg-amber-400 transition-colors"
-				>
-					See Available Rooms →
-				</button>
+			<button
+				type="button"
+				onclick={goToStep2}
+				class="w-full rounded-xl bg-amber-500 py-3 text-sm font-bold text-stone-900 hover:bg-amber-400 transition-colors"
+			>
+				See Available Rooms →
+			</button>
 
-			<!-- ── Step 2: Room Type ───────────────────────────────────────────── -->
-			{:else if step === 2}
-				<div class="flex items-center justify-between mb-5">
-					<h2 class="text-lg font-semibold text-stone-900">Choose a room type</h2>
-					<button onclick={() => { step = 1; }} class="text-sm text-stone-400 hover:text-stone-600">← Back</button>
+		<!-- ── Step 2: Room Type ───────────────────────────────────────────── -->
+		{:else if step === 2}
+			<div class="flex items-center justify-between mb-5">
+				<h2 class="text-lg font-semibold text-stone-900">Choose a room type</h2>
+				<button onclick={() => { step = 1; }} class="text-sm text-stone-400 hover:text-stone-600">← Back</button>
+			</div>
+
+			<div class="rounded-xl bg-stone-50 border border-stone-100 px-4 py-2.5 text-sm text-stone-600 mb-5">
+				<strong>{selectedProperty?.name}</strong> · {fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights}n
+			</div>
+
+			{#if availabilityLoading}
+				<div class="text-center py-10 text-stone-400 text-sm">Checking availability…</div>
+			{:else if availabilityError}
+				<p class="text-red-600 text-sm mb-3">{availabilityError}</p>
+				<button onclick={loadAvailability} class="text-sm text-amber-600 hover:underline">Retry</button>
+			{:else if availableTypes.length === 0}
+				<div class="text-center py-10 text-stone-500">
+					<p class="font-medium">No rooms available for those dates.</p>
+					<p class="text-sm mt-1">Try different dates or the other property.</p>
+					<button onclick={() => { step = 1; }} class="mt-4 text-sm text-amber-600 hover:underline">← Change dates</button>
 				</div>
-
-				<div class="rounded-xl bg-stone-50 border border-stone-100 px-4 py-2.5 text-sm text-stone-600 mb-5">
-					<strong>{selectedProperty?.name}</strong> · {fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights}n
-				</div>
-
-				{#if availableTypesForProperty.length === 0}
-					<div class="text-center py-10 text-stone-500">
-						<p class="font-medium">No rooms available for those dates.</p>
-						<p class="text-sm mt-1">Try different dates or the other property.</p>
-						<button onclick={() => { step = 1; }} class="mt-4 text-sm text-amber-600 hover:underline">← Change dates</button>
-					</div>
-				{:else}
-					<div class="space-y-3">
-						{#each availableTypesForProperty as rt}
-							<button
-								type="button"
-								onclick={() => { selectedTypeId = rt.id; }}
-								class={[
-									'w-full rounded-xl border-2 overflow-hidden text-left transition-all flex',
-									selectedTypeId === rt.id
-										? 'border-amber-500 bg-amber-50'
-										: 'border-stone-200 hover:border-stone-300 bg-white'
-								].join(' ')}
-							>
-								<img
-									src={categoryImages[rt.category] ?? categoryImages['A']}
-									alt={rt.name}
-									class="w-24 sm:w-32 h-full object-cover shrink-0"
-								/>
-								<div class="p-4 flex-1">
-									<div class="flex items-start justify-between gap-2">
-										<div>
-											<p class="font-semibold text-stone-900">{rt.name}</p>
-											{#if bedLabel(rt)}
-												<p class="text-stone-500 text-xs mt-0.5">{bedLabel(rt)}</p>
-											{/if}
-											<div class="flex flex-wrap gap-1 mt-2">
-												{#if rt.beds?.hasKitchen}
-													<span class="text-[10px] bg-green-100 text-green-700 rounded-full px-2 py-0.5">Kitchen</span>
-												{/if}
-												{#if (rt.beds?.numRooms ?? 0) > 1}
-													<span class="text-[10px] bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">{rt.beds?.numRooms} Bedrooms</span>
-												{/if}
-											</div>
-										</div>
-										<div class="text-right shrink-0">
-											{#if rt.minRateCents}
-												<p class="text-xs text-stone-400">from</p>
-												<p class="text-lg font-bold text-stone-900">${(rt.minRateCents / 100).toFixed(0)}</p>
-												<p class="text-xs text-stone-400">/night</p>
+			{:else}
+				<div class="space-y-3">
+					{#each availableTypes as rt}
+						<button
+							type="button"
+							onclick={() => { selectedTypeId = rt.id; }}
+							class={[
+								'w-full rounded-xl border-2 overflow-hidden text-left transition-all flex',
+								selectedTypeId === rt.id
+									? 'border-amber-500 bg-amber-50'
+									: 'border-stone-200 hover:border-stone-300 bg-white'
+							].join(' ')}
+						>
+							<img
+								src={categoryImages[rt.category] ?? categoryImages['A']}
+								alt={rt.name}
+								class="w-24 sm:w-32 h-full object-cover shrink-0"
+							/>
+							<div class="p-4 flex-1">
+								<div class="flex items-start justify-between gap-2">
+									<div>
+										<p class="font-semibold text-stone-900">{rt.name}</p>
+										{#if bedLabel(rt)}
+											<p class="text-stone-500 text-xs mt-0.5">{bedLabel(rt)}</p>
+										{/if}
+										<div class="flex flex-wrap gap-1 mt-2">
+											{#if rt.beds?.hasKitchen}
+												<span class="text-[10px] bg-green-100 text-green-700 rounded-full px-2 py-0.5">Kitchen</span>
 											{/if}
 										</div>
 									</div>
+									<div class="text-right shrink-0">
+										{#if rt.minRateCents}
+											<p class="text-xs text-stone-400">from</p>
+											<p class="text-lg font-bold text-stone-900">${(rt.minRateCents / 100).toFixed(0)}</p>
+											<p class="text-xs text-stone-400">/night</p>
+										{/if}
+										<p class="text-xs text-stone-400 mt-1">{rt.availableCount} avail.</p>
+									</div>
 								</div>
-							</button>
-						{/each}
-					</div>
-
-					<button
-						type="button"
-						onclick={() => { if (selectedTypeId) step = 3; }}
-						disabled={!selectedTypeId}
-						class="mt-5 w-full rounded-xl bg-amber-500 py-3 text-sm font-bold text-stone-900 hover:bg-amber-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-					>
-						Continue →
-					</button>
-				{/if}
-
-			<!-- ── Step 3: Guest Details ───────────────────────────────────────── -->
-			{:else if step === 3}
-				<div class="flex items-center justify-between mb-5">
-					<h2 class="text-lg font-semibold text-stone-900">Your details</h2>
-					<button onclick={() => { step = 2; }} class="text-sm text-stone-400 hover:text-stone-600">← Back</button>
+							</div>
+						</button>
+					{/each}
 				</div>
 
-				<!-- Booking summary mini -->
-				{#if selectedType}
-					<div class="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm mb-5 flex items-center gap-3">
-						<img src={categoryImages[selectedType.category] ?? categoryImages['A']} alt="" class="h-12 w-16 rounded-lg object-cover" />
-						<div>
-							<p class="font-semibold text-stone-900">{selectedType.name}</p>
-							<p class="text-stone-500 text-xs">{selectedProperty?.name} · {fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights}n</p>
-							{#if rateQuote}
-								<p class="text-amber-700 text-xs font-semibold mt-0.5">Est. {fmt(rateQuote.subtotalCents)} total (before tax)</p>
-							{:else if rateLoading}
-								<p class="text-stone-400 text-xs">Calculating rate…</p>
-							{/if}
-						</div>
+				<button
+					type="button"
+					onclick={goToStep3}
+					disabled={!selectedTypeId}
+					class="mt-5 w-full rounded-xl bg-amber-500 py-3 text-sm font-bold text-stone-900 hover:bg-amber-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+				>
+					Continue →
+				</button>
+			{/if}
+
+		<!-- ── Step 3: Guest Details ───────────────────────────────────────── -->
+		{:else if step === 3}
+			<div class="flex items-center justify-between mb-5">
+				<h2 class="text-lg font-semibold text-stone-900">Your details</h2>
+				<button onclick={() => { step = 2; }} class="text-sm text-stone-400 hover:text-stone-600">← Back</button>
+			</div>
+
+			<!-- Booking summary mini -->
+			{#if selectedType}
+				<div class="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm mb-5 flex items-center gap-3">
+					<img src={categoryImages[selectedType.category] ?? categoryImages['A']} alt="" class="h-12 w-16 rounded-lg object-cover" />
+					<div>
+						<p class="font-semibold text-stone-900">{selectedType.name}</p>
+						<p class="text-stone-500 text-xs">{selectedProperty?.name} · {fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights}n</p>
+						{#if rateQuote}
+							<p class="text-amber-700 text-xs font-semibold mt-0.5">Est. {fmt(rateQuote.subtotalCents)} total (before tax)</p>
+						{:else if rateLoading}
+							<p class="text-stone-400 text-xs">Calculating rate…</p>
+						{/if}
 					</div>
-				{/if}
+				</div>
+			{/if}
 
 				<div class="space-y-4">
 					<div class="grid gap-4 sm:grid-cols-2">

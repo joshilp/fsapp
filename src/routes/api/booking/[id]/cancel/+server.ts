@@ -6,8 +6,9 @@ import { json } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { bookings, bookingLineItems, paymentEvents, properties } from '$lib/server/db/schema';
+import { bookings, bookingLineItems, paymentEvents, properties, rooms } from '$lib/server/db/schema';
 import { sendCancellationNotice } from '$lib/server/email';
+import { syncARIForStay } from '$lib/server/ari-sync';
 
 /** GET — preview cancellation policy without making changes */
 export const GET: RequestHandler = async ({ params, locals }) => {
@@ -122,6 +123,13 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 	await db.update(bookings)
 		.set({ status: 'cancelled', cancelledAt: now })
 		.where(eq(bookings.id, id));
+
+	// Re-sync availability with Channex — cancellation frees up inventory
+	const roomTypeId = booking.roomId
+		? (await db.query.rooms.findFirst({ where: eq(rooms.id, booking.roomId), columns: { roomTypeId: true } }))?.roomTypeId ?? null
+		: null;
+	// Need rooms import for the query above — handled inline
+	if (roomTypeId) void syncARIForStay(roomTypeId, booking.checkInDate, booking.checkOutDate).catch(() => {});
 
 	// Send cancellation email to guest (non-blocking)
 	const fullBooking = await db.query.bookings.findFirst({

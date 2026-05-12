@@ -13,6 +13,7 @@ import {
 	rooms
 } from '$lib/server/db/schema';
 import { user } from '$lib/server/db/auth.schema';
+import { syncARIForStay } from '$lib/server/ari-sync';
 import { encryptCc } from '$lib/server/cc';
 
 // ─── Load ─────────────────────────────────────────────────────────────────────
@@ -230,6 +231,15 @@ export const actions: Actions = {
 			}
 		}
 
+		// Re-sync Channex availability for this room type over the booked nights
+		const bookedRoom = await db.query.rooms.findFirst({
+			where: eq(rooms.id, roomId),
+			columns: { roomTypeId: true }
+		});
+		if (bookedRoom?.roomTypeId) {
+			void syncARIForStay(bookedRoom.roomTypeId, checkIn, checkOut).catch(() => {});
+		}
+
 		return { success: true, bookingId };
 	},
 
@@ -271,10 +281,22 @@ export const actions: Actions = {
 
 		if (!bookingId) return fail(400, { error: 'Missing bookingId' });
 
+		const cancelledBooking = await db.query.bookings.findFirst({
+			where: eq(bookings.id, bookingId),
+			columns: { roomId: true, requestedRoomTypeId: true, checkInDate: true, checkOutDate: true },
+			with: { room: { columns: { roomTypeId: true } } }
+		});
+
 		await db
 			.update(bookings)
 			.set({ status: 'cancelled', cancelledAt: new Date() })
 			.where(eq(bookings.id, bookingId));
+
+		// Re-sync Channex — cancellation frees up inventory
+		const roomTypeId = cancelledBooking?.room?.roomTypeId ?? cancelledBooking?.requestedRoomTypeId ?? null;
+		if (roomTypeId && cancelledBooking) {
+			void syncARIForStay(roomTypeId, cancelledBooking.checkInDate, cancelledBooking.checkOutDate).catch(() => {});
+		}
 
 		return { success: true };
 	},

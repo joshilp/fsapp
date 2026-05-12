@@ -57,6 +57,17 @@ export const properties = sqliteTable('properties', {
 	// ── Channex channel manager ───────────────────────────────────────────────
 	// UUID of this property in your Channex account. Set in Settings → Channels.
 	channexPropertyId: text('channex_property_id'),
+	// ── Online booking (guest-facing page) ───────────────────────────────────
+	// Short unique public ID used in booking URLs: /book/[publicId]
+	publicId: text('public_id').unique(),
+	// Toggle to disable online bookings without removing config
+	bookingEnabled: integer('booking_enabled', { mode: 'boolean' }).notNull().default(true),
+	// Short blurb shown on the property booking page
+	bookingDescription: text('booking_description'),
+	// Hero image URL for the booking page header
+	heroImageUrl: text('hero_image_url'),
+	// Hex accent colour for the booking page (e.g. '#d97706')
+	accentColour: text('accent_colour'),
 	...timestamps
 });
 
@@ -324,7 +335,7 @@ export const bookings = sqliteTable(
 
 		otaConfirmationNumber: text('ota_confirmation_number'),
 		// Set on public (online) bookings — 8-char token for confirmation page (no auth)
-		publicToken: text('public_token'),
+		publicToken: text('public_token').unique(),
 		// For unassigned online bookings: captures the requested room type before operator assigns a room
 		requestedRoomTypeId: text('requested_room_type_id').references(() => roomTypes.id, { onDelete: 'set null' }),
 		// Free-text clerk name for non-registered users (walk-ins helping at desk, etc.)
