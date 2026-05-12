@@ -53,27 +53,28 @@
 	}
 
 	async function fireTrigger() {
-		if (!selRt?.channexRoomTypeId || !selRt?.channexRatePlanId) {
-			toast.error('Room type has no Channex IDs configured — set them in Settings first.');
-			return;
-		}
 		const prop = data.properties.find(p => p.id === propId);
-		if (!prop?.channexPropertyId) {
-			toast.error('Property has no Channex Property ID — set it in Settings first.');
-			return;
-		}
+		if (!prop) { toast.error('Select a property.'); return; }
+		if (!rtId)  { toast.error('Select a room type.'); return; }
+		if (!checkIn || !checkOut) { toast.error('Set check-in and check-out dates.'); return; }
 
 		triggering = true;
 		triggerResult = null;
 		try {
+			// Pass Channex IDs if configured, otherwise the trigger endpoint uses internal IDs
 			const r = await fetch('/api/dev/channex-trigger', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					event,
-					channexPropertyId: prop.channexPropertyId,
-					channexRoomTypeId: selRt.channexRoomTypeId,
-					channexRatePlanId: selRt.channexRatePlanId,
+					// Channex IDs (real — used if configured in Settings)
+					channexPropertyId: prop.channexPropertyId || null,
+					channexRoomTypeId: selRt?.channexRoomTypeId || null,
+					channexRatePlanId: selRt?.channexRatePlanId || null,
+					// Internal IDs (dev fallback — used when Channex IDs are not set)
+					propertyId: propId,
+					roomTypeId: rtId,
+					// Booking details
 					checkIn, checkOut,
 					guestName, guestEmail: guestEmail || null, guestPhone: guestPhone || null,
 					adults, otaName, notes: notes || null, otaRef: otaRef || null
@@ -86,7 +87,7 @@
 				await invalidateAll();
 				await refreshLog();
 			} else {
-				toast.error(`Webhook returned ${d.status}`);
+				toast.error(`Webhook returned ${d.status}: ${JSON.stringify(d.result)}`);
 			}
 		} catch (e) {
 			toast.error('Network error firing webhook');
@@ -159,8 +160,10 @@
 								<option value={p.id}>{p.name}</option>
 							{/each}
 						</select>
-						{#if !data.properties.find(p => p.id === propId)?.channexPropertyId}
-							<p class="text-[10px] text-amber-600 mt-0.5">⚠ No Channex ID set</p>
+						{#if data.properties.find(p => p.id === propId)?.channexPropertyId}
+							<p class="text-[10px] text-green-600 mt-0.5">✓ Channex ID set</p>
+						{:else}
+							<p class="text-[10px] text-muted-foreground mt-0.5">Using internal ID (mock only)</p>
 						{/if}
 					</div>
 					<div>
@@ -170,8 +173,10 @@
 								<option value={rt.id}>{rt.name}</option>
 							{/each}
 						</select>
-						{#if selRt && !selRt.channexRoomTypeId}
-							<p class="text-[10px] text-amber-600 mt-0.5">⚠ No Channex IDs set</p>
+						{#if selRt?.channexRoomTypeId}
+							<p class="text-[10px] text-green-600 mt-0.5">✓ Channex ID set</p>
+						{:else}
+							<p class="text-[10px] text-muted-foreground mt-0.5">Using internal ID (mock only)</p>
 						{/if}
 					</div>
 				</div>

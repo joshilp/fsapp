@@ -60,19 +60,32 @@ export const POST: RequestHandler = async ({ request }) => {
 };
 
 async function handleBookingUpsert(chbk: ChannexBooking, isUpdate: boolean) {
-	// Find which property matches by channexPropertyId
-	const prop = await db.query.properties.findFirst({
+	// Find which property matches by channexPropertyId.
+	// In dev/mock mode the trigger may send "DEV:{internalId}" — fall back to matching by internal id.
+	let prop = await db.query.properties.findFirst({
 		where: eq(properties.channexPropertyId, chbk.property_id)
 	});
+	if (!prop && chbk.property_id.startsWith('DEV:')) {
+		const internalId = chbk.property_id.slice(4);
+		prop = await db.query.properties.findFirst({
+			where: eq(properties.id, internalId)
+		});
+	}
 	if (!prop) {
 		console.warn('[channex webhook] No property found for channexPropertyId:', chbk.property_id);
 		return;
 	}
 
-	// Find which room type matches by channexRoomTypeId
-	const rt = await db.query.roomTypes.findFirst({
+	// Find which room type matches by channexRoomTypeId (or internal ID in dev mode)
+	let rt = await db.query.roomTypes.findFirst({
 		where: eq(roomTypes.channexRoomTypeId, chbk.room_type_id)
 	});
+	if (!rt && chbk.room_type_id.startsWith('DEV:')) {
+		const internalId = chbk.room_type_id.slice(4);
+		rt = await db.query.roomTypes.findFirst({
+			where: eq(roomTypes.id, internalId)
+		});
+	}
 
 	// Find or create the channel (e.g. "Booking.com")
 	let channel = await db.query.bookingChannels.findFirst({
