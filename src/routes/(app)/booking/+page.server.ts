@@ -237,7 +237,7 @@ export const actions: Actions = {
 			columns: { roomTypeId: true }
 		});
 		if (bookedRoom?.roomTypeId) {
-			void syncARIForStay(bookedRoom.roomTypeId, checkIn, checkOut).catch(() => {});
+			void syncARIForStay(bookedRoom.roomTypeId, checkIn, checkOut).catch((e) => console.error('[ari-sync] booking create:', e));
 		}
 
 		return { success: true, bookingId };
@@ -295,7 +295,7 @@ export const actions: Actions = {
 		// Re-sync Channex — cancellation frees up inventory
 		const roomTypeId = cancelledBooking?.room?.roomTypeId ?? cancelledBooking?.requestedRoomTypeId ?? null;
 		if (roomTypeId && cancelledBooking) {
-			void syncARIForStay(roomTypeId, cancelledBooking.checkInDate, cancelledBooking.checkOutDate).catch(() => {});
+			void syncARIForStay(roomTypeId, cancelledBooking.checkInDate, cancelledBooking.checkOutDate).catch((e) => console.error('[ari-sync] booking cancel:', e));
 		}
 
 		return { success: true };

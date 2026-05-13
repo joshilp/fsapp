@@ -238,8 +238,10 @@
 			if (r.ok) {
 				const d = await r.json();
 				confirmSentAt = d.confirmationSentAt;
+			} else {
+				toast.error('Failed to send confirmation email.');
 			}
-		} catch { /* ignore */ } finally { confirmBusy = false; }
+		} catch { toast.error('Failed to send confirmation email.'); } finally { confirmBusy = false; }
 	}
 
 	async function copyConfirmationText() {
@@ -665,9 +667,9 @@
 		if (!bookingId) return;
 		if (!window.confirm('Delete this payment record? This cannot be undone.')) return;
 		try {
-			await fetch(`/api/payment-events/${payId}`, { method: 'DELETE' });
-			await fetchCard(bookingId);
-		} catch { /* ignore */ }
+		await fetch(`/api/payment-events/${payId}`, { method: 'DELETE' });
+		await fetchCard(bookingId);
+	} catch { toast.error('Failed to delete payment — please try again.'); }
 	}
 </script>
 

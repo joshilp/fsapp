@@ -99,7 +99,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			columns: { roomTypeId: true }
 		});
 		if (room?.roomTypeId) {
-			void syncARIForStay(room.roomTypeId, checkInDate as string, checkOutDate as string).catch(() => {});
+			void syncARIForStay(room.roomTypeId, checkInDate as string, checkOutDate as string).catch((e) => console.error('[ari-sync] api/booking POST:', e));
 		}
 	}
 

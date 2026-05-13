@@ -130,7 +130,7 @@ export async function bookAction(request: Request) {
 	void sendOperatorAlert({ guestName, guestEmail, propertyName: propRow?.name ?? propertyId, checkInDate: checkIn, checkOutDate: checkOut, nights, requestedRoomType: typeRow?.name ?? null, quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null, confirmationUrl: confirmUrl });
 
 	// Re-sync availability with Channex for every night of the stay
-	void syncARIForStay(roomTypeId, checkIn, checkOut).catch(() => {});
+	void syncARIForStay(roomTypeId, checkIn, checkOut).catch((e) => console.error('[ari-sync] public-book:', e));
 
 	return { success: true, token };
 }

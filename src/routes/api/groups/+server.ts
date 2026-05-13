@@ -169,7 +169,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			columns: { roomTypeId: true }
 		});
 		if (rm?.roomTypeId) {
-			void syncARIForStay(rm.roomTypeId, spec.checkIn, spec.checkOut).catch(() => {});
+			void syncARIForStay(rm.roomTypeId, spec.checkIn, spec.checkOut).catch((e) => console.error('[ari-sync] groups POST:', e));
 		}
 	}
 

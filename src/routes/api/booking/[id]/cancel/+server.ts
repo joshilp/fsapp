@@ -129,7 +129,7 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 		? (await db.query.rooms.findFirst({ where: eq(rooms.id, booking.roomId), columns: { roomTypeId: true } }))?.roomTypeId ?? null
 		: null;
 	// Need rooms import for the query above — handled inline
-	if (roomTypeId) void syncARIForStay(roomTypeId, booking.checkInDate, booking.checkOutDate).catch(() => {});
+	if (roomTypeId) void syncARIForStay(roomTypeId, booking.checkInDate, booking.checkOutDate).catch((e) => console.error('[ari-sync] booking cancel:', e));
 
 	// Send cancellation email to guest (non-blocking)
 	const fullBooking = await db.query.bookings.findFirst({

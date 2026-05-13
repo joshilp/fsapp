@@ -40,7 +40,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		});
 	}
 
-	void syncARIForDate(roomTypeId, date).catch(() => {});
+	void syncARIForDate(roomTypeId, date).catch((e) => console.error('[ari-sync] override POST:', e));
 	return json({ ok: true });
 };
 
@@ -54,6 +54,6 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
 		and(eq(rateOverrides.roomTypeId, roomTypeId), eq(rateOverrides.date, date))
 	);
 
-	void syncARIForDate(roomTypeId, date).catch(() => {});
+	void syncARIForDate(roomTypeId, date).catch((e) => console.error('[ari-sync] override DELETE:', e));
 	return json({ ok: true });
 };
