@@ -26,7 +26,7 @@
 		checkOut: string;
 	};
 	type RateLine = { id: string; label: string; qty: string; unit: string; total: string };
-	type TaxLine  = { id: string; presetId: string; label: string; total: string };
+	type TaxLine  = { id: string; presetId: string; label: string; percent: string; total: string };
 	type Payment  = { id: string; type: string; amount: number; paymentMethod: string; notes: string | null; chargedAt: number | null };
 	type TaxPreset = { id: string; label: string; ratePercent: number };
 	type BookingType = 'walkin' | 'phone' | 'website' | 'bookingcom' | 'expedia' | 'airbnb' | 'other';
@@ -79,6 +79,7 @@
 	let requestedRoomTypeId_ = $state('');
 	let availRooms = $state<{ id: string; roomNumber: string; roomTypeName: string }[]>([]);
 	let availRoomsLoading = $state(false);
+	let roomPickerDismissed = $state(false);   // lets operator proceed to folio as unassigned
 
 	async function loadAvailableRooms() {
 		if (!requestedRoomTypeId_ || !checkIn || !checkOut || checkIn >= checkOut) return;
@@ -383,7 +384,7 @@
 		waiverSigned = false;
 		rateLines = [{ id: crypto.randomUUID(), label: '', qty: '', unit: '', total: '' }];
 		taxLines = []; taxPresets = []; payments = []; ccInfo = null;
-		requestedRoomTypeId_ = ''; availRooms = [];
+		requestedRoomTypeId_ = ''; availRooms = []; roomPickerDismissed = false;
 		addingPay = false; payAmt = ''; payMethod = 'cash'; payType = 'final_charge'; payNotes = ''; payErr = '';
 		suggestions = []; showSuggest = false;
 		depositAmt = ''; cancelPreview = null; cancelOpen = false; cancelBusy = false;
@@ -403,9 +404,8 @@
 		checkIn = nb.checkIn; checkOut = nb.checkOut;
 		channelId = defChannel('phone');
 		requestedRoomTypeId_ = nb.requestedRoomTypeId ?? '';
-		// Open directly to Stay tab when booking from inventory grid so the
-		// room assignment picker is immediately visible
-		if (requestedRoomTypeId_) leftTab = 'stay';
+		// Open to Guest tab — room assignment is now in the right panel
+		if (requestedRoomTypeId_) leftTab = 'guest';
 		fetchTaxPresets();
 		if (requestedRoomTypeId_) {
 			loadAvailableRooms();
@@ -428,8 +428,12 @@
 
 	async function fetchTaxPresets() {
 		try {
-			const r = await fetch('/api/tax-presets');
-			if (r.ok) taxPresets = await r.json();
+			const r = await fetch(`/api/tax-presets${propId ? `?propertyId=${encodeURIComponent(propId)}` : ''}`);
+			if (r.ok) {
+				taxPresets = await r.json();
+				// Auto-apply if rates are already loaded (handles case where suggestRate ran first)
+				autoApplyTaxes(rateTotal);
+			}
 		} catch { /* ignore */ }
 	}
 
@@ -486,7 +490,7 @@
 				unit: l.unitAmount ? (l.unitAmount/100).toFixed(2) : '',
 				total: (l.totalAmount/100).toFixed(2)
 			})) : [{ id: crypto.randomUUID(), label: '', qty: '', unit: '', total: '' }];
-			taxLines = taxes.map((l: {id:string;label:string;totalAmount:number}) => ({ id: l.id, presetId: '', label: l.label, total: (l.totalAmount/100).toFixed(2) }));
+			taxLines = taxes.map((l: {id:string;label:string;totalAmount:number}) => ({ id: l.id, presetId: '', label: l.label, percent: '', total: (l.totalAmount/100).toFixed(2) }));
 		} catch (e) {
 			saveError = (e as Error).message;
 		} finally {
@@ -521,7 +525,29 @@
 	function applyPreset(line: TaxLine, pid: string) {
 		const p = taxPresets.find(x => x.id === pid); if (!p) return;
 		line.presetId = pid; line.label = p.label;
+		line.percent = String(p.ratePercent);
 		line.total = ((Math.round(rateTotal*100) * p.ratePercent / 100) / 100).toFixed(2);
+	}
+
+	/** Recalculate dollar amounts for any tax lines that have a percent set. */
+	function recalcPercentTaxes(sub: number) {
+		taxLines = taxLines.map(l => {
+			const pct = parseFloat(l.percent);
+			if (!pct || !sub) return l;
+			return { ...l, total: (sub * pct / 100).toFixed(2) };
+		});
+	}
+
+	/** Auto-create tax lines from all configured presets (only when none exist yet). */
+	function autoApplyTaxes(sub: number) {
+		if (!taxPresets.length || taxLines.length > 0 || sub <= 0) return;
+		taxLines = taxPresets.map(p => ({
+			id: crypto.randomUUID(),
+			presetId: p.id,
+			label: p.label,
+			percent: String(p.ratePercent),
+			total: sub > 0 ? (sub * p.ratePercent / 100).toFixed(2) : ''
+		}));
 	}
 
 	async function suggestRate(force = false) {
@@ -547,6 +573,10 @@
 				if (!depositAmt && d.suggestedDepositCents > 0) {
 					depositAmt = (d.suggestedDepositCents / 100).toFixed(2);
 				}
+				const sub = (d.subtotalCents ?? 0) / 100;
+				// Auto-apply preset taxes if none yet, otherwise recalculate percent-based ones
+				if (taxLines.length === 0) autoApplyTaxes(sub);
+				else recalcPercentTaxes(sub);
 			}
 		} catch { /* ignore */ } finally { rateLoading = false; }
 	}
@@ -863,42 +893,9 @@
 						{:else}
 							<input type="hidden" name="otaConfirmationNumber" value="" />
 						{/if}
-					</section>
+				</section>
 
-					<!-- Room assignment (inventory-sourced bookings only) -->
-					{#if requestedRoomTypeId_ && isNew}
-						<section class="rounded-lg border-2 border-teal-400 bg-teal-50/60 dark:bg-teal-950/20 p-3">
-							<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-400 flex items-center gap-1.5">
-								<span>🛏</span> Assign a Room
-								<span class="font-normal normal-case text-[10px] text-teal-600/70 ml-1">optional — leave blank to queue for later</span>
-							</h3>
-							<p class="text-xs text-teal-800 dark:text-teal-300 mb-2">
-								Booking from inventory grid for <strong>{roomNumber_}</strong>. Pick a specific room or save as unassigned.
-							</p>
-							{#if availRoomsLoading}
-								<p class="text-xs text-muted-foreground animate-pulse py-1">Checking availability…</p>
-							{:else}
-								<select id="bc-room-pick"
-									class="w-full rounded-md border border-teal-300 bg-background px-3 py-2 text-sm focus:ring-teal-400"
-									value={roomId_}
-									onchange={(e) => pickAvailRoom((e.target as HTMLSelectElement).value)}
-								>
-									<option value="">— Save as unassigned (queue) —</option>
-									{#each availRooms as r}
-										<option value={r.id}>Room {r.roomNumber} – {r.roomTypeName}</option>
-									{/each}
-								</select>
-								{#if availRooms.length === 0 && checkIn && checkOut}
-									<p class="text-[10px] text-amber-600 mt-1">All rooms of this type are booked for these dates — will save as unassigned.</p>
-								{:else if !roomId_}
-									<p class="text-[10px] text-teal-600 mt-1">{availRooms.length} room{availRooms.length === 1 ? '' : 's'} available · choose one or leave unassigned</p>
-								{:else}
-									<p class="text-[10px] text-teal-700 font-medium mt-1">✓ Room {roomNumber_} selected</p>
-								{/if}
-							{/if}
-						</section>
-					{/if}
-					{/if}
+				{/if}
 
 				<!-- Notes tab -->
 				{#if leftTab === 'notes'}
@@ -956,12 +953,52 @@
 				{/if}
 				{/if}
 
-				</div><!-- /left -->
+			</div><!-- /left -->
 
-				<!-- ── RIGHT: Folio ──────────────────────────────────────────────── -->
-				<div class="flex flex-col gap-4">
+			<!-- ── RIGHT: Room picker (inventory new booking) OR Folio ──────────── -->
+			<div class="flex flex-col gap-4">
 
-					<!-- Folio -->
+			{#if requestedRoomTypeId_ && isNew && !roomId_ && !roomPickerDismissed}
+				<!-- ── Room assignment panel ───────────────────────────────────── -->
+				<section class="rounded-lg border-2 border-teal-400 bg-teal-50/60 dark:bg-teal-950/20 p-4 flex flex-col gap-4">
+					<div>
+						<h3 class="text-sm font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-2">
+							<span>🛏</span> Assign a Room
+						</h3>
+						<p class="text-xs text-teal-700/80 dark:text-teal-300/80 mt-1">
+							Booking from inventory grid for <strong>{roomNumber_}</strong>. Pick a specific room or queue as unassigned.
+						</p>
+					</div>
+
+					{#if availRoomsLoading}
+						<p class="text-sm text-muted-foreground animate-pulse">Checking availability…</p>
+					{:else if availRooms.length === 0 && checkIn && checkOut}
+						<p class="text-sm text-amber-700">All rooms of this type are fully booked for these dates.</p>
+						<button type="button" onclick={() => roomPickerDismissed = true}
+							class="w-full rounded-lg bg-teal-600 text-white py-2.5 text-sm font-semibold hover:bg-teal-700 transition-colors">
+							Queue as Unassigned →
+						</button>
+					{:else}
+						<select
+							class="w-full rounded-md border border-teal-300 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+							value=""
+							onchange={(e) => pickAvailRoom((e.target as HTMLSelectElement).value)}
+						>
+							<option value="" disabled>— Choose a room —</option>
+							{#each availRooms as r}
+								<option value={r.id}>Room {r.roomNumber} – {r.roomTypeName}</option>
+							{/each}
+						</select>
+						<p class="text-[10px] text-teal-600 -mt-2">{availRooms.length} room{availRooms.length === 1 ? '' : 's'} available</p>
+						<button type="button" onclick={() => roomPickerDismissed = true}
+							class="text-xs text-teal-600 hover:text-teal-800 text-center underline underline-offset-2">
+							Queue as unassigned instead
+						</button>
+					{/if}
+				</section>
+			{:else}
+
+				<!-- ── Folio ───────────────────────────────────────────────────── -->
 					<section class="rounded-lg border border-border bg-card p-3">
 						<div class="mb-2 flex items-center justify-between">
 							<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Folio</h3>
@@ -995,39 +1032,52 @@
 								class="text-xs text-muted-foreground hover:text-foreground">+ charge line</button>
 						</div>
 
-						<!-- Tax lines -->
-						<div class="mt-3 space-y-1.5">
-							<p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Taxes</p>
-							{#each taxLines as line, i}
-								<div class="flex items-center gap-1">
-									{#if taxPresets.length}
-										<select onchange={(e) => applyPreset(line, (e.target as HTMLSelectElement).value)}
-											class="rounded border border-input bg-background px-1 py-1 text-xs">
-											<option value="">Custom</option>
-											{#each taxPresets as p}<option value={p.id} selected={line.presetId===p.id}>{p.label}</option>{/each}
-										</select>
-									{/if}
-									<input name="tax-label-{i}" placeholder="Tax label" bind:value={line.label}
-										class="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-xs" />
-									<div class="relative w-20">
-										<span class="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
-										<input name="tax-total-{i}" type="number" step="0.01" bind:value={line.total}
-											class="w-full rounded border border-input bg-background pl-5 pr-1 py-1 text-xs" />
-									</div>
-									<button type="button" onclick={() => taxLines = taxLines.filter(l => l.id !== line.id)}
-										class="shrink-0 px-1 text-xs text-muted-foreground hover:text-destructive">×</button>
-								</div>
-							{/each}
-							<button type="button" onclick={() => {
-								const newLine = { id: crypto.randomUUID(), presetId: '', label: '', total: '' };
-								if (taxPresets.length === 1) applyPreset(newLine, taxPresets[0].id);
-								taxLines = [...taxLines, newLine];
-							}} class="text-xs text-muted-foreground hover:text-foreground">+ tax line</button>
+					<!-- Tax lines -->
+					<div class="mt-3 space-y-1.5">
+						<div class="flex justify-between text-xs text-muted-foreground font-medium border-t border-border pt-2 mb-2">
+							<span>Subtotal</span><span>${rateTotal.toFixed(2)}</span>
 						</div>
+						<p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Taxes</p>
+						{#each taxLines as line, i}
+							<div class="flex items-center gap-1">
+								{#if taxPresets.length}
+									<select onchange={(e) => applyPreset(line, (e.target as HTMLSelectElement).value)}
+										class="rounded border border-input bg-background px-1 py-1 text-xs shrink-0">
+										<option value="">Custom</option>
+										{#each taxPresets as p}<option value={p.id} selected={line.presetId===p.id}>{p.label}</option>{/each}
+									</select>
+								{/if}
+								<input name="tax-label-{i}" placeholder="Label" bind:value={line.label}
+									class="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-xs" />
+								<!-- Percent field: drives the dollar amount when set -->
+								<div class="relative w-14 shrink-0">
+									<input type="number" min="0" max="100" step="0.01" placeholder="%" bind:value={line.percent}
+										oninput={() => {
+											const pct = parseFloat(line.percent);
+											if (pct >= 0) line.total = (rateTotal * pct / 100).toFixed(2);
+										}}
+										class="w-full rounded border border-input bg-background px-2 pr-4 py-1 text-xs" />
+									<span class="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
+								</div>
+								<!-- Dollar amount: auto-filled when percent set, manual otherwise -->
+								<div class="relative w-16 shrink-0">
+									<span class="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+									<input name="tax-total-{i}" type="number" step="0.01" bind:value={line.total}
+										oninput={() => { if (line.percent) line.percent = ''; }}
+										class={['w-full rounded border border-input bg-background pl-4 pr-1 py-1 text-xs',
+											line.percent ? 'text-muted-foreground' : ''].join(' ')} />
+								</div>
+								<button type="button" onclick={() => taxLines = taxLines.filter(l => l.id !== line.id)}
+									class="shrink-0 px-1 text-xs text-muted-foreground hover:text-destructive">×</button>
+							</div>
+						{/each}
+						<button type="button" onclick={() => {
+							taxLines = [...taxLines, { id: crypto.randomUUID(), presetId: '', label: '', percent: '', total: '' }];
+						}} class="text-xs text-muted-foreground hover:text-foreground">+ tax line</button>
+					</div>
 
 						<!-- Divider + totals -->
 						<div class="mt-3 border-t border-border pt-2 space-y-1 text-sm">
-							<div class="flex justify-between text-muted-foreground"><span>Subtotal</span><span>${rateTotal.toFixed(2)}</span></div>
 							{#if taxTotal > 0}<div class="flex justify-between text-muted-foreground"><span>Tax</span><span>${taxTotal.toFixed(2)}</span></div>{/if}
 							<div class="flex justify-between font-semibold text-base"><span>Total charges</span><span>${grandTotal.toFixed(2)}</span></div>
 						</div>
@@ -1185,9 +1235,11 @@
 								<span class="text-base">{balanceCents > 0 ? fmtMoney(balanceCents) : '✓'}</span>
 							</div>
 						{/if}
-					</section>
+				</section>
 
-					</div><!-- /right -->
+			{/if}<!-- end room picker / folio swap -->
+
+			</div><!-- /right -->
 
 				</div><!-- /grid -->
 				{#if showCheckoutBar && status === 'checked_in'}

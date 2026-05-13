@@ -581,10 +581,12 @@
 	{@const rt = allRts.find(r => r.id === popoverCell?.roomTypeId)}
 	{@const popNights = Math.round((new Date(popoverCheckOut + 'T12:00:00').getTime() - new Date(popoverCell.date + 'T12:00:00').getTime()) / 86400000)}
 	{@const multiNight = popNights > 1}
-	<div class="fixed z-30 rounded-xl border border-border bg-background shadow-xl w-72 max-h-[90vh] overflow-y-auto" style="top:50%;left:50%;transform:translate(-50%,-50%)" role="dialog" aria-label="Cell info">
+	{@const rtAri = allAri[popoverCell.roomTypeId] ?? {}}
+	{@const totalCents = nightDates.reduce((s, d) => { const nc = rtAri[d]; return s + (nc?.overrideRateCents ?? nc?.baseRateCents ?? 0); }, 0)}
+	<div class="fixed z-30 rounded-xl border border-border bg-background shadow-xl w-[480px] max-w-[95vw] max-h-[90vh] overflow-y-auto" style="top:50%;left:50%;transform:translate(-50%,-50%)" role="dialog" aria-label="Cell info">
 
 		<!-- Header -->
-		<div class="px-4 pt-4 pb-3 flex items-start justify-between">
+		<div class="px-4 pt-4 pb-3 flex items-start justify-between border-b border-border">
 			<div>
 				<p class="font-semibold text-sm">{rt?.name}</p>
 				<p class="text-xs text-muted-foreground">
@@ -602,98 +604,119 @@
 			<button onclick={closePopover} class="text-muted-foreground hover:text-foreground text-lg leading-none px-1 shrink-0">×</button>
 		</div>
 
-		<div class="px-4 pb-4 space-y-3">
+		<!-- ── New Booking CTA (full width) ───────────────────────────────────── -->
+		<div class="px-4 pt-3 pb-2">
+			<button
+				onclick={() => {
+					openBookingCard(popoverCell!.roomTypeId, rt?.name ?? '', popoverCell!.date, popoverCheckOut, popoverPropId, popoverPropName);
+					closePopover();
+				}}
+				class="w-full rounded-lg bg-green-600 text-white py-2 text-sm font-semibold hover:bg-green-700 transition-colors"
+			>+ New Booking{multiNight ? ` · ${popNights} nights` : ''}</button>
+		</div>
 
-			<!-- ── New Booking CTA ─────────────────────────────────────────────── -->
-		<button
-			onclick={() => {
-				openBookingCard(popoverCell!.roomTypeId, rt?.name ?? '', popoverCell!.date, popoverCheckOut, popoverPropId, popoverPropName);
-				closePopover();
-			}}
-			class="w-full rounded-lg bg-green-600 text-white py-2 text-sm font-semibold hover:bg-green-700 transition-colors"
-		>+ New Booking{multiNight ? ` · ${popNights} nights` : ''}</button>
+		<!-- ── Two-column body: Rates (left) + Occupancy (right) ──────────────── -->
+		<div class="grid grid-cols-2 gap-0 px-4 pb-3 divide-x divide-border">
 
-		<!-- ── Per-night Rate Breakdown (multi-night drag only) ─────────────── -->
-		{#if multiNight}
-			{@const rtAri = allAri[popoverCell.roomTypeId] ?? {}}
-			{@const totalCents = nightDates.reduce((s, d) => { const nc = rtAri[d]; return s + (nc?.overrideRateCents ?? nc?.baseRateCents ?? 0); }, 0)}
-			<div class="rounded-lg border border-border bg-muted/30 p-2.5 space-y-0.5">
-				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Rates · tap night to override</p>
-				{#each nightDates as d}
-					{@const nc = rtAri[d]}
-					{@const isEditing = d === overrideDate}
-					<button type="button" onclick={() => selectOverrideDate(d)}
-						class={['flex items-center justify-between w-full text-left rounded px-2 py-1 text-xs transition-colors',
-							isEditing ? 'bg-primary/10 ring-1 ring-inset ring-primary/30' : 'hover:bg-muted/60'].join(' ')}>
-						<span class={isEditing ? 'font-semibold' : 'text-muted-foreground'}>
-							{new Date(d + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
-						</span>
-						<span class="flex items-center gap-1.5">
-							{#if nc?.overrideRateCents != null}
-								<span class="text-amber-700 font-semibold">{fmt(nc.overrideRateCents)}</span>
-								<span class="text-muted-foreground/60 line-through text-[10px]">{fmt(nc.baseRateCents ?? null)}</span>
-							{:else if nc?.baseRateCents}
-								<span class={isEditing ? 'font-semibold' : ''}>{fmt(nc.baseRateCents)}</span>
-							{:else}
-								<span class="text-muted-foreground">—</span>
-							{/if}
-							{#if nc?.hasOverride}<span class="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="Has override"></span>{/if}
-						</span>
-					</button>
-				{/each}
-				{#if totalCents > 0}
-					<div class="flex justify-between text-xs pt-1.5 mt-0.5 border-t border-border font-medium">
-						<span class="text-muted-foreground">Est. total</span>
-						<span>{fmt(totalCents)}</span>
+			<!-- Left: Rates -->
+			<div class="pr-3 space-y-1 min-w-0">
+				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+					{multiNight ? 'Rates · tap to override' : 'Rate'}
+				</p>
+				{#if multiNight}
+					<div class="max-h-52 overflow-y-auto space-y-0.5 pr-0.5">
+						{#each nightDates as d}
+							{@const nc = rtAri[d]}
+							{@const isEditing = d === overrideDate}
+							<button type="button" onclick={() => selectOverrideDate(d)}
+								class={['flex items-center justify-between w-full text-left rounded px-1.5 py-1 text-xs transition-colors',
+									isEditing ? 'bg-primary/10 ring-1 ring-inset ring-primary/30' : 'hover:bg-muted/60'].join(' ')}>
+								<span class={['truncate mr-1', isEditing ? 'font-semibold' : 'text-muted-foreground'].join(' ')}>
+									{new Date(d + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
+								</span>
+								<span class="flex items-center gap-1 shrink-0">
+									{#if nc?.overrideRateCents != null}
+										<span class="text-amber-700 font-semibold">{fmt(nc.overrideRateCents)}</span>
+										<span class="text-muted-foreground/60 line-through text-[10px]">{fmt(nc.baseRateCents ?? null)}</span>
+									{:else if nc?.baseRateCents}
+										<span class={isEditing ? 'font-semibold' : ''}>{fmt(nc.baseRateCents)}</span>
+									{:else}
+										<span class="text-muted-foreground">—</span>
+									{/if}
+									{#if nc?.hasOverride}<span class="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="Has override"></span>{/if}
+								</span>
+							</button>
+						{/each}
 					</div>
+					{#if totalCents > 0}
+						<div class="flex justify-between text-xs pt-1.5 border-t border-border font-medium">
+							<span class="text-muted-foreground">Est. total</span>
+							<span>{fmt(totalCents)}</span>
+						</div>
+					{/if}
+				{:else}
+					<!-- Single night: just show the rate -->
+					<p class="text-sm font-medium">
+						{#if cell?.overrideRateCents != null}
+							<span class="text-amber-700">{fmt(cell.overrideRateCents)}</span>
+							<span class="text-muted-foreground line-through text-xs ml-1">{fmt(cell.baseRateCents ?? null)}</span>
+						{:else if cell?.baseRateCents}
+							{fmt(cell.baseRateCents)}
+						{:else}
+							<span class="text-muted-foreground">—</span>
+						{/if}
+					</p>
+					{#if cell?.minNights > 1}
+						<p class="text-[10px] text-amber-700">{cell.minNights}n minimum</p>
+					{/if}
 				{/if}
 			</div>
-		{/if}
 
-			<!-- ── Occupancy ───────────────────────────────────────────────────── -->
-			{#if cellOccupancyLoading}
-				<p class="text-xs text-muted-foreground animate-pulse text-center py-1">Loading…</p>
-			{:else if cellCheckingIn.length || cellCheckingOut.length || cellStayingThrough > 0}
-				<div class="rounded-lg border border-border bg-muted/30 p-2.5 space-y-2 text-xs">
-					{#if cellCheckingIn.length}
-						<div>
-							<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Checking in ({cellCheckingIn.length})</p>
-							{#each cellCheckingIn as g}
-								<button type="button" onclick={() => openBookingDetail(g.id)}
-									class="flex items-center gap-1.5 w-full text-left py-0.5 hover:text-primary transition-colors">
-									<span class="text-muted-foreground">→</span>
-									<span class="font-medium truncate">{g.guestName}</span>
-									<span class="text-muted-foreground shrink-0">
-										{g.roomNumber ? `· Rm ${g.roomNumber}` : '· unassigned'}
-										· {g.nights} nt{(g.nights ?? 0) === 1 ? '' : 's'}
-									</span>
-								</button>
-							{/each}
-						</div>
-					{/if}
-					{#if cellCheckingOut.length}
-						<div>
-							<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Checking out ({cellCheckingOut.length})</p>
-							{#each cellCheckingOut as g}
-								<button type="button" onclick={() => openBookingDetail(g.id)}
-									class="flex items-center gap-1.5 w-full text-left py-0.5 hover:text-primary transition-colors">
-									<span class="text-muted-foreground">→</span>
-									<span class="font-medium truncate">{g.guestName}</span>
-									{#if g.roomNumber}<span class="text-muted-foreground shrink-0">· Rm {g.roomNumber}</span>{/if}
-								</button>
-							{/each}
-						</div>
-					{/if}
-					{#if cellStayingThrough > 0}
-						<p class="text-muted-foreground">{cellStayingThrough} staying through</p>
-					{/if}
-				</div>
-			{:else}
-				<p class="text-xs text-muted-foreground text-center py-0.5">No guests on this date</p>
-			{/if}
+			<!-- Right: Occupancy -->
+			<div class="pl-3 space-y-2 min-w-0">
+				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Occupancy</p>
+				{#if cellOccupancyLoading}
+					<p class="text-xs text-muted-foreground animate-pulse">Loading…</p>
+				{:else if cellCheckingIn.length || cellCheckingOut.length || cellStayingThrough > 0}
+					<div class="max-h-52 overflow-y-auto space-y-2 pr-0.5 text-xs">
+						{#if cellCheckingIn.length}
+							<div>
+								<p class="text-[10px] font-semibold text-green-700 uppercase tracking-wide mb-0.5">In ({cellCheckingIn.length})</p>
+								{#each cellCheckingIn as g}
+									<button type="button" onclick={() => { openBookingDetail(g.id); closePopover(); }}
+										class="flex items-center gap-1 w-full text-left py-0.5 hover:text-primary transition-colors min-w-0">
+										<span class="text-muted-foreground shrink-0">→</span>
+										<span class="font-medium truncate">{g.guestName}</span>
+										<span class="text-muted-foreground shrink-0 text-[10px]">{g.roomNumber ? `Rm${g.roomNumber}` : 'unassigned'}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+						{#if cellCheckingOut.length}
+							<div>
+								<p class="text-[10px] font-semibold text-orange-700 uppercase tracking-wide mb-0.5">Out ({cellCheckingOut.length})</p>
+								{#each cellCheckingOut as g}
+									<button type="button" onclick={() => { openBookingDetail(g.id); closePopover(); }}
+										class="flex items-center gap-1 w-full text-left py-0.5 hover:text-primary transition-colors min-w-0">
+										<span class="text-muted-foreground shrink-0">←</span>
+										<span class="font-medium truncate">{g.guestName}</span>
+										{#if g.roomNumber}<span class="text-muted-foreground shrink-0 text-[10px]">Rm{g.roomNumber}</span>{/if}
+									</button>
+								{/each}
+							</div>
+						{/if}
+						{#if cellStayingThrough > 0}
+							<p class="text-muted-foreground text-[10px]">{cellStayingThrough} staying through</p>
+						{/if}
+					</div>
+				{:else}
+					<p class="text-xs text-muted-foreground">No guests</p>
+				{/if}
+			</div>
+		</div>
 
-		<!-- ── Rate & Restriction Override ────────────────────────────────── -->
-		<div class="border-t border-border pt-3 space-y-3">
+		<!-- ── Override (full width below columns) ────────────────────────────── -->
+		<div class="border-t border-border px-4 py-3 space-y-3">
 			<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
 				{#if multiNight}
 					Override · {new Date(overrideDate + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
@@ -701,30 +724,31 @@
 					Rate & Restrictions Override
 				{/if}
 			</p>
-			<div>
-				<label class="text-xs text-muted-foreground font-medium">Rate ($/night)</label>
-				<div class="flex items-center gap-2 mt-1">
-					<span class="text-sm text-muted-foreground">$</span>
-					<input type="number" min="0" step="1" bind:value={editRate} placeholder={overrideCell?.baseRateCents ? String(overrideCell.baseRateCents / 100) : 'Season rate'} class="flex-1 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-					{#if editRate}<button onclick={() => editRate = ''} class="text-xs text-muted-foreground hover:text-foreground">✕</button>{/if}
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<label class="text-xs text-muted-foreground font-medium">Rate ($/night)</label>
+					<div class="flex items-center gap-2 mt-1">
+						<span class="text-sm text-muted-foreground">$</span>
+						<input type="number" min="0" step="1" bind:value={editRate} placeholder={overrideCell?.baseRateCents ? String(overrideCell.baseRateCents / 100) : 'Season rate'} class="flex-1 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+						{#if editRate}<button onclick={() => editRate = ''} class="text-xs text-muted-foreground hover:text-foreground">✕</button>{/if}
+					</div>
+					{#if overrideCell?.baseRateCents}<p class="text-[10px] text-muted-foreground mt-0.5">Season: {fmt(overrideCell.baseRateCents)}</p>{/if}
 				</div>
-				{#if overrideCell?.baseRateCents}<p class="text-[10px] text-muted-foreground mt-0.5">Season: {fmt(overrideCell.baseRateCents)}</p>{/if}
-			</div>
-			<div>
-				<label class="text-xs text-muted-foreground font-medium">Min nights</label>
-				<input type="number" min="1" max="30" bind:value={editMin} placeholder={String(overrideCell?.baseMinNights ?? 1)} class="mt-1 w-24 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-			</div>
-				<div class="space-y-2">
-					<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editStopSell} class="h-4 w-4 rounded border-input" /><span class="text-sm">Stop sell</span></label>
-					<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTA} class="h-4 w-4 rounded border-input" /><span class="text-sm">Closed to arrival (CTA)</span></label>
-					<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTD} class="h-4 w-4 rounded border-input" /><span class="text-sm">Closed to departure (CTD)</span></label>
+				<div>
+					<label class="text-xs text-muted-foreground font-medium">Min nights</label>
+					<input type="number" min="1" max="30" bind:value={editMin} placeholder={String(overrideCell?.baseMinNights ?? 1)} class="mt-1 w-full rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
 				</div>
-				<div class="flex gap-2">
-					<button onclick={saveOverride} disabled={savingCell} class="flex-1 rounded-lg bg-primary text-primary-foreground py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">{savingCell ? 'Saving…' : 'Save override'}</button>
-					{#if overrideCell?.hasOverride}<button onclick={clearOverride} disabled={savingCell} class="rounded-lg border border-border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50">Clear</button>{/if}
-				</div>
-				<p class="text-[10px] text-muted-foreground text-center">Changes sync to Channex automatically</p>
 			</div>
+			<div class="flex flex-wrap gap-x-4 gap-y-1.5">
+				<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editStopSell} class="h-4 w-4 rounded border-input" /><span class="text-sm">Stop sell</span></label>
+				<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTA} class="h-4 w-4 rounded border-input" /><span class="text-sm">CTA</span></label>
+				<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTD} class="h-4 w-4 rounded border-input" /><span class="text-sm">CTD</span></label>
+			</div>
+			<div class="flex gap-2">
+				<button onclick={saveOverride} disabled={savingCell} class="flex-1 rounded-lg bg-primary text-primary-foreground py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">{savingCell ? 'Saving…' : 'Save override'}</button>
+				{#if overrideCell?.hasOverride}<button onclick={clearOverride} disabled={savingCell} class="rounded-lg border border-border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50">Clear</button>{/if}
+			</div>
+			<p class="text-[10px] text-muted-foreground text-center">Changes sync to Channex automatically</p>
 		</div>
 	</div>
 {/if}
