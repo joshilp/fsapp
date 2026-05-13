@@ -192,7 +192,20 @@
 	let editCTA      = $state(false);
 	let editCTD      = $state(false);
 	let savingCell   = $state(false);
+	let overrideDate = $state('');   // which night's override is being edited (may differ from check-in when multi-night)
 
+	// Array of ISO dates for each night in the selected range (check-in inclusive, check-out exclusive)
+	const nightDates = $derived.by(() => {
+		if (!popoverCell) return [] as string[];
+		const dates: string[] = [];
+		const end = new Date(popoverCheckOut + 'T12:00:00');
+		let cur = new Date(popoverCell.date + 'T12:00:00');
+		while (cur < end) {
+			dates.push(cur.toISOString().slice(0, 10));
+			cur.setDate(cur.getDate() + 1);
+		}
+		return dates;
+	});
 	// Occupancy data loaded on popover open
 	type CellGuest = { id: string; guestName: string; roomNumber: string | null; nights?: number };
 	let cellCheckingIn     = $state<CellGuest[]>([]);
@@ -240,12 +253,23 @@
 		popoverCheckOut = checkOut ?? addDaysLocal(checkIn, 1);
 		popoverPropId   = prop.id;
 		popoverPropName = prop.name;
+		overrideDate = checkIn;
 		editRate     = cell?.overrideRateCents != null ? String(cell.overrideRateCents / 100) : '';
 		editMin      = cell?.minNights != null && cell.minNights !== cell.baseMinNights ? String(cell.minNights) : '';
 		editStopSell = cell?.stopSell ?? false;
 		editCTA      = cell?.closedToArrival ?? false;
 		editCTD      = cell?.closedToDeparture ?? false;
 		loadCellOccupancy(roomTypeId, checkIn);
+	}
+	function selectOverrideDate(d: string) {
+		const ari = Object.values(data.propData).reduce<Record<string, Record<string, ARICell>>>((a, p) => ({ ...a, ...p.ariData }), {});
+		const c = ari[popoverCell!.roomTypeId]?.[d];
+		overrideDate = d;
+		editRate     = c?.overrideRateCents != null ? String(c.overrideRateCents / 100) : '';
+		editMin      = c?.minNights != null && c.minNights !== c.baseMinNights ? String(c.minNights) : '';
+		editStopSell = c?.stopSell ?? false;
+		editCTA      = c?.closedToArrival ?? false;
+		editCTD      = c?.closedToDeparture ?? false;
 	}
 	function closePopover() { popoverCell = null; }
 
@@ -257,7 +281,7 @@
 		if (!popoverCell) return;
 		savingCell = true;
 		try {
-			const res = await fetch('/api/ari/override', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomTypeId: popoverCell.roomTypeId, date: popoverCell.date, rateCents: editRate ? Math.round(parseFloat(editRate) * 100) : null, minNights: editMin ? parseInt(editMin) : null, stopSell: editStopSell, closedToArrival: editCTA, closedToDeparture: editCTD }) });
+			const res = await fetch('/api/ari/override', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomTypeId: popoverCell.roomTypeId, date: overrideDate, rateCents: editRate ? Math.round(parseFloat(editRate) * 100) : null, minNights: editMin ? parseInt(editMin) : null, stopSell: editStopSell, closedToArrival: editCTA, closedToDeparture: editCTD }) });
 			if (res.ok) { toast.success('Override saved'); closePopover(); await invalidateAll(); } else toast.error('Save failed');
 		} finally { savingCell = false; }
 	}
@@ -265,7 +289,7 @@
 		if (!popoverCell) return;
 		savingCell = true;
 		try {
-			const res = await fetch('/api/ari/override', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomTypeId: popoverCell.roomTypeId, date: popoverCell.date }) });
+			const res = await fetch('/api/ari/override', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomTypeId: popoverCell.roomTypeId, date: overrideDate }) });
 			if (res.ok) { toast.success('Override cleared'); closePopover(); await invalidateAll(); } else toast.error('Clear failed');
 		} finally { savingCell = false; }
 	}
@@ -552,9 +576,10 @@
 {#if popoverCell}
 	{@const allAri = Object.values(data.propData).reduce((a, p) => ({ ...a, ...p.ariData }), {} as Record<string, Record<string, ARICell>>)}
 	{@const cell = allAri[popoverCell.roomTypeId]?.[popoverCell.date]}
+	{@const overrideCell = allAri[popoverCell.roomTypeId]?.[overrideDate]}
 	{@const allRts = data.propertiesList.flatMap(p => data.propData[p.id]?.roomTypesList ?? [])}
 	{@const rt = allRts.find(r => r.id === popoverCell?.roomTypeId)}
-	{@const popNights = Math.round((new Date(popoverCheckOut).getTime() - new Date(popoverCell.date + 'T12:00:00').getTime()) / 86400000)}
+	{@const popNights = Math.round((new Date(popoverCheckOut + 'T12:00:00').getTime() - new Date(popoverCell.date + 'T12:00:00').getTime()) / 86400000)}
 	{@const multiNight = popNights > 1}
 	<div class="fixed z-30 rounded-xl border border-border bg-background shadow-xl w-72 max-h-[90vh] overflow-y-auto" style="top:50%;left:50%;transform:translate(-50%,-50%)" role="dialog" aria-label="Cell info">
 
@@ -580,13 +605,50 @@
 		<div class="px-4 pb-4 space-y-3">
 
 			<!-- ── New Booking CTA ─────────────────────────────────────────────── -->
-			<button
-				onclick={() => {
-					openBookingCard(popoverCell!.roomTypeId, rt?.name ?? '', popoverCell!.date, popoverCheckOut, popoverPropId, popoverPropName);
-					closePopover();
-				}}
-				class="w-full rounded-lg bg-green-600 text-white py-2 text-sm font-semibold hover:bg-green-700 transition-colors"
-			>+ New Booking{multiNight ? ` · ${popNights} nights` : ''}</button>
+		<button
+			onclick={() => {
+				openBookingCard(popoverCell!.roomTypeId, rt?.name ?? '', popoverCell!.date, popoverCheckOut, popoverPropId, popoverPropName);
+				closePopover();
+			}}
+			class="w-full rounded-lg bg-green-600 text-white py-2 text-sm font-semibold hover:bg-green-700 transition-colors"
+		>+ New Booking{multiNight ? ` · ${popNights} nights` : ''}</button>
+
+		<!-- ── Per-night Rate Breakdown (multi-night drag only) ─────────────── -->
+		{#if multiNight}
+			{@const rtAri = allAri[popoverCell.roomTypeId] ?? {}}
+			{@const totalCents = nightDates.reduce((s, d) => { const nc = rtAri[d]; return s + (nc?.overrideRateCents ?? nc?.baseRateCents ?? 0); }, 0)}
+			<div class="rounded-lg border border-border bg-muted/30 p-2.5 space-y-0.5">
+				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Rates · tap night to override</p>
+				{#each nightDates as d}
+					{@const nc = rtAri[d]}
+					{@const isEditing = d === overrideDate}
+					<button type="button" onclick={() => selectOverrideDate(d)}
+						class={['flex items-center justify-between w-full text-left rounded px-2 py-1 text-xs transition-colors',
+							isEditing ? 'bg-primary/10 ring-1 ring-inset ring-primary/30' : 'hover:bg-muted/60'].join(' ')}>
+						<span class={isEditing ? 'font-semibold' : 'text-muted-foreground'}>
+							{new Date(d + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
+						</span>
+						<span class="flex items-center gap-1.5">
+							{#if nc?.overrideRateCents != null}
+								<span class="text-amber-700 font-semibold">{fmt(nc.overrideRateCents)}</span>
+								<span class="text-muted-foreground/60 line-through text-[10px]">{fmt(nc.baseRateCents ?? null)}</span>
+							{:else if nc?.baseRateCents}
+								<span class={isEditing ? 'font-semibold' : ''}>{fmt(nc.baseRateCents)}</span>
+							{:else}
+								<span class="text-muted-foreground">—</span>
+							{/if}
+							{#if nc?.hasOverride}<span class="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="Has override"></span>{/if}
+						</span>
+					</button>
+				{/each}
+				{#if totalCents > 0}
+					<div class="flex justify-between text-xs pt-1.5 mt-0.5 border-t border-border font-medium">
+						<span class="text-muted-foreground">Est. total</span>
+						<span>{fmt(totalCents)}</span>
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 			<!-- ── Occupancy ───────────────────────────────────────────────────── -->
 			{#if cellOccupancyLoading}
@@ -630,22 +692,28 @@
 				<p class="text-xs text-muted-foreground text-center py-0.5">No guests on this date</p>
 			{/if}
 
-			<!-- ── Rate & Restriction Override ────────────────────────────────── -->
-			<div class="border-t border-border pt-3 space-y-3">
-				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Rate & Restrictions Override</p>
-				<div>
-					<label class="text-xs text-muted-foreground font-medium">Rate ($/night)</label>
-					<div class="flex items-center gap-2 mt-1">
-						<span class="text-sm text-muted-foreground">$</span>
-						<input type="number" min="0" step="1" bind:value={editRate} placeholder={cell?.baseRateCents ? String(cell.baseRateCents / 100) : 'Season rate'} class="flex-1 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-						{#if editRate}<button onclick={() => editRate = ''} class="text-xs text-muted-foreground hover:text-foreground">✕</button>{/if}
-					</div>
-					{#if cell?.baseRateCents}<p class="text-[10px] text-muted-foreground mt-0.5">Season: {fmt(cell.baseRateCents)}</p>{/if}
+		<!-- ── Rate & Restriction Override ────────────────────────────────── -->
+		<div class="border-t border-border pt-3 space-y-3">
+			<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+				{#if multiNight}
+					Override · {new Date(overrideDate + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
+				{:else}
+					Rate & Restrictions Override
+				{/if}
+			</p>
+			<div>
+				<label class="text-xs text-muted-foreground font-medium">Rate ($/night)</label>
+				<div class="flex items-center gap-2 mt-1">
+					<span class="text-sm text-muted-foreground">$</span>
+					<input type="number" min="0" step="1" bind:value={editRate} placeholder={overrideCell?.baseRateCents ? String(overrideCell.baseRateCents / 100) : 'Season rate'} class="flex-1 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+					{#if editRate}<button onclick={() => editRate = ''} class="text-xs text-muted-foreground hover:text-foreground">✕</button>{/if}
 				</div>
-				<div>
-					<label class="text-xs text-muted-foreground font-medium">Min nights</label>
-					<input type="number" min="1" max="30" bind:value={editMin} placeholder={String(cell?.baseMinNights ?? 1)} class="mt-1 w-24 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-				</div>
+				{#if overrideCell?.baseRateCents}<p class="text-[10px] text-muted-foreground mt-0.5">Season: {fmt(overrideCell.baseRateCents)}</p>{/if}
+			</div>
+			<div>
+				<label class="text-xs text-muted-foreground font-medium">Min nights</label>
+				<input type="number" min="1" max="30" bind:value={editMin} placeholder={String(overrideCell?.baseMinNights ?? 1)} class="mt-1 w-24 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+			</div>
 				<div class="space-y-2">
 					<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editStopSell} class="h-4 w-4 rounded border-input" /><span class="text-sm">Stop sell</span></label>
 					<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTA} class="h-4 w-4 rounded border-input" /><span class="text-sm">Closed to arrival (CTA)</span></label>
@@ -653,7 +721,7 @@
 				</div>
 				<div class="flex gap-2">
 					<button onclick={saveOverride} disabled={savingCell} class="flex-1 rounded-lg bg-primary text-primary-foreground py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">{savingCell ? 'Saving…' : 'Save override'}</button>
-					{#if cell?.hasOverride}<button onclick={clearOverride} disabled={savingCell} class="rounded-lg border border-border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50">Clear</button>{/if}
+					{#if overrideCell?.hasOverride}<button onclick={clearOverride} disabled={savingCell} class="rounded-lg border border-border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50">Clear</button>{/if}
 				</div>
 				<p class="text-[10px] text-muted-foreground text-center">Changes sync to Channex automatically</p>
 			</div>

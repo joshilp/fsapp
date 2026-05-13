@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { and, eq, lte, gte } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { properties, rateSeasons, rateTiers, rooms } from '$lib/server/db/schema';
+import { properties, rateOverrides, rateSeasons, rateTiers, rooms } from '$lib/server/db/schema';
 
 export type RateLine = {
 	seasonId: string;
@@ -78,6 +78,17 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		orderBy: (t, { asc }) => [asc(t.startDate)]
 	});
 
+	// Load any per-date rate overrides for this room type within the stay
+	const overrides = await db.query.rateOverrides.findMany({
+		where: and(
+			eq(rateOverrides.roomTypeId, room.roomTypeId),
+			gte(rateOverrides.date, checkIn),
+			lte(rateOverrides.date, addDays(checkOut, -1))
+		),
+		columns: { date: true, rateCents: true }
+	});
+	const overrideByDate = new Map(overrides.filter(o => o.rateCents != null).map(o => [o.date, o.rateCents!]));
+
 	// Walk each night of the stay and find the applicable season
 	const nightsTotal = daysBetween(checkIn, checkOut);
 	const perNight: Array<{ seasonId: string; seasonName: string; colour: string; rate: number; minNights: number }> = [];
@@ -90,22 +101,29 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			continue;
 		}
 		const tier = season.tiers?.[0];
+		const baseRate = tier?.nightlyRate ?? 0;
+		// ARI override wins over season rate — matches what is pushed to Channex/OTAs
+		const effectiveRate = overrideByDate.get(night) ?? baseRate;
 		perNight.push({
 			seasonId: season.id,
 			seasonName: season.name,
 			colour: season.colour,
-			rate: tier?.nightlyRate ?? 0,
+			rate: effectiveRate,
 			minNights: season.minNights
 		});
 	}
 
-	// Group consecutive nights with same rate into line items
+	// Group consecutive nights that share the same season AND effective rate into line items
 	const lines: RateLine[] = [];
 	let i = 0;
 	while (i < perNight.length) {
 		const cur = perNight[i];
 		let count = 1;
-		while (i + count < perNight.length && perNight[i + count].seasonId === cur.seasonId) {
+		while (
+			i + count < perNight.length &&
+			perNight[i + count].seasonId === cur.seasonId &&
+			perNight[i + count].rate === cur.rate
+		) {
 			count++;
 		}
 		lines.push({
