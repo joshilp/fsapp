@@ -1,5 +1,5 @@
 import { redirect } from '@sveltejs/kit';
-import { and, gte, lte, inArray, or, eq } from 'drizzle-orm';
+import { and, gte, lte, inArray, ne, isNull, eq } from 'drizzle-orm';
 import type { PageServerLoad, Actions } from './$types';
 import { db } from '$lib/server/db';
 import { bookings, rateOverrides, rateSeasons, rooms, roomTypes, properties, bookingChannels } from '$lib/server/db/schema';
@@ -79,14 +79,30 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 
 	const allRoomIds = allRooms.map((r) => r.id);
 
+	// Assigned bookings (roomId set) — exclude terminal statuses to match ari-sync.ts logic
 	const allActiveBookings = allRoomIds.length ? await db.query.bookings.findMany({
 		where: and(
 			inArray(bookings.roomId, allRoomIds),
-			or(eq(bookings.status, 'confirmed'), eq(bookings.status, 'checked_in')),
+			ne(bookings.status, 'cancelled'),
+			ne(bookings.status, 'blocked'),
+			ne(bookings.status, 'checked_out'),
 			lte(bookings.checkInDate, to),
 			gte(bookings.checkOutDate, from)
 		),
 		columns: { id: true, roomId: true, checkInDate: true, checkOutDate: true }
+	}) : [];
+
+	// Unassigned bookings (roomId null, requestedRoomTypeId set) also hold inventory
+	const allUnassignedBookings = allRoomTypeIds.length ? await db.query.bookings.findMany({
+		where: and(
+			isNull(bookings.roomId),
+			inArray(bookings.requestedRoomTypeId, allRoomTypeIds),
+			ne(bookings.status, 'cancelled'),
+			ne(bookings.status, 'blocked'),
+			lte(bookings.checkInDate, to),
+			gte(bookings.checkOutDate, from)
+		),
+		columns: { id: true, requestedRoomTypeId: true, checkInDate: true, checkOutDate: true }
 	}) : [];
 
 	const allSeasons = allRoomTypeIds.length ? await db.query.rateSeasons.findMany({
@@ -140,7 +156,11 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 					(b) => b.roomId !== null && rtRoomIds.includes(b.roomId) &&
 					       b.checkInDate <= date && b.checkOutDate > date
 				).length;
-				const available = Math.max(0, totalRooms - booked);
+				const unassigned = allUnassignedBookings.filter(
+					(b) => b.requestedRoomTypeId === rt.id &&
+					       b.checkInDate <= date && b.checkOutDate > date
+				).length;
+				const available = Math.max(0, totalRooms - booked - unassigned);
 
 				let baseRateCents: number | null = null;
 				let baseMinNights = 1;

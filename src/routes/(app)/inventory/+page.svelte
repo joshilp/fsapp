@@ -47,14 +47,91 @@
 		window.location.href = navUrl(d.toISOString().slice(0, 10));
 	}
 
-	// ─── Drag-to-book ──────────────────────────────────────────────────────────
+	// ─── Drag-to-book / mode ─────────────────────────────────────────────────
 	const dragSel = new DragSelect();
 	type InvDrawExtra = { roomTypeId: string; roomTypeName: string; propertyId: string; propertyName: string };
 	const drawSel = new DrawSelect<InvDrawExtra>();
-	let drawMode  = $state(false);
+	let mode      = $state<'book' | 'edit' | 'group'>('book');
 	let dragMoved = $state(false);
+	let legendOpen = $state(false);
 
-	function toggleDrawMode() { drawMode = !drawMode; if (!drawMode) drawSel.clear(); }
+	function setMode(m: 'book' | 'edit' | 'group') {
+		mode = m;
+		drawSel.clear();
+		editRange = null;
+	}
+
+	// ─── Bulk Edit Panel ─────────────────────────────────────────────────────
+	type EditRange = { roomTypeId: string; roomTypeName: string; propertyId: string; propertyName: string; minCol: number; maxCol: number };
+	let editRange     = $state<EditRange | null>(null);
+	let bulkDOW       = $state([true, true, true, true, true, true, true]);
+	let bulkRateMode  = $state<'none' | 'set' | 'increase_pct'>('none');
+	let bulkRateValue = $state('');
+	let bulkMinNights = $state('');
+	let bulkStopSell  = $state<'no_change' | 'enable' | 'disable'>('no_change');
+	let bulkCTA       = $state<'no_change' | 'enable' | 'disable'>('no_change');
+	let bulkCTD       = $state<'no_change' | 'enable' | 'disable'>('no_change');
+	let bulkApplyTo   = $state<'roomType' | 'property'>('roomType');
+	let bulkSaving    = $state(false);
+
+	const bulkCount = $derived.by(() => {
+		if (!editRange) return 0;
+		let c = 0;
+		for (let i = editRange.minCol; i <= editRange.maxCol; i++) {
+			const d = data.dates[i];
+			if (!d) continue;
+			if (bulkDOW[new Date(d + 'T12:00:00').getDay()]) c++;
+		}
+		return c;
+	});
+
+	function cellEditState(roomTypeId: string, colIdx: number): boolean {
+		if (mode !== 'edit' || !editRange) return false;
+		return editRange.roomTypeId === roomTypeId && colIdx >= editRange.minCol && colIdx <= editRange.maxCol;
+	}
+
+	async function applyBulkEdit() {
+		if (!editRange || bulkSaving) return;
+		bulkSaving = true;
+		try {
+			const dates: string[] = [];
+			for (let i = editRange.minCol; i <= editRange.maxCol; i++) {
+				const d = data.dates[i];
+				if (!d) continue;
+				if (bulkDOW[new Date(d + 'T12:00:00').getDay()]) dates.push(d);
+			}
+			if (!dates.length) { toast.error('No dates match the day filter.'); return; }
+
+			const r = await fetch('/api/ari/bulk-override', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					roomTypeId: bulkApplyTo === 'roomType' ? editRange.roomTypeId : undefined,
+					propertyId: bulkApplyTo === 'property' ? editRange.propertyId : undefined,
+					dates,
+					rateMode: bulkRateMode,
+					rateValue: bulkRateValue ? Number(bulkRateValue) : null,
+					minNights: bulkMinNights ? Number(bulkMinNights) : null,
+					stopSell: bulkStopSell === 'enable' ? true : bulkStopSell === 'disable' ? false : null,
+					closedToArrival: bulkCTA === 'enable' ? true : bulkCTA === 'disable' ? false : null,
+					closedToDeparture: bulkCTD === 'enable' ? true : bulkCTD === 'disable' ? false : null,
+				})
+			});
+			if (r.ok) {
+				const result = await r.json();
+				toast.success(`Updated ${result.updated} cell${result.updated === 1 ? '' : 's'}`);
+				editRange = null;
+				await invalidateAll();
+			} else {
+				const err = await r.json();
+				toast.error(err.error ?? 'Bulk update failed');
+			}
+		} catch {
+			toast.error('Bulk update failed');
+		} finally {
+			bulkSaving = false;
+		}
+	}
 
 	function getAri(propId: string) { return data.propData[propId]?.ariData ?? {}; }
 
@@ -78,7 +155,7 @@
 	}
 
 	function cellDrawState(roomTypeId: string, propId: string, colIdx: number): 'drawing' | 'drawing-conflict' | null {
-		if (!drawMode) return null;
+		if (mode !== 'group') return null;
 		const r = drawSel.activeRange;
 		if (!r || r.rowId !== roomTypeId || colIdx < r.minCol || colIdx > r.maxCol) return null;
 		return hasConflictInRange(roomTypeId, propId, r.minCol, r.maxCol) ? 'drawing-conflict' : 'drawing';
@@ -86,12 +163,12 @@
 
 	function onAvailMouseDown(e: MouseEvent, roomTypeId: string, colIdx: number) {
 		e.preventDefault(); dragMoved = false;
-		if (drawMode) drawSel.startGesture(roomTypeId, colIdx);
+		if (mode === 'group') drawSel.startGesture(roomTypeId, colIdx);
 		else dragSel.start(roomTypeId, colIdx);
 	}
 
 	function onAvailMouseEnter(roomTypeId: string, colIdx: number) {
-		if (drawMode) {
+		if (mode === 'group') {
 			const r = drawSel.activeRange;
 			if (r?.rowId === roomTypeId && colIdx !== r.minCol) { dragMoved = true; drawSel.moveGesture(roomTypeId, colIdx); }
 		} else {
@@ -107,7 +184,7 @@
 	}
 
 	function onDocumentMouseUp() {
-		if (drawMode) {
+		if (mode === 'group') {
 			const r = drawSel.endGesture();
 			if (!r) return;
 			const prop = findRtProp(r.rowId);
@@ -121,6 +198,22 @@
 			if (rt) drawSel.commit(r.rowId, r.minCol, r.maxCol, { roomTypeId: rt.id, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name });
 			return;
 		}
+		if (mode === 'edit') {
+			if (!dragSel.active) return;
+			const r = dragSel.range;
+			const prop = r ? findRtProp(r.rowId) : null;
+			dragSel.cancel();
+			if (!r || !prop) return;
+			const rt = data.propData[prop.id]?.roomTypesList.find((x) => x.id === r.rowId);
+			if (rt) {
+				editRange = { roomTypeId: r.rowId, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name, minCol: r.minCol, maxCol: r.maxCol };
+				bulkRateMode = 'none'; bulkRateValue = ''; bulkMinNights = '';
+				bulkStopSell = 'no_change'; bulkCTA = 'no_change'; bulkCTD = 'no_change';
+				bulkDOW = [true, true, true, true, true, true, true];
+			}
+			return;
+		}
+		// ── book mode ───────────────────────────────────────────────────────────
 		if (!dragSel.active) return;
 		const wasMoved = dragMoved;
 		const r = dragSel.range;
@@ -186,6 +279,7 @@
 	let popoverCheckOut  = $state('');   // pre-filled checkout for "New Booking" CTA
 	let popoverPropId    = $state('');
 	let popoverPropName  = $state('');
+	let popoverSource    = $state<'avail' | 'rate'>('avail'); // controls whether booking CTA is shown
 	let editRate     = $state('');
 	let editMin      = $state('');
 	let editStopSell = $state(false);
@@ -243,7 +337,7 @@
 		cardOpen = true;
 	}
 
-	function openPopover(roomTypeId: string, checkIn: string, checkOut?: string) {
+	function openPopover(roomTypeId: string, checkIn: string, checkOut?: string, source: 'avail' | 'rate' = 'avail') {
 		if (!roomTypeId || !checkIn) return;
 		const prop = findRtProp(roomTypeId);
 		if (!prop) return;
@@ -253,6 +347,7 @@
 		popoverCheckOut = checkOut ?? addDaysLocal(checkIn, 1);
 		popoverPropId   = prop.id;
 		popoverPropName = prop.name;
+		popoverSource   = source;
 		overrideDate = checkIn;
 		editRate     = cell?.overrideRateCents != null ? String(cell.overrideRateCents / 100) : '';
 		editMin      = cell?.minNights != null && cell.minNights !== cell.baseMinNights ? String(cell.minNights) : '';
@@ -351,13 +446,17 @@
 
 			<!-- Property selector (single mode only) -->
 			{#if layoutMode === 'single'}
-				<div class="flex gap-1">
-					{#each data.propertiesList as prop}
-						<a href={navUrl(data.from, prop.id)}
-							class={['rounded-full border px-3 py-1 text-xs font-medium transition-colors', activeProp === prop.id ? 'bg-foreground text-background border-foreground' : 'border-border text-muted-foreground hover:border-foreground/40'].join(' ')}
-						>{prop.name}</a>
-					{/each}
-				</div>
+				{#if data.propertiesList.length > 1}
+					<select
+						class="rounded border border-input bg-background px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-ring"
+						onchange={(e) => { window.location.href = navUrl(data.from, (e.target as HTMLSelectElement).value); }}>
+						{#each data.propertiesList as prop}
+							<option value={prop.id} selected={activeProp === prop.id}>{prop.name}</option>
+						{/each}
+					</select>
+				{:else}
+					<span class="text-xs font-semibold">{data.propertiesList[0]?.name ?? ''}</span>
+				{/if}
 			{/if}
 
 			<!-- Layout toggle -->
@@ -375,10 +474,12 @@
 				<button onclick={nextWindow} class="px-2 py-1 hover:bg-muted rounded">{data.window}d →</button>
 			</div>
 
-			<!-- Draw mode -->
-			<button onclick={toggleDrawMode}
-				class={['rounded border px-2.5 py-1 text-xs font-medium transition-colors', drawMode ? 'bg-orange-500 text-white border-orange-500' : 'bg-background text-muted-foreground border-input hover:border-orange-400'].join(' ')}
-			>✎ Draw</button>
+			<!-- Mode segmented control -->
+			<div class="flex rounded-md border border-input overflow-hidden text-xs font-medium">
+				<button onclick={() => setMode('book')} class={['px-2.5 py-1 border-r border-input transition-colors', mode === 'book' ? 'bg-foreground text-background' : 'bg-background text-muted-foreground hover:bg-muted'].join(' ')}>Book</button>
+				<button onclick={() => setMode('edit')} class={['px-2.5 py-1 border-r border-input transition-colors', mode === 'edit' ? 'bg-blue-600 text-white' : 'bg-background text-muted-foreground hover:bg-muted'].join(' ')}>✎ Rates</button>
+				<button onclick={() => setMode('group')} class={['px-2.5 py-1 transition-colors', mode === 'group' ? 'bg-orange-500 text-white' : 'bg-background text-muted-foreground hover:bg-muted'].join(' ')}>Group</button>
+			</div>
 
 			<!-- Sync Channex -->
 			<form method="POST" action="?/syncChannex&prop={activeProp}"
@@ -398,11 +499,8 @@
 				</button>
 			</form>
 
-			<div class="flex items-center gap-3 text-xs text-muted-foreground ml-auto">
-				<span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-teal-100 border border-teal-400"></span> Click/drag→book</span>
-				<span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-blue-100 border border-blue-300"></span> Override</span>
-				<span class="flex items-center gap-1 text-red-600 font-bold">STOP</span>
-			</div>
+			<button onclick={() => legendOpen = !legendOpen}
+				class={['ml-auto rounded border px-2 py-1 text-xs font-medium transition-colors', legendOpen ? 'bg-foreground text-background border-foreground' : 'border-input text-muted-foreground hover:bg-muted'].join(' ')}>Legend</button>
 		</div>
 	</div>
 
@@ -461,7 +559,7 @@
 						<tr class="border-b border-border/20">
 							<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
 								Available
-								<div class="text-[8px] normal-case font-normal opacity-60 mt-0.5">drag to book</div>
+								<div class="text-[8px] normal-case font-normal opacity-60 mt-0.5">{mode === 'edit' ? 'drag to edit' : 'drag to book'}</div>
 							</td>
 							{#each data.dates as iso, i}
 								{@const cell = propAri[rt.id]?.[iso]}
@@ -469,12 +567,14 @@
 								{@const wState = cellDrawState(rt.id, prop.id, i)}
 								{@const sel = drawSel.selections.find(s => s.rowId === rt.id)}
 								{@const inSel = sel && i >= sel.minCol && i <= sel.maxCol}
-							<td style="width:{COL_W}px"
-								class={['border-r border-border/20 px-0.5 py-1.5 text-center cursor-crosshair transition-colors',
-									dState === 'selected' ? 'bg-teal-100' : dState === 'conflict' ? 'bg-red-100' :
-									wState === 'drawing' ? 'bg-orange-100' : wState === 'drawing-conflict' ? 'bg-red-100' :
-									inSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-400' : (cell ? cellBg(iso, cell) : '')
-								].join(' ')}
+						<td style="width:{COL_W}px"
+							class={['border-r border-border/20 px-0.5 py-1.5 text-center transition-colors',
+								mode === 'edit' ? 'cursor-pointer' : 'cursor-crosshair',
+								dState === 'selected' ? (mode === 'edit' ? 'bg-blue-100' : 'bg-teal-100') : dState === 'conflict' ? 'bg-red-100' :
+								cellEditState(rt.id, i) ? 'bg-blue-100/60 ring-1 ring-inset ring-blue-300' :
+								wState === 'drawing' ? 'bg-orange-100' : wState === 'drawing-conflict' ? 'bg-red-100' :
+								inSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-400' : (cell ? cellBg(iso, cell) : '')
+							].join(' ')}
 								onmousedown={(e) => onAvailMouseDown(e, rt.id, i)}
 								onmouseenter={() => onAvailMouseEnter(rt.id, i)}
 								ontouchstart={(e) => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }}
@@ -506,7 +606,7 @@
 							<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">Rate / night</td>
 							{#each data.dates as iso}
 								{@const cell = propAri[rt.id]?.[iso]}
-								<td style="width:{COL_W}px" class={['border-r border-border/20 px-0.5 py-1.5 text-center cursor-pointer transition-colors hover:bg-muted/40', cell ? cellBg(iso, cell) : ''].join(' ')} onclick={() => openPopover(rt.id, iso)}>
+								<td style="width:{COL_W}px" class={['border-r border-border/20 px-0.5 py-1.5 text-center cursor-pointer transition-colors hover:bg-muted/40', cell ? cellBg(iso, cell) : ''].join(' ')} onclick={() => openPopover(rt.id, iso, undefined, 'rate')}>
 									{#if cell}
 										<span class={['font-mono text-[11px]', cell.overrideRateCents != null ? 'text-blue-700 font-bold' : ''].join(' ')} style={cell.seasonColour && !cell.overrideRateCents ? `color:${cell.seasonColour}; filter:brightness(0.6)` : ''}>
 											{fmt(cell.effectiveRateCents)}
@@ -524,7 +624,7 @@
 							<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">Min / Flags</td>
 							{#each data.dates as iso}
 								{@const cell = propAri[rt.id]?.[iso]}
-								<td style="width:{COL_W}px" class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40', cell ? cellBg(iso, cell) : ''].join(' ')} onclick={() => openPopover(rt.id, iso)}>
+								<td style="width:{COL_W}px" class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40', cell ? cellBg(iso, cell) : ''].join(' ')} onclick={() => openPopover(rt.id, iso, undefined, 'rate')}>
 									{#if cell}
 										<div class="flex flex-col items-center gap-0.5">
 											<span class={['text-[9px] leading-none', cell.minNights > 1 ? 'font-medium text-amber-700' : 'text-muted-foreground/50'].join(' ')}>{cell.minNights}n</span>
@@ -604,16 +704,24 @@
 			<button onclick={closePopover} class="text-muted-foreground hover:text-foreground text-lg leading-none px-1 shrink-0">×</button>
 		</div>
 
-		<!-- ── New Booking CTA (full width) ───────────────────────────────────── -->
+	<!-- ── New Booking CTA (full width) ───────────────────────────────────── -->
+	{#if popoverSource === 'avail' && mode === 'book'}
 		<div class="px-4 pt-3 pb-2">
-			<button
-				onclick={() => {
-					openBookingCard(popoverCell!.roomTypeId, rt?.name ?? '', popoverCell!.date, popoverCheckOut, popoverPropId, popoverPropName);
-					closePopover();
-				}}
-				class="w-full rounded-lg bg-green-600 text-white py-2 text-sm font-semibold hover:bg-green-700 transition-colors"
-			>+ New Booking{multiNight ? ` · ${popNights} nights` : ''}</button>
+			{#if (cell?.available ?? 0) > 0 && !cell?.stopSell}
+				<button
+					onclick={() => {
+						openBookingCard(popoverCell!.roomTypeId, rt?.name ?? '', popoverCell!.date, popoverCheckOut, popoverPropId, popoverPropName);
+						closePopover();
+					}}
+					class="w-full rounded-lg bg-green-600 text-white py-2 text-sm font-semibold hover:bg-green-700 transition-colors"
+				>+ New Booking{multiNight ? ` · ${popNights} nights` : ''}</button>
+			{:else}
+				<p class="rounded-lg bg-muted px-3 py-2 text-center text-sm text-muted-foreground">
+					{cell?.stopSell ? 'Stop sell active — edit restrictions below to re-open.' : 'No availability — edit restrictions or increase inventory.'}
+				</p>
+			{/if}
 		</div>
+	{/if}
 
 		<!-- ── Two-column body: Rates (left) + Occupancy (right) ──────────────── -->
 		<div class="grid grid-cols-2 gap-0 px-4 pb-3 divide-x divide-border">
@@ -749,6 +857,190 @@
 				{#if overrideCell?.hasOverride}<button onclick={clearOverride} disabled={savingCell} class="rounded-lg border border-border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50">Clear</button>{/if}
 			</div>
 			<p class="text-[10px] text-muted-foreground text-center">Changes sync to Channex automatically</p>
+		</div>
+	</div>
+{/if}
+
+<!-- ── Bulk Edit Side Panel ──────────────────────────────────────────────── -->
+{#if mode === 'edit' && editRange}
+	<div class="fixed right-0 top-14 bottom-0 w-80 z-30 border-l border-border bg-background shadow-xl overflow-hidden flex flex-col">
+		<!-- Header -->
+		<div class="flex items-center gap-2 px-4 py-3 border-b border-border bg-blue-600 text-white">
+			<div class="flex-1 min-w-0">
+				<p class="font-semibold text-sm">Bulk Rate Edit</p>
+				<p class="text-xs opacity-80 truncate">{editRange.roomTypeName}</p>
+			</div>
+			<button onclick={() => editRange = null} class="opacity-70 hover:opacity-100 text-xl leading-none">×</button>
+		</div>
+
+		<!-- Date range summary -->
+		<div class="px-4 py-2.5 bg-blue-50 border-b border-border text-sm">
+			<span class="text-muted-foreground text-xs">Range:</span>
+			<span class="font-medium ml-1">{data.dates[editRange.minCol]}</span>
+			{#if editRange.minCol !== editRange.maxCol}
+				<span class="text-muted-foreground"> → </span>
+				<span class="font-medium">{data.dates[editRange.maxCol]}</span>
+			{/if}
+			<span class="text-xs text-muted-foreground ml-1">({editRange.maxCol - editRange.minCol + 1}d)</span>
+		</div>
+
+		<!-- Form body -->
+		<div class="flex-1 overflow-y-auto px-4 py-4 space-y-5">
+			<!-- Apply to -->
+			<div>
+				<p class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Apply to</p>
+				<div class="flex gap-4 text-sm">
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input type="radio" bind:group={bulkApplyTo} value="roomType" class="h-3.5 w-3.5" />
+						<span>This room type</span>
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input type="radio" bind:group={bulkApplyTo} value="property" class="h-3.5 w-3.5" />
+						<span>All room types</span>
+					</label>
+				</div>
+			</div>
+
+			<!-- Day of week filter -->
+			<div>
+				<p class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Days of week</p>
+				<div class="flex gap-1">
+					{#each ['Su','Mo','Tu','We','Th','Fr','Sa'] as dow, i}
+						<button onclick={() => bulkDOW[i] = !bulkDOW[i]}
+							class={['flex-1 rounded py-1.5 text-[11px] font-medium border transition-colors',
+								bulkDOW[i] ? 'bg-blue-600 text-white border-blue-600' : 'bg-background text-muted-foreground border-input hover:bg-muted'
+							].join(' ')}
+						>{dow}</button>
+					{/each}
+				</div>
+			</div>
+
+			<!-- Rate -->
+			<div>
+				<p class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Rate</p>
+				<div class="space-y-2 text-sm">
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input type="radio" bind:group={bulkRateMode} value="none" class="h-3.5 w-3.5" />
+						<span>No change</span>
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input type="radio" bind:group={bulkRateMode} value="set" class="h-3.5 w-3.5" />
+						<span>Set to</span>
+						{#if bulkRateMode === 'set'}
+							<div class="flex items-center gap-1">
+								<span class="text-muted-foreground">$</span>
+								<input type="number" min="0" step="1" bind:value={bulkRateValue} placeholder="0"
+									class="w-20 rounded border border-input px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+							</div>
+						{/if}
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input type="radio" bind:group={bulkRateMode} value="increase_pct" class="h-3.5 w-3.5" />
+						<span>Adjust by</span>
+						{#if bulkRateMode === 'increase_pct'}
+							<div class="flex items-center gap-1">
+								<input type="number" min="-99" max="500" step="1" bind:value={bulkRateValue} placeholder="0"
+									class="w-16 rounded border border-input px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+								<span class="text-muted-foreground text-xs">%</span>
+							</div>
+						{/if}
+					</label>
+				</div>
+			</div>
+
+			<!-- Min nights -->
+			<div>
+				<p class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Min nights</p>
+				<input type="number" min="1" max="30" bind:value={bulkMinNights} placeholder="No change"
+					class="w-full rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+			</div>
+
+			<!-- Restrictions -->
+			<div>
+				<p class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Restrictions</p>
+				<div class="space-y-2">
+					<div class="flex items-center justify-between text-sm">
+						<span>Stop Sell</span>
+						<select bind:value={bulkStopSell} class="rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring">
+							<option value="no_change">No change</option>
+							<option value="enable">Enable</option>
+							<option value="disable">Disable</option>
+						</select>
+					</div>
+					<div class="flex items-center justify-between text-sm">
+						<span>CTA <span class="text-muted-foreground text-xs">(no arrivals)</span></span>
+						<select bind:value={bulkCTA} class="rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring">
+							<option value="no_change">No change</option>
+							<option value="enable">Enable</option>
+							<option value="disable">Disable</option>
+						</select>
+					</div>
+					<div class="flex items-center justify-between text-sm">
+						<span>CTD <span class="text-muted-foreground text-xs">(no departures)</span></span>
+						<select bind:value={bulkCTD} class="rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring">
+							<option value="no_change">No change</option>
+							<option value="enable">Enable</option>
+							<option value="disable">Disable</option>
+						</select>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Footer -->
+		<div class="border-t border-border px-4 py-3 space-y-2.5">
+			<p class="text-xs text-muted-foreground">{bulkCount} cell{bulkCount === 1 ? '' : 's'} will be updated</p>
+			<div class="flex gap-2">
+				<button onclick={() => editRange = null}
+					class="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
+				<button onclick={applyBulkEdit} disabled={bulkSaving || bulkCount === 0}
+					class="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">{bulkSaving ? 'Applying…' : 'Apply'}</button>
+			</div>
+			<p class="text-[10px] text-muted-foreground text-center">Syncs to Channex automatically</p>
+		</div>
+	</div>
+{/if}
+
+<!-- ── Legend floating panel ──────────────────────────────────────────────── -->
+{#if legendOpen}
+	<div class="fixed bottom-4 right-4 z-40 rounded-lg border border-border bg-background shadow-xl p-4 w-64 text-xs">
+		<div class="flex items-center justify-between mb-3">
+			<p class="font-semibold text-sm">Legend</p>
+			<button onclick={() => legendOpen = false} class="text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
+		</div>
+		<div class="space-y-3">
+			<div>
+				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Availability count</p>
+				<div class="space-y-1">
+					<div class="flex items-center gap-2"><span class="text-emerald-700 font-semibold w-8 text-center">2+</span><span>Available</span></div>
+					<div class="flex items-center gap-2"><span class="text-amber-600 font-semibold w-8 text-center">1</span><span>Last room</span></div>
+					<div class="flex items-center gap-2"><span class="text-red-500 font-semibold w-8 text-center">0</span><span>Sold out</span></div>
+					<div class="flex items-center gap-2"><span class="text-red-700 font-bold w-8 text-center text-[10px]">STOP</span><span>Stop sell — closed online</span></div>
+				</div>
+			</div>
+			<div>
+				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Cell background</p>
+				<div class="space-y-1">
+					<div class="flex items-center gap-2"><span class="inline-block w-5 h-3.5 rounded-sm bg-red-50 border border-red-200"></span><span>Stop sell / sold out</span></div>
+					<div class="flex items-center gap-2"><span class="inline-block w-5 h-3.5 rounded-sm bg-blue-50 border border-blue-200"></span><span>Rate override active</span></div>
+					<div class="flex items-center gap-2"><span class="inline-block w-5 h-3.5 rounded-sm bg-amber-50 border border-amber-200"></span><span>Today</span></div>
+				</div>
+			</div>
+			<div>
+				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Restriction flags</p>
+				<div class="space-y-1">
+					<div class="flex items-center gap-2"><span class="text-red-600 font-bold w-8">CTA</span><span>Closed to Arrival</span></div>
+					<div class="flex items-center gap-2"><span class="text-orange-600 font-bold w-8">CTD</span><span>Closed to Departure</span></div>
+				</div>
+			</div>
+			<div>
+				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Modes</p>
+				<div class="space-y-1">
+					<div class="flex items-center gap-2"><span class="font-medium bg-foreground text-background rounded px-1 py-0.5 text-[10px]">Book</span><span>Click/drag to book rooms</span></div>
+					<div class="flex items-center gap-2"><span class="font-medium bg-blue-600 text-white rounded px-1 py-0.5 text-[10px]">✎ Rates</span><span>Click/drag to bulk edit rates</span></div>
+					<div class="flex items-center gap-2"><span class="font-medium bg-orange-500 text-white rounded px-1 py-0.5 text-[10px]">Group</span><span>Drag across room types for group</span></div>
+				</div>
+			</div>
 		</div>
 	</div>
 {/if}

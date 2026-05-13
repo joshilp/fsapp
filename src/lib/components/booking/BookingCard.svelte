@@ -743,6 +743,8 @@
 				<input type="hidden" name="intent"               bind:value={intent} />
 				<input type="hidden" name="propertyId"           value={propId} />
 				<input type="hidden" name="roomId"               value={roomId_} />
+				<input type="hidden" name="checkIn"              value={checkIn} />
+				<input type="hidden" name="checkOut"             value={checkOut} />
 				<input type="hidden" name="requestedRoomTypeId"  value={requestedRoomTypeId_} />
 				<input type="hidden" name="channelId"            value={channelId} />
 				<input type="hidden" name="bookingType" value={bookingType} />
@@ -863,17 +865,17 @@
 						<div class="grid grid-cols-2 gap-3">
 							<div>
 								<label class="mb-1 block text-xs text-muted-foreground" for="bc-ci">Check-in</label>
-								<input id="bc-ci" name="checkIn" type="date" bind:value={checkIn}
-									oninput={() => {
-										if (checkOut <= checkIn) checkOut = nextDay(checkIn);
-										if (requestedRoomTypeId_) loadAvailableRooms();
-									}}
+						<input id="bc-ci" type="date" bind:value={checkIn}
+								oninput={() => {
+									if (checkOut <= checkIn) checkOut = nextDay(checkIn);
+									if (requestedRoomTypeId_) loadAvailableRooms();
+								}}
 									class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" required />
 							</div>
 							<div>
 								<label class="mb-1 block text-xs text-muted-foreground" for="bc-co">Check-out</label>
-								<input id="bc-co" name="checkOut" type="date" bind:value={checkOut}
-									oninput={() => { if (requestedRoomTypeId_) loadAvailableRooms(); }}
+						<input id="bc-co" type="date" bind:value={checkOut}
+								oninput={() => { if (requestedRoomTypeId_) loadAvailableRooms(); }}
 									class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" required />
 							</div>
 						</div>
