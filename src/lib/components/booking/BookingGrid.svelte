@@ -5,6 +5,7 @@
 	import BookingCard from './BookingCard.svelte';
 	import BookingDetailDialog from './BookingDetailDialog.svelte';
 	import SlipFormDialog from './SlipFormDialog.svelte';
+	import { toast } from 'svelte-sonner';
 
 	type Channel = { id: string; name: string };
 	type User    = { id: string; name: string };
@@ -32,6 +33,10 @@
 		onGroupBook?: (rooms: GroupRoom[]) => void;
 		/** Deep-link: auto-open a specific booking card on mount */
 		initialOpenId?: string;
+		/** When set, clicking a free cell assigns this booking to that room instead of creating a new one */
+		pendingAssignBookingId?: string;
+		/** Called after a successful room assignment so parent can refresh + clear assign mode */
+		onRoomAssigned?: () => void;
 	};
 
 	let {
@@ -42,6 +47,8 @@
 		onDrawSelectionsChange,
 		onGroupBook,
 		initialOpenId,
+		pendingAssignBookingId,
+		onRoomAssigned,
 	}: Props = $props();
 
 	const { startDate, numDays, rooms: allRooms, propertyName, propertyId } = $derived(grid);
@@ -310,6 +317,40 @@
 
 	let conflictMessage = $state('');
 
+	// ─── Assign-mode: directly assign an existing unassigned booking to a room ──
+
+	let assignBusy = $state(false);
+
+	async function assignRoom(roomId: string) {
+		if (!pendingAssignBookingId || assignBusy) return;
+		const bookingIdToOpen = pendingAssignBookingId; // capture before parent clears it
+		const room = allRooms.find((r) => r.id === roomId);
+		if (!room) return;
+		assignBusy = true;
+		try {
+			const res = await fetch(`/api/booking/${bookingIdToOpen}/assign-room`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ roomId })
+			});
+			if (res.ok) {
+				toast.success(`Room ${room.roomNumber} assigned`);
+				// Notify parent (refreshes grid data + clears assign mode)
+				onRoomAssigned?.();
+				// Open the booking card so the operator can review guest details,
+				// add charges, or make any other changes before check-in
+				openExistingCard(bookingIdToOpen);
+			} else {
+				const err = await res.json().catch(() => ({}));
+				toast.error(err.error ?? 'Failed to assign room');
+			}
+		} catch {
+			toast.error('Network error assigning room');
+		} finally {
+			assignBusy = false;
+		}
+	}
+
 	// ─── Booking Card (unified — replaces SlipFormDialog + BookingDetailDialog) ─
 
 	let cardOpen        = $state(false);
@@ -317,6 +358,11 @@
 	let cardBookingId   = $state<string | null>(null);
 
 	function openNewCard(roomId: string, checkIn: string, checkOut: string) {
+		// In assign mode, click on a free cell assigns the pending booking instead
+		if (pendingAssignBookingId) {
+			assignRoom(roomId);
+			return;
+		}
 		const room = allRooms.find((r) => r.id === roomId);
 		if (!room) return;
 		cardNewBooking = {
@@ -714,23 +760,29 @@
 					</div>
 				</td>
 
-				<!-- Day cells: merge ghost/draw overlays into free spans -->
-				{#each getDisplaySpans(room) as span (span.day)}
-					{#if span.type === 'free'}
-						{@const dragState = cellInDrag(room.id, span.day)}
-						{@const drawState = cellInDraw(room.id, span.day)}
-						{@const rate = dayRate(room.roomTypeId, span.day)}
-						<td
-							class={[
-								'border-border relative cursor-pointer border-b border-r p-0 transition-[filter]',
-								todayDay === span.day && !dragState ? 'ring-1 ring-inset ring-primary/30' : '',
-								!dragState && !drawState ? 'hover:brightness-90' : ''
-							].join(' ')}
-							style="min-width:48px; width:48px; height:50px; background:{freeCellBg(room.roomTypeId, span.day, dragState, drawState)}"
-						onmousedown={(e) => { e.preventDefault(); if (drawMode) drawSel.startGesture(room.id, span.day); else dragSel.start(room.id, span.day); }}
-						onmouseenter={() => { if (drawMode) drawSel.moveGesture(room.id, span.day); else dragSel.move(room.id, span.day); }}
-							ontouchend={(e) => { e.preventDefault(); onCellTap(room.id, span.day); }}
-						>
+			<!-- Day cells: merge ghost/draw overlays into free spans -->
+			{#each getDisplaySpans(room) as span (span.day)}
+				{#if span.type === 'free'}
+					{@const dragState = cellInDrag(room.id, span.day)}
+					{@const drawState = cellInDraw(room.id, span.day)}
+					{@const rate = dayRate(room.roomTypeId, span.day)}
+					<td
+						class={[
+							'border-border relative border-b border-r p-0 transition-[filter]',
+							pendingAssignBookingId ? 'cursor-crosshair' : 'cursor-pointer',
+							pendingAssignBookingId ? 'hover:bg-teal-100/80' : '',
+							todayDay === span.day && !dragState ? 'ring-1 ring-inset ring-primary/30' : '',
+							!dragState && !drawState && !pendingAssignBookingId ? 'hover:brightness-90' : ''
+						].join(' ')}
+						style="min-width:48px; width:48px; height:50px; background:{pendingAssignBookingId ? undefined : freeCellBg(room.roomTypeId, span.day, dragState, drawState)}"
+					onmousedown={(e) => { e.preventDefault(); if (pendingAssignBookingId) { assignRoom(room.id); } else if (drawMode) drawSel.startGesture(room.id, span.day); else dragSel.start(room.id, span.day); }}
+					onmouseenter={() => { if (!pendingAssignBookingId) { if (drawMode) drawSel.moveGesture(room.id, span.day); else dragSel.move(room.id, span.day); } }}
+						ontouchend={(e) => { e.preventDefault(); onCellTap(room.id, span.day); }}
+						title={pendingAssignBookingId ? `Assign to room ${room.roomNumber}` : undefined}
+					>
+						{#if pendingAssignBookingId}
+							<span class="pointer-events-none absolute inset-0 flex items-center justify-center text-[9px] font-semibold text-teal-600 opacity-60">+</span>
+						{:else}
 							<span class="pointer-events-none absolute top-0.5 right-0.5 h-[5px] w-[5px] rounded-full opacity-70"
 								style="background:{HK_COLORS[hkStatus]}"></span>
 							{#if rate !== null}
@@ -738,24 +790,30 @@
 									${Math.round(rate / 100)}
 								</span>
 							{/if}
-						</td>
+						{/if}
+					</td>
 
-					{:else if span.type === 'ghost'}
-						<!-- Ghost bar: available room for filter date range -->
-						<td
-							colspan={span.length}
-							class="border-border relative cursor-pointer border-b border-r p-0"
-							style="min-width:{span.length * 48}px; height:50px"
-							onclick={() => onGhostClick(room.id)}
-							title={drawMode ? 'Click to add to draw selection' : 'Click to book this room'}
-						>
-							<div class="flex h-full items-center justify-center gap-1 rounded border-2 border-dashed border-teal-400 bg-teal-50/80 px-2 text-teal-700 hover:bg-teal-100 transition-colors mx-px">
-								<span class="text-xs font-medium">✓ Available</span>
-								{#if span.length > 2}
-									<span class="text-[10px] opacity-70">{span.length}n</span>
-								{/if}
-							</div>
-						</td>
+				{:else if span.type === 'ghost'}
+					<!-- Ghost bar: available room for filter date range -->
+					<td
+						colspan={span.length}
+						class="border-border relative cursor-pointer border-b border-r p-0"
+						style="min-width:{span.length * 48}px; height:50px"
+						onclick={() => onGhostClick(room.id)}
+						title={pendingAssignBookingId ? `Assign to room ${room.roomNumber}` : drawMode ? 'Click to add to draw selection' : 'Click to book this room'}
+					>
+						<div class={[
+							'flex h-full items-center justify-center gap-1 rounded border-2 border-dashed px-2 transition-colors mx-px',
+							pendingAssignBookingId
+								? 'border-teal-500 bg-teal-100/80 text-teal-800 hover:bg-teal-200'
+								: 'border-teal-400 bg-teal-50/80 text-teal-700 hover:bg-teal-100'
+						].join(' ')}>
+							<span class="text-xs font-medium">{pendingAssignBookingId ? '→ Assign here' : '✓ Available'}</span>
+							{#if span.length > 2 && !pendingAssignBookingId}
+								<span class="text-[10px] opacity-70">{span.length}n</span>
+							{/if}
+						</div>
+					</td>
 
 				{:else if span.type === 'draw'}
 					<!-- Draw selection bar (finalised) -->

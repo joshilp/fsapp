@@ -28,19 +28,18 @@ import { validateWebhookEnvelope } from '../schemas/channex.schema';
 
 test.describe('Channex webhook parsing', () => {
 
-	// Helper: build a minimal valid trigger payload using TEST_* env vars
+	// Helper: check we have enough config to fire a trigger (Channex IDs OR internal IDs)
+	function hasRequiredIds() {
+		return !!(process.env.TEST_CHANNEX_PROPERTY_ID || process.env.TEST_PROPERTY_ID);
+	}
+
+	// Helper: build a minimal valid trigger payload using whatever IDs are available
 	function getTriggerPayload(overrides = {}) {
-		return createWebhookTrigger({
-			channexPropertyId: process.env.TEST_CHANNEX_PROPERTY_ID ?? '',
-			channexRoomTypeId: process.env.TEST_CHANNEX_ROOM_TYPE_ID ?? '',
-			channexRatePlanId: process.env.TEST_CHANNEX_RATE_PLAN_ID ?? '',
-			...overrides,
-		});
+		return createWebhookTrigger(overrides);
 	}
 
 	test('booking_new webhook is accepted and returns { received: true }', async ({ apiContext }) => {
-		const propId = process.env.TEST_CHANNEX_PROPERTY_ID;
-		if (!propId) { test.skip(true, 'Channex IDs not configured'); return; }
+		if (!hasRequiredIds()) { test.skip(true, 'Set TEST_PROPERTY_ID in .env to run'); return; }
 
 		const res = await apiContext.post('/api/dev/channex-trigger', {
 			data: getTriggerPayload({ checkIn: isoDate(30), checkOut: isoDate(33) })
@@ -52,8 +51,7 @@ test.describe('Channex webhook parsing', () => {
 	});
 
 	test('the mock trigger produces a payload that matches the Channex webhook schema', async ({ apiContext }) => {
-		const propId = process.env.TEST_CHANNEX_PROPERTY_ID;
-		if (!propId) { test.skip(true, 'Channex IDs not configured'); return; }
+		if (!hasRequiredIds()) { test.skip(true, 'Set TEST_PROPERTY_ID in .env to run'); return; }
 
 		// Fire a trigger and inspect what we actually sent to our own webhook handler
 		const res  = await apiContext.post('/api/dev/channex-trigger', { data: getTriggerPayload() });

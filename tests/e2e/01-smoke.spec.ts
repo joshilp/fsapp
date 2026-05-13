@@ -12,7 +12,7 @@ import { test, expect } from '../fixtures';
 test.describe('smoke', () => {
 	test('booking grid loads and shows navigation', async ({ page }) => {
 		await page.goto('/booking');
-		// The page title is set per-page; confirm it's not empty and the page loaded
+		await page.waitForLoadState('networkidle');
 		await expect(page).toHaveTitle(/Booking Grid/i);
 		await expect(page.getByRole('navigation')).toBeVisible();
 	});

@@ -31,7 +31,8 @@ export interface ChannexARIEntry {
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const UUID_LIKE = /^[0-9a-f-]{32,}$/i;
+// Accept real UUIDs or DEV:-prefixed test IDs (e.g. "DEV:prop-test-123")
+const UUID_LIKE = /^(?:DEV:[^\s]+|[0-9a-f-]{32,})$/i;
 
 export function validateARIEntry(entry: unknown): string[] {
 	const errors: string[] = [];

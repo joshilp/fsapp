@@ -39,17 +39,23 @@ The global setup runs before every `pnpm test` call and upserts that user
 as an approved admin, so the password in `.env` is always what Playwright
 uses to log in, regardless of what's in the database.
 
-### 2. Configure Channex test IDs (for Channex tests)
+### 2. Configure test IDs for Channex / OTA tests
 
-To run Channex webhook and ARI tests, set the Channex UUIDs for one of your
-properties and room types. Find these in Settings → Channels after you've
-configured Channex IDs for a property.
+Most new tests use the **`bookingFixture`** which auto-creates a test property
+via `/api/test/seed` and tears it down after each test. These require no extra config.
+
+For the Channex webhook tests (`02-channex-webhook.spec.ts`, `channex-webhook-parse.spec.ts`),
+set at least `TEST_PROPERTY_ID` with the internal UUID of any property in your dev DB:
 
 ```env
-TEST_CHANNEX_PROPERTY_ID=<uuid from local.db properties.channex_property_id>
-TEST_CHANNEX_ROOM_TYPE_ID=<uuid from local.db room_types.channex_room_type_id>
-TEST_CHANNEX_RATE_PLAN_ID=<uuid from local.db room_types.channex_rate_plan_id>
+# Internal DB IDs (no Channex account needed — works with CHANNEX_MOCK=true)
+TEST_PROPERTY_ID=<uuid from local.db properties.id>
 TEST_ROOM_TYPE_ID=<uuid from local.db room_types.id>
+
+# Real Channex IDs (only needed to test against the live Channex API)
+TEST_CHANNEX_PROPERTY_ID=<channex_property_id>
+TEST_CHANNEX_ROOM_TYPE_ID=<channex_room_type_id>
+TEST_CHANNEX_RATE_PLAN_ID=<channex_rate_plan_id>
 ```
 
 If these are not set, the relevant tests are **skipped** (not failed) with a
@@ -96,7 +102,11 @@ tests/
 
   e2e/
     01-smoke.spec.ts      App loads, nav is visible, unauthenticated redirects.
-    02-channex-webhook.spec.ts  Full flow: fire mock webhook → booking created.
+    02-channex-webhook.spec.ts  Full flow: fire mock webhook → booking in DB.
+    03-public-booking.spec.ts   Guest books via /book/[publicId] → confirmation.
+    04-ota-assign-flow.spec.ts  Webhook → unassigned queue → assign room → card.
+    05-operator-booking.spec.ts Operator creates booking via API; cancel restores.
+    06-availability-accuracy.spec.ts  Booking reduces count; cancel restores it.
 
   api/
     channex-ari-format.spec.ts   Validates ARI push payloads against schema.
@@ -118,6 +128,31 @@ test('description of the business rule being tested', async ({ page, apiContext 
   // Act — perform the action
   // Assert — verify the outcome with descriptive expect messages
   expect(result, 'human-readable description of what should be true').toBe(expected);
+});
+```
+
+### Using the bookingFixture
+
+For tests that need a real property, room type, room, and rate — use the
+`bookingFixture`. It seeds a `[Test] ...` property before the test and deletes
+it afterwards, so your dev DB is never polluted.
+
+```ts
+test('example using bookingFixture', async ({ apiContext, bookingFixture }) => {
+  // bookingFixture has:
+  //   .propertyId, .propertyName, .publicId
+  //   .roomTypeId, .roomTypeName
+  //   .roomId, .roomNumber
+  //   .seasonId, .nightlyRate
+  //   .checkIn, .checkOut (14 and 17 days from now)
+  const res = await apiContext.get('/api/public/availability', {
+    params: {
+      propertyId: bookingFixture.propertyId,
+      checkIn:    bookingFixture.checkIn,
+      checkOut:   bookingFixture.checkOut,
+    }
+  });
+  expect(res.ok()).toBe(true);
 });
 ```
 
@@ -172,13 +207,28 @@ If you see auth-related test failures, check that `TEST_EMAIL` and
 | Area | Coverage |
 |------|----------|
 | App loads / navigation | ✅ smoke test |
-| Channex webhook → booking_new | ✅ (requires Channex IDs in .env) |
-| Channex webhook → booking_cancel | ✅ (requires Channex IDs in .env) |
+| Channex webhook → booking_new | ✅ (set TEST_PROPERTY_ID in .env) |
+| Channex webhook → booking_cancel | ✅ (set TEST_PROPERTY_ID in .env) |
+| Webhook guest data saved correctly | ✅ |
 | ARI payload format (rate in dollars) | ✅ (requires TEST_ROOM_TYPE_ID) |
 | ARI payload format (date format) | ✅ (requires TEST_ROOM_TYPE_ID) |
 | Webhook signature verification | ✅ |
-| Booking creation via BookingCard | 🔲 not yet |
-| Check-in / check-out flow | 🔲 not yet |
+| Guest booking page loads with branding | ✅ bookingFixture |
+| Guest date + room type selection | ✅ bookingFixture |
+| Full guest booking → confirmation | ✅ bookingFixture |
+| Public availability API | ✅ bookingFixture |
+| Public pricing API | ✅ bookingFixture |
+| OTA webhook → unassigned queue visible | ✅ bookingFixture |
+| Assign-room API (happy path) | ✅ bookingFixture |
+| Assign-room API (conflict rejected) | ✅ bookingFixture |
+| Operator creates booking | ✅ bookingFixture |
+| Duplicate room booking rejected | ✅ bookingFixture |
+| Booking cancellation | ✅ bookingFixture |
+| Assigned booking reduces availability | ✅ bookingFixture |
+| Cancelled booking restores availability | ✅ bookingFixture |
+| Unassigned OTA booking reduces availability | ✅ bookingFixture |
+| Overbooking via public booking rejected | ✅ bookingFixture |
+| Check-in / check-out UI flow | 🔲 not yet |
 | Group booking workflow | 🔲 not yet |
 | Deposit pending → received | 🔲 not yet |
 

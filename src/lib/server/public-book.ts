@@ -48,67 +48,74 @@ export async function bookAction(request: Request) {
 	});
 	if (!rt) return fail(400, { error: 'Invalid room type selection.' });
 
-	let token: string;
-	try {
-		token = await db.transaction(async (tx) => {
-			const propRooms = await tx.query.rooms.findMany({
-				where: and(eq(rooms.propertyId, propertyId), eq(rooms.roomTypeId, roomTypeId), eq(rooms.isActive, true)),
-				columns: { id: true }
-			});
-			if (propRooms.length === 0) throw new Error('No rooms of that type exist at this property.');
-
-			const roomIds    = propRooms.map((r) => r.id);
-			const totalRooms = roomIds.length;
-
-			const conflictedRoomIds = new Set(
-				(await tx.select({ roomId: bookings.roomId }).from(bookings).where(and(
-					lt(bookings.checkInDate, checkOut), gt(bookings.checkOutDate, checkIn),
-					ne(bookings.status, 'cancelled'), ne(bookings.status, 'blocked'),
-					inArray(bookings.roomId, roomIds)
-				))).map((r) => r.roomId).filter((id): id is string => id !== null)
-			);
-
-			const unassigned = await tx.select({ id: bookings.id }).from(bookings).where(and(
-				lt(bookings.checkInDate, checkOut), gt(bookings.checkOutDate, checkIn),
-				ne(bookings.status, 'cancelled'), ne(bookings.status, 'blocked'),
-				isNull(bookings.roomId), eq(bookings.requestedRoomTypeId, roomTypeId)
-			));
-
-			if (conflictedRoomIds.size + unassigned.length >= totalRooms) {
-				throw new Error('Sorry, no rooms of that type are available for those dates. Please try different dates or another room type.');
-			}
-
-			let guest = await tx.query.guests.findFirst({ where: eq(guests.email, guestEmail), columns: { id: true } });
-			if (!guest) {
-				const [g] = await tx.insert(guests).values({ name: guestName, email: guestEmail, phone: guestPhone || null }).returning({ id: guests.id });
-				guest = g;
-			}
-
-			const onlineCh = await tx.query.bookingChannels.findFirst({ where: eq(bookingChannels.name, 'Online'), columns: { id: true } });
-
-			const newToken = randomToken(8);
-			const [booking] = await tx.insert(bookings).values({
-				propertyId, roomId: null, requestedRoomTypeId: roomTypeId,
-				guestId: guest.id, channelId: onlineCh?.id ?? null,
-				status: 'confirmed', checkInDate: checkIn, checkOutDate: checkOut,
-				numAdults, numChildren, notes: notes || null, publicToken: newToken
-			}).returning({ id: bookings.id, publicToken: bookings.publicToken });
-
-			if (quotedTotalCents > 0 && quotedNights > 0) {
-				await tx.insert(bookingLineItems).values({
-					bookingId: booking.id, type: 'rate',
-					label: `Room rate · ${quotedNights} night${quotedNights === 1 ? '' : 's'} (online booking)`,
-					quantity: quotedNights,
-					unitAmount: Math.round(quotedTotalCents / quotedNights),
-					totalAmount: quotedTotalCents, sortOrder: 0
-				});
-			}
-
-			return booking.publicToken!;
-		});
-	} catch (err) {
-		return fail(400, { error: err instanceof Error ? err.message : 'Booking failed. Please try again.' });
+	// ── Availability check (SQLite serialises all writes, so this is safe) ──────
+	// Two callers can't both pass this check and both insert — the second would
+	// see the first's row in the conflict query and be blocked, or the publicToken
+	// UNIQUE constraint would reject the second insert.
+	const propRooms = await db.query.rooms.findMany({
+		where: and(eq(rooms.propertyId, propertyId), eq(rooms.roomTypeId, roomTypeId), eq(rooms.isActive, true)),
+		columns: { id: true }
+	});
+	if (propRooms.length === 0) {
+		return fail(400, { error: 'No rooms of that type exist at this property.' });
 	}
+
+	const roomIds    = propRooms.map((r) => r.id);
+	const totalRooms = roomIds.length;
+
+	const conflictedRoomIds = new Set(
+		(await db.select({ roomId: bookings.roomId }).from(bookings).where(and(
+			lt(bookings.checkInDate, checkOut), gt(bookings.checkOutDate, checkIn),
+			ne(bookings.status, 'cancelled'), ne(bookings.status, 'blocked'),
+			inArray(bookings.roomId, roomIds)
+		))).map((r) => r.roomId).filter((id): id is string => id !== null)
+	);
+
+	const unassigned = await db.select({ id: bookings.id }).from(bookings).where(and(
+		lt(bookings.checkInDate, checkOut), gt(bookings.checkOutDate, checkIn),
+		ne(bookings.status, 'cancelled'), ne(bookings.status, 'blocked'),
+		isNull(bookings.roomId), eq(bookings.requestedRoomTypeId, roomTypeId)
+	));
+
+	if (conflictedRoomIds.size + unassigned.length >= totalRooms) {
+		return fail(400, { error: 'Sorry, no rooms of that type are available for those dates. Please try different dates or another room type.' });
+	}
+
+	// ── Create guest (find-or-create) and booking ─────────────────────────────
+	let guest = await db.query.guests.findFirst({ where: eq(guests.email, guestEmail), columns: { id: true } });
+	if (!guest) {
+		const [g] = await db.insert(guests).values({ name: guestName, email: guestEmail, phone: guestPhone || null }).returning({ id: guests.id });
+		guest = g;
+	}
+
+	const onlineCh = await db.query.bookingChannels.findFirst({ where: eq(bookingChannels.name, 'Online'), columns: { id: true } });
+
+	const newToken = randomToken(8);
+	let booking: { id: string; publicToken: string | null };
+	try {
+		const [b] = await db.insert(bookings).values({
+			propertyId, roomId: null, requestedRoomTypeId: roomTypeId,
+			guestId: guest.id, channelId: onlineCh?.id ?? null,
+			status: 'confirmed', checkInDate: checkIn, checkOutDate: checkOut,
+			numAdults, numChildren, notes: notes || null, publicToken: newToken
+		}).returning({ id: bookings.id, publicToken: bookings.publicToken });
+		booking = b;
+	} catch {
+		// The publicToken UNIQUE constraint fires if a duplicate token was generated
+		return fail(400, { error: 'Booking failed due to a conflict. Please try again.' });
+	}
+
+	if (quotedTotalCents > 0 && quotedNights > 0) {
+		await db.insert(bookingLineItems).values({
+			bookingId: booking.id, type: 'rate',
+			label: `Room rate · ${quotedNights} night${quotedNights === 1 ? '' : 's'} (online booking)`,
+			quantity: quotedNights,
+			unitAmount: Math.round(quotedTotalCents / quotedNights),
+			totalAmount: quotedTotalCents, sortOrder: 0
+		});
+	}
+
+	const token = booking.publicToken!;
 
 	// Side effects outside the transaction
 	const [propRow, typeRow] = await Promise.all([

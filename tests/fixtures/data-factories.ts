@@ -23,9 +23,13 @@ export function isoDate(offsetDays = 0): string {
 
 export type WebhookTriggerPayload = {
 	event: 'booking_new' | 'booking_cancel';
-	channexPropertyId: string;
-	channexRoomTypeId: string;
-	channexRatePlanId: string;
+	// Real Channex IDs — set in .env as TEST_CHANNEX_* (optional)
+	channexPropertyId?: string | null;
+	channexRoomTypeId?: string | null;
+	channexRatePlanId?: string | null;
+	// Internal DB IDs — used as fallback when Channex IDs are not configured
+	propertyId?: string | null;
+	roomTypeId?: string | null;
 	checkIn: string;
 	checkOut: string;
 	adults: number;
@@ -41,19 +45,25 @@ export type WebhookTriggerPayload = {
 
 /**
  * Builds a webhook trigger payload for a new OTA booking.
- * Requires channexPropertyId, channexRoomTypeId, channexRatePlanId from your
- * test property (set these in .env as TEST_CHANNEX_PROPERTY_ID etc.).
+ *
+ * Prefers real Channex IDs from TEST_CHANNEX_* env vars when available.
+ * Falls back to TEST_PROPERTY_ID / TEST_ROOM_TYPE_ID (internal DB IDs) so
+ * tests work even without a Channex subscription.
  */
 export function createWebhookTrigger(
 	overrides: Partial<WebhookTriggerPayload> = {}
 ): WebhookTriggerPayload {
 	return {
 		event: 'booking_new',
-		channexPropertyId: process.env.TEST_CHANNEX_PROPERTY_ID ?? '',
-		channexRoomTypeId: process.env.TEST_CHANNEX_ROOM_TYPE_ID ?? '',
-		channexRatePlanId: process.env.TEST_CHANNEX_RATE_PLAN_ID ?? '',
-		checkIn:    isoDate(7),
-		checkOut:   isoDate(10),
+		// Channex IDs (optional — real Channex account only)
+		channexPropertyId: process.env.TEST_CHANNEX_PROPERTY_ID ?? null,
+		channexRoomTypeId: process.env.TEST_CHANNEX_ROOM_TYPE_ID ?? null,
+		channexRatePlanId: process.env.TEST_CHANNEX_RATE_PLAN_ID ?? null,
+		// Internal IDs (used when Channex IDs are absent)
+		propertyId:  process.env.TEST_PROPERTY_ID  ?? null,
+		roomTypeId:  process.env.TEST_ROOM_TYPE_ID ?? null,
+		checkIn:    isoDate(14),
+		checkOut:   isoDate(17),
 		adults:     2,
 		children:   0,
 		guestName:  `Playwright Guest ${Date.now()}`,
@@ -86,3 +96,4 @@ export function createARIOverride(overrides: Partial<ARIUpdatePayload> = {}): AR
 		...overrides,
 	};
 }
+

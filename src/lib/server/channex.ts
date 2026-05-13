@@ -78,35 +78,32 @@ function isConfigured(): boolean {
 export async function pushARI(updates: ARIUpdate[]): Promise<boolean> {
 	if (updates.length === 0) return false;
 
-	// Mock mode: log the call locally instead of hitting the real API
+	// Convert internal format to Channex wire format (shared by both mock and live paths)
+	const wireEntries = updates.map((u) => {
+		const entry: Record<string, unknown> = {
+			property_id:  u.channexPropertyId,
+			room_type_id: u.channexRoomTypeId,
+			rate_plan_id: u.channexRatePlanId,
+			date_from: u.dateFrom,
+			date_to:   u.dateTo
+		};
+		if (u.availability !== undefined) entry.availability = u.availability;
+		if (u.rateCents    !== undefined) entry.rate = parseFloat((u.rateCents / 100).toFixed(2));
+		if (u.minNights    !== undefined) entry.min_stay_arrival = u.minNights;
+		if (u.stopSell           !== undefined) entry.stop_sell           = u.stopSell;
+		if (u.closedToArrival    !== undefined) entry.closed_to_arrival   = u.closedToArrival;
+		if (u.closedToDeparture  !== undefined) entry.closed_to_departure = u.closedToDeparture;
+		return entry;
+	});
+
+	// Mock mode: log the wire-format payload locally instead of hitting the real API
 	if (isMockMode()) {
-		logARIPush(updates);
-		console.log(`[channex mock] ARI push: ${updates.length} update(s) logged`);
+		logARIPush(wireEntries);
+		console.log(`[channex mock] ARI push: ${wireEntries.length} update(s) logged`);
 		return true;
 	}
 
 	if (!isConfigured()) return false;
-
-	// Channex ARI upload endpoint (v1)
-	// Format: array of per-room-type-range updates
-	const payload = {
-		ari: updates.map((u) => {
-			const entry: Record<string, unknown> = {
-				property_id: u.channexPropertyId,
-				room_type_id: u.channexRoomTypeId,
-				rate_plan_id: u.channexRatePlanId,
-				date_from: u.dateFrom,
-				date_to: u.dateTo
-			};
-			if (u.availability !== undefined) entry.availability = u.availability;
-			if (u.rateCents !== undefined) entry.rate = parseFloat((u.rateCents / 100).toFixed(2));
-			if (u.minNights !== undefined) entry.min_stay_arrival = u.minNights;
-			if (u.stopSell !== undefined) entry.stop_sell = u.stopSell;
-			if (u.closedToArrival !== undefined) entry.closed_to_arrival = u.closedToArrival;
-			if (u.closedToDeparture !== undefined) entry.closed_to_departure = u.closedToDeparture;
-			return entry;
-		})
-	};
 
 	try {
 		const res = await fetch(`${BASE_URL}/ari_upload`, {
@@ -115,7 +112,7 @@ export async function pushARI(updates: ARIUpdate[]): Promise<boolean> {
 				'Content-Type': 'application/json',
 				'user-api-key': apiKey()
 			},
-			body: JSON.stringify(payload)
+			body: JSON.stringify({ ari: wireEntries })
 		});
 
 		if (!res.ok) {

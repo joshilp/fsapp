@@ -206,6 +206,23 @@
 						<!-- Online Booking Settings -->
 						<div class="mt-5 pt-5 border-t border-border">
 							<Label class="block font-semibold mb-3">Online Booking Page</Label>
+							<!-- Property IDs — useful for .env / API testing config -->
+							<div class="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+								<div class="flex flex-col gap-1">
+									<Label class="text-xs text-muted-foreground">Property ID <span class="text-[10px]">(internal — for TEST_PROPERTY_ID)</span></Label>
+									<div class="flex items-center gap-2">
+										<code class="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono break-all select-all">{prop.id}</code>
+									</div>
+								</div>
+								{#each data.roomTypesList.filter(rt => rt.propertyId === prop.id) as rt}
+									<div class="flex flex-col gap-1">
+										<Label class="text-xs text-muted-foreground">Room type ID — {rt.name} <span class="text-[10px]">(for TEST_ROOM_TYPE_ID)</span></Label>
+										<div class="flex items-center gap-2">
+											<code class="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono break-all select-all">{rt.id}</code>
+										</div>
+									</div>
+								{/each}
+							</div>
 							{#if prop.publicId}
 								<div class="mb-3 flex flex-col gap-1">
 									<Label class="text-xs text-muted-foreground">Booking URL</Label>

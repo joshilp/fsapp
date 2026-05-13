@@ -15,15 +15,11 @@
  *   2. We read the mock ARI log via /api/dev/channex-log
  *   3. We validate every entry in the log against the schema
  *
- * Acceptance criteria:
- *   - All entries in the ARI log pass validateARIEntry() with zero errors
- *   - rates are in dollars (not cents)
- *   - dates are YYYY-MM-DD
- *   - all required UUID fields are present and non-empty
+ * Uses `bookingFixture` which creates a test room type with fake Channex IDs
+ * so the ARI mock fires without needing a real Channex account.
  *
  * Prerequisites:
  *   - CHANNEX_MOCK=true in .env
- *   - TEST_ROOM_TYPE_ID set to a real room type ID from your local.db
  */
 import { test, expect } from '../fixtures';
 import { validateARIEntry } from '../schemas/channex.schema';
@@ -36,24 +32,21 @@ test.describe('Channex ARI payload format', () => {
 		await apiContext.delete('/api/dev/channex-log');
 	});
 
-	test('rate override produces a valid Channex ARI payload', async ({ apiContext }) => {
-		const roomTypeId = process.env.TEST_ROOM_TYPE_ID;
-		if (!roomTypeId) {
-			test.skip(true, 'Set TEST_ROOM_TYPE_ID in .env to the ID of a room type in local.db');
-			return;
-		}
-
+	test('rate override produces a valid Channex ARI payload', async ({ apiContext, bookingFixture }) => {
 		const testDate = isoDate(21); // 3 weeks out — unlikely to conflict with real bookings
 
 		// ── Trigger an ARI override ────────────────────────────────────────────
 		const overrideRes = await apiContext.post('/api/ari/override', {
 			data: {
-				roomTypeId,
+				roomTypeId: bookingFixture.roomTypeId,
 				date: testDate,
 				rateCents: 14900,  // $149.00
 			}
 		});
 		expect(overrideRes.ok(), `ARI override endpoint should return 2xx, got ${overrideRes.status()}`).toBe(true);
+
+		// Give the async ARI push a moment to complete
+		await new Promise(r => setTimeout(r, 500));
 
 		// ── Read the mock ARI log ──────────────────────────────────────────────
 		const logRes = await apiContext.get('/api/dev/channex-log');
@@ -74,21 +67,21 @@ test.describe('Channex ARI payload format', () => {
 		}
 	});
 
-	test('rate value is in dollars (not cents)', async ({ apiContext }) => {
-		const roomTypeId = process.env.TEST_ROOM_TYPE_ID;
-		if (!roomTypeId) { test.skip(true, 'TEST_ROOM_TYPE_ID not set'); return; }
-
+	test('rate value is in dollars (not cents)', async ({ apiContext, bookingFixture }) => {
 		await apiContext.delete('/api/dev/channex-log');
 
 		const testDate = isoDate(22);
 		await apiContext.post('/api/ari/override', {
-			data: { roomTypeId, date: testDate, rateCents: 9900 } // $99.00 = 9900 cents
+			data: { roomTypeId: bookingFixture.roomTypeId, date: testDate, rateCents: 9900 } // $99.00 = 9900 cents
 		});
+
+		await new Promise(r => setTimeout(r, 500));
 
 		const log: Array<{ updates: unknown[] }> = await (await apiContext.get('/api/dev/channex-log')).json();
 		const allUpdates = log.flatMap(e => e.updates) as Array<Record<string, unknown>>;
 		const rateUpdates = allUpdates.filter(u => u.rate !== undefined);
 
+		expect(rateUpdates.length, 'should have at least one rate update').toBeGreaterThan(0);
 		for (const u of rateUpdates) {
 			expect(
 				typeof u.rate === 'number' && u.rate < 1000,
@@ -97,14 +90,15 @@ test.describe('Channex ARI payload format', () => {
 		}
 	});
 
-	test('date fields are in YYYY-MM-DD format', async ({ apiContext }) => {
-		const roomTypeId = process.env.TEST_ROOM_TYPE_ID;
-		if (!roomTypeId) { test.skip(true, 'TEST_ROOM_TYPE_ID not set'); return; }
-
+	test('date fields are in YYYY-MM-DD format', async ({ apiContext, bookingFixture }) => {
 		await apiContext.delete('/api/dev/channex-log');
 
 		const testDate = isoDate(23);
-		await apiContext.post('/api/ari/override', { data: { roomTypeId, date: testDate } });
+		await apiContext.post('/api/ari/override', {
+			data: { roomTypeId: bookingFixture.roomTypeId, date: testDate }
+		});
+
+		await new Promise(r => setTimeout(r, 500));
 
 		const log: Array<{ updates: unknown[] }> = await (await apiContext.get('/api/dev/channex-log')).json();
 		const allUpdates = log.flatMap(e => e.updates) as Array<Record<string, unknown>>;

@@ -44,7 +44,7 @@ export default defineConfig({
 	],
 
 	use: {
-		baseURL: 'http://localhost:5173',
+		baseURL: 'http://localhost:5174',
 
 		// Collect trace on first retry so failures are debuggable.
 		trace: 'on-first-retry',
@@ -90,7 +90,7 @@ export default defineConfig({
 	// it won't start a second instance — just connect to the existing one.
 	webServer: {
 		command: 'pnpm dev',
-		url: 'http://localhost:5173',
+		url: 'http://localhost:5174',
 		reuseExistingServer: true,
 		timeout: 60_000,
 		stdout: 'ignore',

@@ -86,6 +86,10 @@
 	let numChildren = $state(0);
 	let guestNotes  = $state('');
 	let submitting  = $state(false);
+	// Guard: only redirect after the form was actually submitted in this session.
+	// Without this, a stale form action result from browser history can trigger
+	// the goto() prematurely when SvelteKit restores client-side page state.
+	let formSubmittedThisSession = $state(false);
 
 	let rateQuote   = $state<PublicPricing | null>(null);
 	let rateLoading = $state(false);
@@ -117,7 +121,7 @@
 	};
 
 	$effect(() => {
-		if (form?.success && form.token) {
+		if (formSubmittedThisSession && form?.success && form.token) {
 			goto(`/book/confirmation/${form.token}`);
 		}
 	});
@@ -386,6 +390,7 @@
 
 				<form method="POST" action="?/book" use:enhance={() => {
 					submitting = true;
+					formSubmittedThisSession = true;
 					return async ({ update }) => { await update(); submitting = false; };
 				}}>
 					<input type="hidden" name="propertyId" value={property.id} />

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { page } from '$app/stores';
+	import { invalidateAll } from '$app/navigation';
 	import BookingGrid from '$lib/components/booking/BookingGrid.svelte';
 	import BookingFilters from '$lib/components/booking/BookingFilters.svelte';
 	import BookingCard from '$lib/components/booking/BookingCard.svelte';
@@ -61,11 +62,28 @@
 	]);
 	let unassignedOpen = $state(false);
 
-	/** Point the ghost-bar filter at this booking's dates and close modal */
+	/** Booking currently being assigned a room — drives "assign mode" on the grids */
+	let pendingAssign = $state<UnassignedBooking | null>(null);
+
+	/** Point the ghost-bar filter at this booking's dates, enter assign mode, close modal */
 	function findOnGrid(b: UnassignedBooking) {
 		sharedCheckIn  = b.checkInDate;
 		sharedCheckOut = b.checkOutDate;
+		pendingAssign  = b;
 		unassignedOpen = false;
+	}
+
+	function cancelAssign() {
+		pendingAssign  = null;
+		sharedCheckIn  = '';
+		sharedCheckOut = '';
+	}
+
+	async function onRoomAssigned() {
+		pendingAssign  = null;
+		sharedCheckIn  = '';
+		sharedCheckOut = '';
+		await invalidateAll();
 	}
 
 	// ── Other dialogs ─────────────────────────────────────────────────────────
@@ -140,6 +158,20 @@
 {:else if data.falcon && data.spanish}
 	<div class="flex min-h-0 flex-1 flex-col">
 
+		<!-- Assign-mode banner -->
+		{#if pendingAssign}
+			<div class="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-teal-300 bg-teal-50 px-4 py-2 text-sm dark:border-teal-700 dark:bg-teal-950/60">
+				<div class="flex items-center gap-2">
+					<span class="text-lg">🎯</span>
+					<span class="font-semibold text-teal-900 dark:text-teal-100">Assigning room for <em>{pendingAssign.guestName ?? 'Guest'}</em></span>
+					<span class="text-teal-600 dark:text-teal-300">{pendingAssign.checkInDate} → {pendingAssign.checkOutDate} · {pendingAssign.requestedTypeName ?? 'any type'}</span>
+				</div>
+				<button onclick={cancelAssign} class="rounded-md border border-teal-300 bg-white px-3 py-1 text-xs font-medium text-teal-700 hover:bg-teal-50 dark:bg-teal-900 dark:text-teal-200">
+					✕ Cancel
+				</button>
+			</div>
+		{/if}
+
 		{#if layoutMode === 'split'}
 			<!-- Split: both grids side by side -->
 			<div class="flex min-w-0 flex-col divide-y lg:flex-row lg:divide-x lg:divide-y-0">
@@ -156,6 +188,8 @@
 						onDrawSelectionsChange={(s) => { falconSelections = s; }}
 						onGroupBook={openGroupCard}
 						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
+						pendingAssignBookingId={pendingAssign?.propertyId === data.falcon.propertyId ? pendingAssign?.id : undefined}
+						{onRoomAssigned}
 					/>
 				</div>
 				<div class="min-w-0 flex-1">
@@ -171,6 +205,8 @@
 						onDrawSelectionsChange={(s) => { spanishSelections = s; }}
 						onGroupBook={openGroupCard}
 						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
+						pendingAssignBookingId={pendingAssign?.propertyId === data.spanish.propertyId ? pendingAssign?.id : undefined}
+						{onRoomAssigned}
 					/>
 				</div>
 			</div>
@@ -210,6 +246,8 @@
 						onDrawSelectionsChange={(s) => { falconSelections = s; }}
 						onGroupBook={openGroupCard}
 						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
+						pendingAssignBookingId={pendingAssign?.propertyId === data.falcon.propertyId ? pendingAssign?.id : undefined}
+						{onRoomAssigned}
 					/>
 				{:else}
 					<BookingGrid
@@ -224,6 +262,8 @@
 						onDrawSelectionsChange={(s) => { spanishSelections = s; }}
 						onGroupBook={openGroupCard}
 						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
+						pendingAssignBookingId={pendingAssign?.propertyId === data.spanish.propertyId ? pendingAssign?.id : undefined}
+						{onRoomAssigned}
 					/>
 				{/if}
 			</div>
