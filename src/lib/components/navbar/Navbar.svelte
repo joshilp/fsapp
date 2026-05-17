@@ -12,7 +12,7 @@
 	let { user, pendingUserCount = 0, isMockMode = false }: Props = $props();
 </script>
 
-<header class="border-border bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 border-b backdrop-blur">
+<header class="border-border bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 border-b backdrop-blur print:hidden">
 	<div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
 		<a href={user ? '/dashboard' : '/'} class="font-semibold tracking-tight">fsapp</a>
 

@@ -41,12 +41,13 @@
 	}
 	function rtLabel(rt: { category: string; name: string }): string {
 		if (labelMode === 'name') return rt.name.slice(0, 14);
-		return rt.category.slice(0, 6);
+		return rt.category; // short code, already compact
 	}
 
 	// ─── Derived: seasons + room types for current property ───────────────────
-	const seasons   = $derived(data.seasonsList.filter((s) => s.propertyId === propertyId));
-	const roomTypes = $derived(data.roomTypesList.filter((rt) => rt.propertyId === propertyId));
+	const seasons      = $derived(data.seasonsList.filter((s) => s.propertyId === propertyId));
+	const roomTypes    = $derived(data.roomTypesList.filter((rt) => rt.propertyId === propertyId));
+	const printProperty = $derived(data.propertiesList.find(p => p.id === propertyId));
 
 	// ─── Day → season map ─────────────────────────────────────────────────────
 	const dayMap = $derived.by(() => {
@@ -337,7 +338,7 @@
 	</div>
 {/if}
 
-<div class="flex min-h-screen">
+<div class="flex min-h-screen items-start">
 
 	<!-- ── Main calendar area ───────────────────────────────────────────────── -->
 	<div class="flex-1 min-w-0 px-4 py-5">
@@ -440,7 +441,7 @@
 				class="ml-auto rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
 			>Print</button>
 
-			<a href="/settings#pricing" class="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2 no-print">
+			<a href="/settings" class="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2 no-print">
 				Settings →
 			</a>
 		</div>
@@ -467,8 +468,50 @@
 			</div>
 		{/if}
 
-		<!-- 12-month grid -->
-		<div class="grid grid-cols-3 gap-4 xl:grid-cols-4 print:grid-cols-4 print:gap-2"
+	<!-- Print-only header: property, year, rate legend ──────────────────────── -->
+	<div class="hidden print:block mb-4">
+		<div class="flex items-baseline justify-between border-b pb-1 mb-2">
+			<div>
+				<h1 class="text-base font-bold">{printProperty?.name ?? ''} — Rate Calendar {year}</h1>
+				{#if hasVisibleRTs}
+					<p class="text-[8pt] text-muted-foreground mt-0.5">
+						Showing: {roomTypes.filter(rt => rtVisible[rt.id]).map(rt => rt.name).join(', ')}
+					</p>
+				{/if}
+			</div>
+			<span class="text-[8pt] text-muted-foreground">{new Date().toLocaleDateString()}</span>
+		</div>
+		<!-- Season legend with per-room-type rates -->
+		{#if seasons.length > 0}
+			{@const printRoomTypes = hasVisibleRTs ? roomTypes.filter(rt => rtVisible[rt.id]) : roomTypes}
+			<div class="flex flex-wrap gap-x-4 gap-y-1">
+				{#each [...seasons].sort((a,b) => a.sortOrder - b.sortOrder) as s}
+					<div class="flex items-center gap-1.5 text-[7.5pt]">
+						<span class="inline-block h-3 w-3 rounded-sm border border-black/10 shrink-0"
+							style="background:{s.colour}"></span>
+						<span class="font-semibold">{s.name}</span>
+						{#if s.minNights > 1}<span class="text-[6.5pt] opacity-60">{s.minNights}n min</span>{/if}
+						<span class="opacity-60 text-[6.5pt]">
+							({#each printRoomTypes as rt, i}{#if i > 0} · {/if}{rt.category}: ${s.tiers.find(t => t.roomTypeId === rt.id) ? ((s.tiers.find(t => t.roomTypeId === rt.id)!.nightlyRate) / 100).toFixed(0) : '–'}{/each})
+						</span>
+					</div>
+				{/each}
+			</div>
+			<!-- Room type key — bold active types, grey out inactive when filtered -->
+			<div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[7pt]">
+				{#each roomTypes as rt}
+					{@const active = !hasVisibleRTs || rtVisible[rt.id]}
+					<span class={active ? 'text-foreground' : 'opacity-30'}>
+						<strong>{rt.category}</strong> = {rt.name}{#if hasVisibleRTs && rtVisible[rt.id]} ✓{/if}
+					</span>
+				{/each}
+				<span class="text-muted-foreground ml-2">· <span class="inline-block border-b-4 border-b-black/50 px-1">__</span> = min night stay applies</span>
+			</div>
+		{/if}
+	</div>
+
+	<!-- 12-month grid -->
+	<div class="grid grid-cols-3 gap-4 xl:grid-cols-4 print:grid-cols-4 print:gap-2"
 			style={dragAnchor ? 'user-select:none' : ''}>
 			{#each calMonths as month}
 				<div class="print-full">
@@ -496,16 +539,17 @@
 									{@const hasSeason = dayMap.has(cell.iso)}
 									{@const cellSeason = dayMap.get(cell.iso)}
 									{@const inDrag = dragAnchor !== null && dragDates.has(cell.iso)}
-									<!-- Screen version -->
-									<button
-										class={['no-print w-full rounded text-[10px] font-medium leading-none transition-all hover:brightness-90 active:scale-95 flex flex-col items-center justify-start pt-0.5 pb-0.5 cursor-pointer',
-											hasVisibleRTs ? 'min-h-8' : 'h-6',
-											isToday ? 'ring-2 ring-primary ring-offset-1' : '',
-											!hasSeason ? 'text-foreground hover:bg-muted' : '',
-											selectedSeason && dayMap.get(cell.iso)?.id === selectedSeason.id ? 'ring-1 ring-black/40' : '',
-											inDrag && !hasSeason ? 'bg-primary/20 ring-1 ring-primary' : '',
-											inDrag && hasSeason ? 'brightness-110 ring-1 ring-primary' : ''
-										].join(' ')}
+								<!-- Screen version -->
+								<button
+									class={['no-print w-full rounded text-[10px] font-medium leading-none transition-all hover:brightness-90 active:scale-95 flex flex-col items-center justify-start pt-0.5 pb-0.5 cursor-pointer relative',
+										hasVisibleRTs ? 'min-h-8' : 'h-6',
+										isToday ? 'ring-2 ring-primary ring-offset-1' : '',
+										!hasSeason ? 'text-foreground hover:bg-muted' : '',
+										selectedSeason && dayMap.get(cell.iso)?.id === selectedSeason.id ? 'ring-1 ring-black/40' : '',
+										inDrag && !hasSeason ? 'bg-primary/20 ring-1 ring-primary' : '',
+										inDrag && hasSeason ? 'brightness-110 ring-1 ring-primary' : '',
+										cellSeason?.minNights > 1 ? 'border-b-4 border-b-black/50' : ''
+									].join(' ')}
 										style={style || ''}
 										onmousedown={(e) => { if (e.button === 0 && cell.iso) { e.preventDefault(); dragAnchor = cell.iso; dragTip = cell.iso; } }}
 										onmouseover={() => { if (dragAnchor && cell.iso) dragTip = cell.iso; }}
@@ -522,13 +566,17 @@
 												{/if}
 											{/each}
 										{/if}
+										{#if cellSeason?.minNights > 1}
+											<span class="absolute bottom-0.5 right-0.5 text-[6px] font-bold leading-none opacity-70">{cellSeason.minNights}n</span>
+										{/if}
 									</button>
-									<!-- Print version -->
-									<div
-										class={['hidden print:flex flex-col items-center justify-start pt-0.5 w-full rounded font-medium leading-none',
-											hasVisibleRTs ? 'min-h-7 pb-0.5' : 'h-5 justify-center',
-											isToday ? 'ring-1 ring-black' : ''
-										].join(' ')}
+								<!-- Print version -->
+								<div
+									class={['hidden print:flex flex-col items-center justify-start pt-0.5 w-full rounded font-medium leading-none relative',
+										hasVisibleRTs ? 'min-h-7 pb-0.5' : 'h-5 justify-center',
+										isToday ? 'ring-1 ring-black' : '',
+										cellSeason?.minNights > 1 ? 'border-b-4 border-b-black/60' : ''
+									].join(' ')}
 										style={style || ''}
 									>
 										<span class={hasVisibleRTs ? 'text-[7pt] font-bold leading-none mb-px' : 'text-[7pt]'}>{cell.day}</span>
@@ -542,6 +590,9 @@
 													</span>
 												{/if}
 											{/each}
+										{/if}
+										{#if cellSeason?.minNights > 1}
+											<span class="absolute bottom-0.5 right-0.5 text-[5pt] font-bold leading-none opacity-70">{cellSeason.minNights}n</span>
 										{/if}
 									</div>
 								{/if}
@@ -564,7 +615,7 @@
 	</div>
 
 	<!-- ── Side panel ──────────────────────────────────────────────────────── -->
-	<div class="no-print border-l w-80 shrink-0 overflow-y-auto bg-background p-4">
+	<div class="no-print sticky top-14 h-[calc(100vh-3.5rem)] w-80 shrink-0 overflow-y-auto border-l bg-background p-4">
 
 		{#if selectedSeason}
 			<!-- View / Edit season -->

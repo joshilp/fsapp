@@ -134,6 +134,7 @@
 	let taxLines  = $state<TaxLine[]>([]);
 	let taxPresets = $state<TaxPreset[]>([]);
 	let rateLoading = $state(false);
+	let minNightWarning = $state<string | null>(null);
 
 	// ── Payments ──────────────────────────────────────────────────────────────
 	let payments     = $state<Payment[]>([]);
@@ -390,6 +391,7 @@
 		addingPay = false; payAmt = ''; payMethod = 'cash'; payType = 'final_charge'; payNotes = ''; payErr = '';
 		suggestions = []; showSuggest = false;
 		depositAmt = ''; cancelPreview = null; cancelOpen = false; cancelBusy = false;
+		minNightWarning = null;
 		confirmBusy = false; confirmSentAt = null;
 		propLogoUrl = null; propAddress = null; propPhone = null;
 		leftTab = 'guest'; openPayMenu = null;
@@ -579,6 +581,8 @@
 				// Auto-apply preset taxes if none yet, otherwise recalculate percent-based ones
 				if (taxLines.length === 0) autoApplyTaxes(sub);
 				else recalcPercentTaxes(sub);
+				// Surface min-nights warning so operator is aware
+				minNightWarning = d.minNightWarning ?? null;
 			}
 		} catch { /* ignore */ } finally { rateLoading = false; }
 	}
@@ -1011,6 +1015,15 @@
 								{rateLoading ? '…' : '↻ Suggest rate'}
 							</button>
 						</div>
+
+						{#if minNightWarning}
+							<div class="mb-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+								<span class="shrink-0 font-bold">⚠</span>
+								<span>{minNightWarning} You can still save — operator override.</span>
+								<button type="button" onclick={() => minNightWarning = null}
+									class="ml-auto shrink-0 text-amber-600 hover:text-amber-900">✕</button>
+							</div>
+						{/if}
 
 						<!-- Rate charge lines -->
 						<div class="space-y-1.5">

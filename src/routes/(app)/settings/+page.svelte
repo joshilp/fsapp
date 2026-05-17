@@ -36,28 +36,6 @@
 	let deletingRoomType = $state<string | null>(null);
 	let editingRoomType = $state<string | null>(null);
 
-	// ─── Pricing ──────────────────────────────────────────────────────────────
-	let pricingPropertyId = $state(data.propertiesList[0]?.id ?? '');
-	let pricingYear = $state(new Date().getFullYear());
-	let editingSeasonId = $state<string | null>(null);
-	let savingSeason = $state(false);
-	let savingTier = $state<string | null>(null);
-	let deletingSeasonId = $state<string | null>(null);
-	let deletingYear = $state(false);
-
-	function seasonOverlapsYear(s: { startDate: string; endDate: string }, year: number): boolean {
-		return s.startDate <= `${year}-12-31` && s.endDate >= `${year}-01-01`;
-	}
-
-	const pricingSeasons = $derived(
-		data.rateSeasonsList.filter(
-			(s) => s.propertyId === pricingPropertyId && seasonOverlapsYear(s, pricingYear)
-		)
-	);
-
-	function fmt(cents: number) {
-		return (cents / 100).toFixed(0);
-	}
 </script>
 
 <svelte:head>
@@ -73,7 +51,6 @@
 			<Tabs.Trigger value="taxes">Taxes</Tabs.Trigger>
 			<Tabs.Trigger value="roomtypes">Room Types</Tabs.Trigger>
 			<Tabs.Trigger value="rooms">Rooms</Tabs.Trigger>
-			<Tabs.Trigger value="pricing">Pricing</Tabs.Trigger>
 			<Tabs.Trigger value="channels">Channels</Tabs.Trigger>
 			<Tabs.Trigger value="email">Email</Tabs.Trigger>
 		</Tabs.List>
@@ -557,11 +534,12 @@
 												<input name="name" value={rt.name} required
 													class="border-input bg-background rounded border px-2 py-1 text-sm w-40" />
 											</div>
-											<div class="flex flex-col gap-1">
-												<label class="text-xs text-muted-foreground">Category</label>
-												<input name="category" value={rt.category} required maxlength="4"
-													class="border-input bg-background rounded border px-2 py-1 text-sm w-16 font-mono uppercase" />
-											</div>
+										<div class="flex flex-col gap-1">
+											<label class="text-xs text-muted-foreground">Short Code</label>
+											<input name="category" value={rt.category} required maxlength="6"
+												class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono uppercase"
+												title="Internal code shown in the rate calendar grid (e.g. 1BD, 2BDK)" />
+										</div>
 								<div class="flex flex-col gap-1">
 											<label class="text-xs text-muted-foreground">Sort</label>
 											<input name="sortOrder" type="number" value={rt.sortOrder}
@@ -628,11 +606,12 @@
 								<input name="name" placeholder="2 Bed + Kitchen" required
 									class="border-input bg-background rounded border px-2 py-1 text-sm w-40" />
 							</div>
-							<div class="flex flex-col gap-1">
-								<label class="text-xs text-muted-foreground">Category</label>
-								<input name="category" placeholder="C" required maxlength="4"
-									class="border-input bg-background rounded border px-2 py-1 text-sm w-16 font-mono uppercase" />
-							</div>
+						<div class="flex flex-col gap-1">
+							<label class="text-xs text-muted-foreground">Short Code</label>
+							<input name="category" placeholder="2BDK" required maxlength="6"
+								class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono uppercase"
+								title="Internal code shown in the rate calendar grid (e.g. 1BD, 2BDK)" />
+						</div>
 							<div class="flex flex-col gap-1">
 								<label class="text-xs text-muted-foreground">Sort</label>
 							<input name="sortOrder" type="number" value="0"
@@ -656,281 +635,7 @@
 			</div>
 		</Tabs.Content>
 
-		<!-- ── Pricing ──────────────────────────────────────────────────────── -->
-		<Tabs.Content value="pricing">
-			<div class="space-y-4">
-
-				<!-- Toolbar: property + year + actions -->
-				<div class="flex flex-wrap items-center gap-3">
-					<!-- Property selector -->
-					{#if data.propertiesList.length > 1}
-						<select bind:value={pricingPropertyId}
-							class="rounded border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
-							{#each data.propertiesList as prop}
-								<option value={prop.id}>{prop.name}</option>
-							{/each}
-						</select>
-					{:else}
-						<span class="text-sm font-semibold">{data.propertiesList[0]?.name ?? ''}</span>
-					{/if}
-
-					<!-- Year nav -->
-					<div class="flex items-center gap-0.5 rounded-lg border px-1">
-						<button type="button" onclick={() => pricingYear--}
-							class="px-2 py-1 text-sm hover:bg-muted rounded">‹</button>
-						<span class="px-2 text-sm font-semibold">{pricingYear}</span>
-						<button type="button" onclick={() => pricingYear++}
-							class="px-2 py-1 text-sm hover:bg-muted rounded">›</button>
-					</div>
-
-					<!-- Open Rate Calendar link -->
-					<a href="/rates?prop={pricingPropertyId}&year={pricingYear}"
-						class="text-xs text-primary underline underline-offset-2">
-						Open Rate Calendar →
-					</a>
-
-					<!-- Clear year (bulk delete) -->
-					<form method="POST" action="?/deleteYear"
-						use:enhance={({ cancel }) => {
-							if (!confirm(`Delete ALL ${pricingYear} seasons for this property? This cannot be undone.`)) {
-								cancel();
-								return;
-							}
-							deletingYear = true;
-							return async ({ update }) => { deletingYear = false; editingSeasonId = null; await update(); };
-						}}
-						class="ml-auto"
-					>
-						<input type="hidden" name="propertyId" value={pricingPropertyId} />
-						<input type="hidden" name="year" value={pricingYear} />
-						<Button type="submit" variant="ghost" size="sm"
-							class="text-destructive text-xs h-7"
-							disabled={deletingYear}>
-							{deletingYear ? 'Clearing…' : `Clear ${pricingYear}`}
-						</Button>
-					</form>
-				</div>
-
-				<p class="text-xs text-muted-foreground">
-					Season overview for <strong>{pricingYear}</strong>. To create new seasons or set up a new year, drag on the
-					<a href="/rates?prop={pricingPropertyId}&year={pricingYear}" class="underline">Rate Calendar</a>.
-					Click a season below to edit its rates or delete it.
-				</p>
-
-				<!-- Season list -->
-				{#if pricingSeasons.length === 0}
-					<div class="rounded-lg border border-dashed p-8 text-center">
-						<p class="text-sm text-muted-foreground">No seasons in {pricingYear}.</p>
-						<p class="text-xs text-muted-foreground mt-1">
-							<a href="/rates?prop={pricingPropertyId}&year={pricingYear}" class="text-primary underline">Open Rate Calendar</a>
-							to create them by dragging across dates, or use "Copy from {pricingYear - 1}" in the calendar toolbar.
-						</p>
-					</div>
-				{:else}
-					<div class="space-y-2">
-						{#each pricingSeasons as season (season.id)}
-							{@const propTypes = data.roomTypesList.filter((rt) => rt.propertyId === pricingPropertyId)}
-							<div class="bg-card border-border rounded-lg border shadow-sm overflow-hidden">
-								<!-- Season header (click to expand) -->
-								<button type="button"
-									class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/20 transition-colors"
-									onclick={() => { editingSeasonId = editingSeasonId === season.id ? null : season.id; }}
-								>
-									<span class="h-4 w-4 rounded-sm border border-black/10 shrink-0"
-										style="background:{season.colour}"></span>
-									<div class="flex-1 min-w-0">
-										<span class="font-medium text-sm">{season.name}</span>
-										<span class="text-muted-foreground text-xs ml-2">{season.startDate} → {season.endDate}</span>
-										{#if season.minNights > 1}
-											<span class="ml-2 rounded bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 font-semibold">{season.minNights}n min</span>
-										{/if}
-									</div>
-									<!-- Rate summary chips -->
-									<div class="flex gap-1.5 flex-wrap justify-end items-center">
-										{#if season.baseRateCents}
-											<span class="font-mono text-xs bg-primary/10 text-primary rounded px-1.5 py-0.5 font-semibold">
-												Base ${fmt(season.baseRateCents)}
-											</span>
-										{/if}
-										{#each season.tiers as tier}
-											<span class="font-mono text-xs bg-muted rounded px-1.5 py-0.5">
-												{tier.roomType.category}: ${fmt(tier.nightlyRate)}
-											</span>
-										{/each}
-									</div>
-									<span class="text-muted-foreground text-xs ml-1">{editingSeasonId === season.id ? '▲' : '▼'}</span>
-								</button>
-
-								{#if editingSeasonId === season.id}
-									<div class="border-t border-border px-4 py-4 space-y-4 bg-muted/10">
-										<!-- Edit season metadata -->
-										<form method="POST" action="?/upsertSeason"
-											use:enhance={() => {
-												savingSeason = true;
-												return async ({ update }) => { savingSeason = false; await update({ reset: false }); };
-											}}
-											class="grid grid-cols-2 gap-3 sm:grid-cols-4"
-										>
-											<input type="hidden" name="id" value={season.id} />
-											<input type="hidden" name="propertyId" value={season.propertyId} />
-											<input type="hidden" name="sortOrder" value={season.sortOrder} />
-											<div class="flex flex-col gap-1 col-span-2">
-												<label class="text-xs text-muted-foreground">Season name</label>
-												<input name="name" value={season.name} required
-													class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-											</div>
-											<div class="flex flex-col gap-1">
-												<label class="text-xs text-muted-foreground">Start date</label>
-												<input name="startDate" type="date" value={season.startDate}
-													class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-											</div>
-											<div class="flex flex-col gap-1">
-												<label class="text-xs text-muted-foreground">End date</label>
-												<input name="endDate" type="date" value={season.endDate}
-													class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-											</div>
-											<div class="flex flex-col gap-1">
-												<label class="text-xs text-muted-foreground">Colour</label>
-												<div class="flex items-center gap-2">
-													<input type="color" name="colour" value={season.colour}
-														class="h-8 w-10 rounded border cursor-pointer" />
-													<span class="font-mono text-xs text-muted-foreground">{season.colour}</span>
-												</div>
-											</div>
-											<div class="flex flex-col gap-1">
-												<label class="text-xs text-muted-foreground">Min nights</label>
-												<input name="minNights" type="number" min="1" max="14" value={season.minNights}
-													class="border-input bg-background rounded border px-2 py-1.5 text-sm w-20" />
-											</div>
-											<div class="flex flex-col gap-1">
-												<label class="text-xs text-muted-foreground">Base rate</label>
-												<div class="flex items-center gap-1">
-													<span class="text-sm text-muted-foreground">$</span>
-													<input name="baseRateCents" type="number" min="0" step="1"
-														value={season.baseRateCents ? fmt(season.baseRateCents) : ''}
-														placeholder="e.g. 100"
-														class="border-input bg-background rounded border px-2 py-1.5 text-sm w-24 font-mono" />
-													<span class="text-xs text-muted-foreground">/night</span>
-												</div>
-											</div>
-											<div class="flex items-end gap-2 col-span-2">
-												<Button type="submit" size="sm" class="h-8" disabled={savingSeason}>
-													{savingSeason ? '…' : 'Save'}
-												</Button>
-											</div>
-										</form>
-
-										<form method="POST" action="?/deleteSeason"
-											use:enhance={() => {
-												deletingSeasonId = season.id;
-												return async ({ update }) => { deletingSeasonId = null; editingSeasonId = null; await update(); };
-											}}
-										>
-											<input type="hidden" name="id" value={season.id} />
-											<Button type="submit" variant="ghost" size="sm"
-												class="text-destructive text-xs"
-												disabled={deletingSeasonId === season.id}>
-												{deletingSeasonId === season.id ? '…' : 'Delete season'}
-											</Button>
-										</form>
-
-										<!-- Rate table per room type -->
-										<div>
-											<p class="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Nightly Rates</p>
-											{#if season.baseRateCents}
-												<p class="text-xs text-muted-foreground mb-2">
-													Base is <strong>${fmt(season.baseRateCents)}/night</strong>. Enter upcharge per room type (+/− dollars).
-												</p>
-												<form method="POST" action="?/upsertAllTiersAtBase"
-													use:enhance={() => {
-														savingTier = season.id + '__all';
-														return async ({ update }) => { savingTier = null; await update({ reset: false }); };
-													}}
-													class="mb-3"
-												>
-													<input type="hidden" name="seasonId" value={season.id} />
-													<input type="hidden" name="propertyId" value={pricingPropertyId} />
-													<Button type="submit" variant="outline" size="sm" class="h-7 text-xs"
-														disabled={savingTier === season.id + '__all'}>
-														{savingTier === season.id + '__all' ? '…' : `Set all to $${fmt(season.baseRateCents)}`}
-													</Button>
-												</form>
-												<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-													{#each propTypes as rt}
-														{@const existing = season.tiers.find((t) => t.roomTypeId === rt.id)}
-														{@const upcharge = existing ? existing.nightlyRate - season.baseRateCents : 0}
-														<form method="POST" action="?/upsertRateTier"
-															use:enhance={() => {
-																savingTier = season.id + rt.id;
-																return async ({ update }) => { savingTier = null; await update({ reset: false }); };
-															}}
-															class="flex flex-col gap-1"
-														>
-															<input type="hidden" name="seasonId" value={season.id} />
-															<input type="hidden" name="roomTypeId" value={rt.id} />
-															<input type="hidden" name="baseRateCents" value={season.baseRateCents} />
-															<label class="text-xs text-muted-foreground">{rt.category}: {rt.name}</label>
-															<div class="flex items-center gap-1">
-																<span class="text-sm text-muted-foreground">+$</span>
-																<input name="upcharge" type="number" step="1"
-																	value={(upcharge / 100).toFixed(0)}
-																	placeholder="0"
-																	class="border-input bg-background rounded border px-2 py-1.5 text-sm w-20 font-mono"
-																/>
-																<Button type="submit" variant="ghost" size="sm" class="h-8 px-2 text-xs"
-																	disabled={savingTier === season.id + rt.id}>
-																	{savingTier === season.id + rt.id ? '…' : '✓'}
-																</Button>
-															</div>
-															{#if existing}
-																<span class="text-[10px] text-muted-foreground">= ${fmt(existing.nightlyRate)}/night</span>
-															{:else}
-																<span class="text-[10px] text-muted-foreground italic">not set</span>
-															{/if}
-														</form>
-													{/each}
-												</div>
-											{:else}
-												<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-													{#each propTypes as rt}
-														{@const existing = season.tiers.find((t) => t.roomTypeId === rt.id)}
-														<form method="POST" action="?/upsertRateTier"
-															use:enhance={() => {
-																savingTier = season.id + rt.id;
-																return async ({ update }) => { savingTier = null; await update({ reset: false }); };
-															}}
-															class="flex flex-col gap-1"
-														>
-															<input type="hidden" name="seasonId" value={season.id} />
-															<input type="hidden" name="roomTypeId" value={rt.id} />
-															<label class="text-xs text-muted-foreground">{rt.category}: {rt.name}</label>
-															<div class="flex items-center gap-1">
-																<span class="text-sm text-muted-foreground">$</span>
-																<input name="nightlyRate" type="number" min="0" step="1"
-																	value={existing ? fmt(existing.nightlyRate) : ''}
-																	placeholder="0"
-																	class="border-input bg-background rounded border px-2 py-1.5 text-sm w-20 font-mono"
-																/>
-																<Button type="submit" variant="ghost" size="sm" class="h-8 px-2 text-xs"
-																	disabled={savingTier === season.id + rt.id}>
-																	{savingTier === season.id + rt.id ? '…' : '✓'}
-																</Button>
-															</div>
-														</form>
-													{/each}
-												</div>
-											{/if}
-										</div>
-									</div>
-								{/if}
-							</div>
-						{/each}
-					</div>
-				{/if}
-
-			</div>
-		</Tabs.Content>
-
+	
 		<!-- ── Channels ────────────────────────────────────────────────────── -->
 	<Tabs.Content value="channels">
 		<div class="space-y-6">
