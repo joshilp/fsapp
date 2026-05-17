@@ -51,7 +51,14 @@
 	// ─── Day → season map ─────────────────────────────────────────────────────
 	const dayMap = $derived.by(() => {
 		const m = new Map<string, typeof seasons[0]>();
-		for (const s of seasons) {
+		// Sort by date range length DESCENDING — longest seasons are written first,
+		// then shorter (more specific) seasons overwrite them. Shortest range always wins.
+		const sorted = [...seasons].sort((a, b) => {
+			const lenA = new Date(a.endDate + 'T12:00:00').getTime() - new Date(a.startDate + 'T12:00:00').getTime();
+			const lenB = new Date(b.endDate + 'T12:00:00').getTime() - new Date(b.startDate + 'T12:00:00').getTime();
+			return lenB - lenA;
+		});
+		for (const s of sorted) {
 			const start = s.startDate > `${year}-01-01` ? s.startDate : `${year}-01-01`;
 			const end = s.endDate < `${year}-12-31` ? s.endDate : `${year}-12-31`;
 			if (start > end) continue;
@@ -173,10 +180,29 @@
 		start: string; end: string;
 		name: string; colour: string;
 		rate: string; minNights: string;
+		hint: string | null; // describes the layer being overridden
 	} | null>(null);
 
 	function openCreate(start: string, end: string) {
-		dragPopover = { start, end, name: autoName(start, end), colour: nextColour(), rate: '', minNights: '1' };
+		// Detect the current layer for the start date (what this new season will override)
+		const underlying = dayMap.get(start);
+		let hint: string | null = null;
+		let prefillRate = '';
+		let prefillMin = '1';
+		if (underlying) {
+			// Pre-fill from the underlying season's base rate, if set
+			prefillRate = underlying.baseRateCents ? (underlying.baseRateCents / 100).toFixed(0) : '';
+			prefillMin = underlying.minNights.toString();
+			hint = `Overriding "${underlying.name}"${underlying.baseRateCents ? ` · $${(underlying.baseRateCents / 100).toFixed(0)}/night` : ''}`;
+		}
+		dragPopover = {
+			start, end,
+			name: autoName(start, end),
+			colour: nextColour(),
+			rate: prefillRate,
+			minNights: prefillMin,
+			hint
+		};
 		selectedSeason = null;
 		panelMode = 'view';
 	}
@@ -227,6 +253,11 @@
 				<button type="button" onclick={() => { dragPopover = null; }}
 					class="text-muted-foreground hover:text-foreground text-lg leading-none px-1">✕</button>
 			</div>
+			{#if dragPopover.hint}
+				<p class="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-2.5 py-1.5 text-xs text-amber-800 dark:text-amber-300">
+					{dragPopover.hint}
+				</p>
+			{/if}
 
 			<form method="POST" action="?/upsertSeason"
 				use:enhance={() => {

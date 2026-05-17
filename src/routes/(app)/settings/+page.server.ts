@@ -222,11 +222,13 @@ export const actions: Actions = {
 		const name = g('name');
 		const category = g('category');
 		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
+		const defaultRateRaw = g('defaultRateCents');
+		const defaultRateCents = defaultRateRaw ? Math.round(parseFloat(defaultRateRaw) * 100) || null : null;
 		if (!propertyId || !name || !category) return fail(400, { error: 'Missing fields' });
 		if (id) {
-			await db.update(roomTypes).set({ name, category, sortOrder }).where(eq(roomTypes.id, id));
+			await db.update(roomTypes).set({ name, category, sortOrder, defaultRateCents }).where(eq(roomTypes.id, id));
 		} else {
-			await db.insert(roomTypes).values({ id: crypto.randomUUID(), propertyId, name, category, sortOrder });
+			await db.insert(roomTypes).values({ id: crypto.randomUUID(), propertyId, name, category, sortOrder, defaultRateCents });
 		}
 		return { success: true };
 	},

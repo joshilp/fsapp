@@ -167,16 +167,26 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 				let baseRateCents: number | null = null;
 				let baseMinNights = 1;
 				let seasonColour: string | null = null;
-				for (const s of propSeasons) {
-					if (s.startDate <= date && s.endDate >= date) {
-						const tier = s.tiers.find((t) => t.roomTypeId === rt.id);
-						if (tier) {
-							baseRateCents = tier.nightlyRate;
-							baseMinNights = s.minNights;
-							seasonColour  = s.colour;
-							break;
-						}
+				// Sort by date range length ascending — shortest (most specific) season wins
+				const matchingSeasons = propSeasons
+					.filter(s => s.startDate <= date && s.endDate >= date)
+					.sort((a, b) => {
+						const lenA = new Date(a.endDate + 'T12:00:00').getTime() - new Date(a.startDate + 'T12:00:00').getTime();
+						const lenB = new Date(b.endDate + 'T12:00:00').getTime() - new Date(b.startDate + 'T12:00:00').getTime();
+						return lenA - lenB;
+					});
+				for (const s of matchingSeasons) {
+					const tier = s.tiers.find((t) => t.roomTypeId === rt.id);
+					if (tier) {
+						baseRateCents = tier.nightlyRate;
+						baseMinNights = s.minNights;
+						seasonColour  = s.colour;
+						break;
 					}
+				}
+				// Fallback to room type default rate when no season applies
+				if (baseRateCents === null && rt.defaultRateCents) {
+					baseRateCents = rt.defaultRateCents;
 				}
 
 				const ov = overrideMap[rt.id]?.[date];

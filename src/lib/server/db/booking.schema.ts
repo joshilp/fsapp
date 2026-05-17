@@ -88,6 +88,8 @@ export const roomTypes = sqliteTable('room_types', {
 	// channexRatePlanId: UUID of the default Rate Plan in Channex (one per room type)
 	channexRoomTypeId: text('channex_room_type_id'),
 	channexRatePlanId: text('channex_rate_plan_id'),
+	// Floor rate used when no season covers a date — pushed to Channex as the fallback rate
+	defaultRateCents: integer('default_rate_cents'),
 	createdAt: integer('created_at', { mode: 'timestamp_ms' })
 		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
 		.notNull()

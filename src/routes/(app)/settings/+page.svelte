@@ -562,19 +562,34 @@
 												<input name="category" value={rt.category} required maxlength="4"
 													class="border-input bg-background rounded border px-2 py-1 text-sm w-16 font-mono uppercase" />
 											</div>
-											<div class="flex flex-col gap-1">
-												<label class="text-xs text-muted-foreground">Sort</label>
-												<input name="sortOrder" type="number" value={rt.sortOrder}
-													class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
+								<div class="flex flex-col gap-1">
+											<label class="text-xs text-muted-foreground">Sort</label>
+											<input name="sortOrder" type="number" value={rt.sortOrder}
+												class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
+										</div>
+										<div class="flex flex-col gap-1">
+											<label class="text-xs text-muted-foreground">Default rate</label>
+											<div class="flex items-center gap-1">
+												<span class="text-sm text-muted-foreground">$</span>
+												<input name="defaultRateCents" type="number" min="0" step="1"
+													value={rt.defaultRateCents ? (rt.defaultRateCents / 100).toFixed(0) : ''}
+													placeholder="100"
+													class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono" />
 											</div>
+										</div>
 											<Button type="submit" size="sm" class="h-8">Save</Button>
 											<Button type="button" variant="ghost" size="sm" class="h-8"
 												onclick={() => { editingRoomType = null; }}>Cancel</Button>
 										</form>
 									{:else}
-										<div class="flex items-center gap-3 rounded-md border p-2.5 text-sm">
-											<span class="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{rt.category}</span>
-											<span class="flex-1 font-medium">{rt.name}</span>
+									<div class="flex items-center gap-3 rounded-md border p-2.5 text-sm">
+										<span class="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{rt.category}</span>
+										<span class="flex-1 font-medium">{rt.name}</span>
+										{#if rt.defaultRateCents}
+											<span class="font-mono text-xs text-muted-foreground">${(rt.defaultRateCents / 100).toFixed(0)}/night</span>
+										{:else}
+											<span class="text-[10px] text-amber-600 font-medium">no default rate</span>
+										{/if}
 											<Button size="sm" variant="ghost" class="h-7 px-2 text-xs"
 												onclick={() => { editingRoomType = rt.id; }}>Edit</Button>
 											<form method="POST" action="?/deleteRoomType"
@@ -620,9 +635,18 @@
 							</div>
 							<div class="flex flex-col gap-1">
 								<label class="text-xs text-muted-foreground">Sort</label>
-								<input name="sortOrder" type="number" value="0"
-									class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
+							<input name="sortOrder" type="number" value="0"
+								class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
+						</div>
+						<div class="flex flex-col gap-1">
+							<label class="text-xs text-muted-foreground">Default rate</label>
+							<div class="flex items-center gap-1">
+								<span class="text-sm text-muted-foreground">$</span>
+								<input name="defaultRateCents" type="number" min="0" step="1"
+									placeholder="100"
+									class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono" />
 							</div>
+						</div>
 							<Button type="submit" size="sm" class="h-8" disabled={addingRoomType}>
 								{addingRoomType ? '…' : '+ Add type'}
 							</Button>

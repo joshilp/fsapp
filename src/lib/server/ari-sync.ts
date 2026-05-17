@@ -68,7 +68,7 @@ export async function syncARIForStay(roomTypeId: string, checkIn: string, checkO
 		const date = addDays(checkIn, i);
 
 		const avail = await computeAvailability(roomTypeId, roomIds, totalRooms, date);
-		const { rate, minNights } = getRateForDate(seasons, roomTypeId, date);
+		const { rate, minNights } = getRateForDate(seasons, roomTypeId, date, rt.defaultRateCents);
 		const override = await db.query.rateOverrides.findFirst({
 			where: and(eq(rateOverrides.roomTypeId, roomTypeId), eq(rateOverrides.date, date))
 		});
@@ -117,7 +117,7 @@ async function _pushForDate(roomTypeId: string, date: string): Promise<void> {
 		where: eq(rateSeasons.propertyId, rt.propertyId),
 		with: { tiers: { where: eq(rateTiers.roomTypeId, roomTypeId) } }
 	});
-	const { rate, minNights } = getRateForDate(seasons, roomTypeId, date);
+	const { rate, minNights } = getRateForDate(seasons, roomTypeId, date, rt.defaultRateCents);
 	const override = await db.query.rateOverrides.findFirst({
 		where: and(eq(rateOverrides.roomTypeId, roomTypeId), eq(rateOverrides.date, date))
 	});
@@ -191,15 +191,27 @@ async function computeAvailability(
 function getRateForDate(
 	seasons: Array<{ startDate: string; endDate: string; minNights: number; tiers: Array<{ roomTypeId: string; nightlyRate: number }> }>,
 	roomTypeId: string,
-	date: string
+	date: string,
+	defaultRateCents?: number | null
 ): { rate: number | null; minNights: number } {
-	for (const s of seasons) {
-		if (s.startDate <= date && s.endDate >= date) {
-			const tier = s.tiers.find((t) => t.roomTypeId === roomTypeId);
-			if (tier) return { rate: tier.nightlyRate, minNights: s.minNights };
-		}
+	// Collect all seasons that cover this date and have a tier for this room type
+	// Sort shortest range first — most specific (shortest) season wins
+	const matching = seasons
+		.filter(s => s.startDate <= date && s.endDate >= date)
+		.sort((a, b) => rangeDays(a) - rangeDays(b));
+
+	for (const s of matching) {
+		const tier = s.tiers.find((t) => t.roomTypeId === roomTypeId);
+		if (tier) return { rate: tier.nightlyRate, minNights: s.minNights };
 	}
-	return { rate: null, minNights: 1 };
+	// Fallback to room type default rate when no season applies
+	return { rate: defaultRateCents ?? null, minNights: 1 };
+}
+
+function rangeDays(s: { startDate: string; endDate: string }): number {
+	return Math.round(
+		(new Date(s.endDate + 'T12:00:00').getTime() - new Date(s.startDate + 'T12:00:00').getTime()) / 86400000
+	);
 }
 
 function addDays(iso: string, n: number): string {
