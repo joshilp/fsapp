@@ -25,7 +25,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		})
 	]);
 
-	return { year, propertiesList, roomTypesList, seasonsList };
+	const activePropId = url.searchParams.get('prop') || propertiesList[0]?.id || '';
+
+	return { year, activePropId, propertiesList, roomTypesList, seasonsList };
 };
 
 export const actions: Actions = {

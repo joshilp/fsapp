@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { goto } from '$app/navigation';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
-	// ─── State ────────────────────────────────────────────────────────────────
-	let year = $state(data.year);
-	let propertyId = $state(data.propertiesList[0]?.id ?? '');
+	// ─── URL-driven state (derived so they stay in sync with navigation) ───────
+	const year       = $derived(data.year);
+	const propertyId = $derived(data.activePropId);
+
+	// ─── Panel state (reset when property changes) ────────────────────────────
 	let selectedSeason = $state<typeof data.seasonsList[0] | null>(null);
 	let panelMode = $state<'view' | 'edit' | 'create'>('view');
 	let createStart = $state('');
@@ -14,15 +17,42 @@
 	let saving = $state(false);
 	let deleting = $state(false);
 
-	// ─── Derived: seasons for current property ─────────────────────────────
-	const seasons = $derived(data.seasonsList.filter((s) => s.propertyId === propertyId));
+	$effect(() => {
+		propertyId; // reactive — fires when property changes
+		selectedSeason = null;
+		panelMode = 'view';
+	});
+
+	// ─── Room type rate overlays ──────────────────────────────────────────────
+	// rtVisible[id] = true means that room type's rate is shown in each cell
+	let rtVisible = $state<Record<string, boolean>>({});
+	const hasVisibleRTs = $derived(Object.values(rtVisible).some(Boolean));
+	function toggleRT(id: string) { rtVisible[id] = !rtVisible[id]; }
+
+	// ─── Label display mode ───────────────────────────────────────────────────
+	const LABEL_MODE_KEY = 'rate-cal-label-mode';
+	function loadLabelMode(): 'code' | 'name' | 'none' {
+		if (typeof localStorage === 'undefined') return 'code';
+		return (localStorage.getItem(LABEL_MODE_KEY) as 'code' | 'name' | 'none') || 'code';
+	}
+	let labelMode = $state<'code' | 'name' | 'none'>(loadLabelMode());
+	function setLabelMode(m: 'code' | 'name' | 'none') {
+		labelMode = m;
+		if (typeof localStorage !== 'undefined') localStorage.setItem(LABEL_MODE_KEY, m);
+	}
+	function rtLabel(rt: { category: string; name: string }): string {
+		if (labelMode === 'name') return rt.name.slice(0, 14);
+		return rt.category.slice(0, 6); // 'code' mode
+	}
+
+	// ─── Derived: seasons + room types for current property ───────────────────
+	const seasons   = $derived(data.seasonsList.filter((s) => s.propertyId === propertyId));
 	const roomTypes = $derived(data.roomTypesList.filter((rt) => rt.propertyId === propertyId));
 
-	// ─── Day → season map (rebuilt when seasons or year change) ───────────
+	// ─── Day → season map ─────────────────────────────────────────────────────
 	const dayMap = $derived.by(() => {
 		const m = new Map<string, typeof seasons[0]>();
 		for (const s of seasons) {
-			// Only map days that fall within the displayed year
 			const start = s.startDate > `${year}-01-01` ? s.startDate : `${year}-01-01`;
 			const end = s.endDate < `${year}-12-31` ? s.endDate : `${year}-12-31`;
 			if (start > end) continue;
@@ -36,7 +66,7 @@
 		return m;
 	});
 
-	// ─── Calendar generation ───────────────────────────────────────────────
+	// ─── Calendar generation ──────────────────────────────────────────────────
 	type CalDay = { iso: string; day: number; inMonth: boolean };
 	type CalMonth = { name: string; weeks: CalDay[][] };
 
@@ -46,23 +76,18 @@
 		return MONTH_NAMES.map((name, mi) => {
 			const firstDay = new Date(year, mi, 1);
 			const lastDay = new Date(year, mi + 1, 0);
-			// Start grid on Sunday
-			const startPad = firstDay.getDay(); // 0=Sun
+			const startPad = firstDay.getDay();
 			const weeks: CalDay[][] = [];
 			let week: CalDay[] = [];
-
-			// Padding days from prev month
 			for (let i = 0; i < startPad; i++) {
 				const d = new Date(year, mi, 1 - (startPad - i));
 				week.push({ iso: d.toISOString().slice(0, 10), day: d.getDate(), inMonth: false });
 			}
-
 			for (let d = 1; d <= lastDay.getDate(); d++) {
 				const iso = `${year}-${String(mi + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 				week.push({ iso, day: d, inMonth: true });
 				if (week.length === 7) { weeks.push(week); week = []; }
 			}
-			// Trailing padding
 			while (week.length > 0 && week.length < 7) {
 				week.push({ iso: '', day: 0, inMonth: false });
 			}
@@ -71,7 +96,7 @@
 		});
 	});
 
-	// ─── Helpers ──────────────────────────────────────────────────────────
+	// ─── Helpers ──────────────────────────────────────────────────────────────
 	const today = new Date().toISOString().slice(0, 10);
 
 	function fmt(cents: number) { return `$${(cents / 100).toFixed(0)}`; }
@@ -94,18 +119,10 @@
 	function clickDay(iso: string) {
 		if (!iso) return;
 		const s = dayMap.get(iso);
-		if (s) {
-			selectedSeason = s;
-			panelMode = 'view';
-		} else {
-			createStart = iso;
-			createEnd = iso;
-			selectedSeason = null;
-			panelMode = 'create';
-		}
+		if (s) { selectedSeason = s; panelMode = 'view'; }
+		else { createStart = iso; createEnd = iso; selectedSeason = null; panelMode = 'create'; }
 	}
 
-	// Colour-bar spans: compute contiguous runs per month row for the legend strip
 	function seasonRuns(weeks: CalDay[][]): { iso: string; season: typeof seasons[0] }[] {
 		const seen = new Set<string>();
 		const runs: { iso: string; season: typeof seasons[0] }[] = [];
@@ -118,6 +135,11 @@
 		}
 		return runs;
 	}
+
+	// Nav URL helpers
+	function navUrl(y: number, p?: string) {
+		return `?year=${y}&prop=${p ?? propertyId}`;
+	}
 </script>
 
 <svelte:head>
@@ -129,9 +151,9 @@
 		.no-print { display: none !important; }
 		.print-full { break-inside: avoid; }
 		:global(body) { font-size: 9pt; }
-		/* Force background colors to print */
 		* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-		@page { margin: 0.4in; size: letter landscape; }
+		/* Landscape fits 4-col grid better; switch to portrait when showing many rates */
+		@page { margin: 0.35in; size: letter landscape; }
 	}
 </style>
 
@@ -145,28 +167,61 @@
 			<h1 class="text-lg font-bold">Rate Calendar</h1>
 
 			<!-- Year nav -->
-			<div class="flex items-center gap-1 rounded-lg border px-1">
-				<a href="?year={year - 1}&prop={propertyId}"
-					class="px-2 py-1 text-sm hover:bg-muted rounded">‹</a>
+			<div class="flex items-center gap-0.5 rounded-lg border px-1">
+				<a href={navUrl(year - 1)} class="px-2 py-1 text-sm hover:bg-muted rounded">‹</a>
 				<span class="px-2 text-sm font-semibold">{year}</span>
-				<a href="?year={year + 1}&prop={propertyId}"
-					class="px-2 py-1 text-sm hover:bg-muted rounded">›</a>
+				<a href={navUrl(year + 1)} class="px-2 py-1 text-sm hover:bg-muted rounded">›</a>
 			</div>
 
 			<!-- Property selector -->
-			<div class="flex items-center gap-2">
-				{#each data.propertiesList as prop}
-					<button
-						onclick={() => { propertyId = prop.id; selectedSeason = null; }}
-						class="rounded-md border px-3 py-1.5 text-sm font-medium transition-colors {propertyId === prop.id ? 'bg-foreground text-background border-foreground' : 'hover:bg-muted'}"
-					>{prop.name}</button>
-				{/each}
-			</div>
+			{#if data.propertiesList.length > 1}
+				<select
+					class="rounded border border-input bg-background px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-ring"
+					onchange={(e) => goto(navUrl(year, (e.target as HTMLSelectElement).value))}>
+					{#each data.propertiesList as prop}
+						<option value={prop.id} selected={propertyId === prop.id}>{prop.name}</option>
+					{/each}
+				</select>
+			{:else}
+				<span class="text-xs font-semibold">{data.propertiesList[0]?.name ?? ''}</span>
+			{/if}
+
+			<!-- Room type rate toggles -->
+			{#if roomTypes.length > 0}
+				<div class="flex items-center gap-1.5 flex-wrap">
+					<span class="text-xs text-muted-foreground">Show rates:</span>
+					{#each roomTypes as rt}
+						<button
+							onclick={() => toggleRT(rt.id)}
+							class={['rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+								rtVisible[rt.id] ? 'bg-foreground text-background border-foreground' : 'border-border text-muted-foreground hover:border-foreground/40'
+							].join(' ')}
+						>{rt.category}: {rt.name}</button>
+					{/each}
+					{#if hasVisibleRTs}
+						<button onclick={() => rtVisible = {}} class="text-xs text-muted-foreground hover:text-foreground">✕ Clear</button>
+					{/if}
+				</div>
+			{/if}
+
+			<!-- Label mode (only visible when rates are toggled on) -->
+			{#if hasVisibleRTs}
+				<div class="flex rounded-md border border-input overflow-hidden text-xs font-medium" title="Label format in cells">
+					{#each [{ m: 'code', lbl: 'Code' }, { m: 'name', lbl: 'Name' }, { m: 'none', lbl: '$ only' }] as opt}
+						<button
+							onclick={() => setLabelMode(opt.m as 'code' | 'name' | 'none')}
+							class={['px-2 py-1 border-r border-input last:border-0 transition-colors',
+								labelMode === opt.m ? 'bg-foreground text-background' : 'bg-background text-muted-foreground hover:bg-muted'
+							].join(' ')}
+						>{opt.lbl}</button>
+					{/each}
+				</div>
+			{/if}
 
 			<button
 				onclick={() => window.print()}
 				class="ml-auto rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-			>🖨 Print</button>
+			>Print</button>
 
 			<a href="/settings#pricing" class="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2 no-print">
 				Settings →
@@ -206,30 +261,62 @@
 						{/each}
 					</div>
 
-					<!-- Weeks -->
-					{#each month.weeks as week}
+				<!-- Weeks -->
+				{#each month.weeks as week}
 						<div class="grid grid-cols-7 gap-px mb-px">
 							{#each week as cell}
 								{#if !cell.inMonth}
-									<div class="h-6 print:h-5"></div>
+									<div class={hasVisibleRTs ? 'min-h-8 print:min-h-7' : 'h-6 print:h-5'}></div>
 								{:else}
 									{@const style = dayStyle(cell.iso)}
 									{@const isToday = cell.iso === today}
 									{@const hasSeason = dayMap.has(cell.iso)}
+									{@const cellSeason = dayMap.get(cell.iso)}
+									<!-- Screen version -->
 									<button
-										class="no-print h-6 w-full rounded text-[10px] font-medium leading-none transition-all hover:brightness-90 active:scale-95
-											{isToday ? 'ring-2 ring-primary ring-offset-1' : ''}
-											{!hasSeason ? 'text-foreground hover:bg-muted' : ''}
-											{selectedSeason && dayMap.get(cell.iso)?.id === selectedSeason.id ? 'ring-1 ring-black/40' : ''}"
+										class={['no-print w-full rounded text-[10px] font-medium leading-none transition-all hover:brightness-90 active:scale-95 flex flex-col items-center justify-start pt-0.5 pb-0.5',
+											hasVisibleRTs ? 'min-h-8' : 'h-6',
+											isToday ? 'ring-2 ring-primary ring-offset-1' : '',
+											!hasSeason ? 'text-foreground hover:bg-muted' : '',
+											selectedSeason && dayMap.get(cell.iso)?.id === selectedSeason.id ? 'ring-1 ring-black/40' : ''
+										].join(' ')}
 										style={style || ''}
 										onclick={() => clickDay(cell.iso)}
-									>{cell.day}</button>
-									<!-- Print version: static div -->
+									>
+										<span class={hasVisibleRTs ? 'text-[9px] font-bold leading-none mb-0.5' : ''}>{cell.day}</span>
+										{#if hasVisibleRTs}
+											{#each roomTypes.filter(rt => rtVisible[rt.id]) as rt, ri}
+												{@const tier = cellSeason?.tiers.find(t => t.roomTypeId === rt.id)}
+												{#if tier}
+													<span class={['flex flex-col items-center leading-none w-full', ri % 2 === 0 ? 'opacity-100' : 'opacity-70'].join(' ')}>
+														{#if labelMode !== 'none'}<span class="text-[7px] font-medium leading-tight truncate max-w-full">{rtLabel(rt)}</span>{/if}
+														<span class="text-[8px] font-bold leading-tight">{fmt(tier.nightlyRate)}</span>
+													</span>
+												{/if}
+											{/each}
+										{/if}
+									</button>
+									<!-- Print version -->
 									<div
-										class="hidden print:flex h-5 w-full items-center justify-center rounded text-[7pt] font-medium leading-none
-											{isToday ? 'ring-1 ring-black' : ''}"
+										class={['hidden print:flex flex-col items-center justify-start pt-0.5 w-full rounded font-medium leading-none',
+											hasVisibleRTs ? 'min-h-7 pb-0.5' : 'h-5 justify-center',
+											isToday ? 'ring-1 ring-black' : ''
+										].join(' ')}
 										style={style || ''}
-									>{cell.day}</div>
+									>
+										<span class={hasVisibleRTs ? 'text-[7pt] font-bold leading-none mb-px' : 'text-[7pt]'}>{cell.day}</span>
+										{#if hasVisibleRTs}
+											{#each roomTypes.filter(rt => rtVisible[rt.id]) as rt, ri}
+												{@const tier = cellSeason?.tiers.find(t => t.roomTypeId === rt.id)}
+												{#if tier}
+													<span class={['flex flex-col items-center leading-none w-full', ri % 2 === 0 ? 'opacity-100' : 'opacity-70'].join(' ')}>
+														{#if labelMode !== 'none'}<span class="text-[5pt] font-medium leading-tight">{rtLabel(rt)}</span>{/if}
+														<span class="text-[6pt] font-bold leading-tight">{fmt(tier.nightlyRate)}</span>
+													</span>
+												{/if}
+											{/each}
+										{/if}
+									</div>
 								{/if}
 							{/each}
 						</div>
