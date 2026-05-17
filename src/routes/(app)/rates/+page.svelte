@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
+	import { toast } from 'svelte-sonner';
+	import * as Popover from '$lib/components/ui/popover/index.js';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -35,17 +38,92 @@
 		return (localStorage.getItem(LABEL_MODE_KEY) as 'code' | 'name' | 'none') || 'code';
 	}
 	let labelMode = $state<'code' | 'name' | 'none'>(loadLabelMode());
-	function setLabelMode(m: 'code' | 'name' | 'none') {
-		labelMode = m;
-		if (typeof localStorage !== 'undefined') localStorage.setItem(LABEL_MODE_KEY, m);
-	}
 	function rtLabel(rt: { category: string; name: string }): string {
 		if (labelMode === 'name') return rt.name.slice(0, 14);
 		return rt.category; // short code, already compact
 	}
 
+	// ─── Cell size mode ───────────────────────────────────────────────────────
+	const SIZE_MODE_KEY = 'rate-cal-size-mode';
+	function loadSizeMode(): 's' | 'm' | 'l' | 'xl' {
+		if (typeof localStorage === 'undefined') return 'm';
+		return (localStorage.getItem(SIZE_MODE_KEY) as 's' | 'm' | 'l' | 'xl') || 'm';
+	}
+	let sizeMode = $state<'s' | 'm' | 'l' | 'xl'>(loadSizeMode());
+	function setSizeMode(s: 's' | 'm' | 'l' | 'xl') {
+		sizeMode = s;
+		if (typeof localStorage !== 'undefined') localStorage.setItem(SIZE_MODE_KEY, s);
+	}
+
+	// ─── Year action dialogs ───────────────────────────────────────────────────
+	let copyDialogOpen   = $state(false);
+	let clearDialogOpen  = $state(false);
+	let displayPopoverOpen = $state(false);
+	let clearConfirmText = $state('');
+
+	async function submitCopyYear() {
+		copyingYear = true;
+		try {
+			const fd = new FormData();
+			fd.append('propertyId', propertyId);
+			fd.append('fromYear', String(year - 1));
+			fd.append('toYear', String(year));
+			const r = await fetch('?/copyYear', { method: 'POST', body: fd });
+			if (r.ok) { copyDialogOpen = false; await invalidateAll(); }
+			else toast.error('Copy failed');
+		} catch { toast.error('Copy failed'); }
+		finally { copyingYear = false; }
+	}
+
+	async function submitDeleteYear() {
+		if (clearConfirmText !== String(year)) return;
+		deletingYear = true;
+		try {
+			const fd = new FormData();
+			fd.append('propertyId', propertyId);
+			fd.append('year', String(year));
+			const r = await fetch('?/deleteYear', { method: 'POST', body: fd });
+			if (r.ok) { clearDialogOpen = false; clearConfirmText = ''; selectedSeason = null; await invalidateAll(); }
+			else toast.error('Delete failed');
+		} catch { toast.error('Delete failed'); }
+		finally { deletingYear = false; }
+	}
+
+	function setLabelMode(m: 'code' | 'name' | 'none') {
+		labelMode = m;
+		if (typeof localStorage !== 'undefined') localStorage.setItem(LABEL_MODE_KEY, m);
+	}
+	const sz = $derived.by(() => {
+		const s = sizeMode;
+		return {
+			// months-per-row (screen + print driven by same choice)
+			grid:          s === 's' ? 'grid-cols-4' : s === 'l' ? 'grid-cols-2' : s === 'xl' ? 'grid-cols-1' : 'grid-cols-3',
+			printGrid:     s === 's' ? 'print:grid-cols-4' : s === 'l' ? 'print:grid-cols-2' : s === 'xl' ? 'print:grid-cols-1' : 'print:grid-cols-3',
+			gap:           s === 's' ? 'gap-3' : s === 'l' ? 'gap-6' : s === 'xl' ? 'gap-8' : 'gap-4',
+			printGap:      s === 's' ? 'print:gap-1' : s === 'l' ? 'print:gap-3' : s === 'xl' ? 'print:gap-4' : 'print:gap-2',
+			// cell minimum height when rates are visible
+			cellH:         s === 's' ? 'min-h-6' : s === 'l' ? 'min-h-12' : s === 'xl' ? 'min-h-20' : 'min-h-9',
+			// print cell height (no "print:" prefix — used inside the hidden print:flex div)
+			printCellH:    s === 's' ? 'min-h-5' : s === 'l' ? 'min-h-10' : s === 'xl' ? 'min-h-16' : 'min-h-7',
+			// font sizes — screen
+			dayNum:        s === 's' ? 'text-[9px]' : s === 'l' ? 'text-[11px]' : s === 'xl' ? 'text-[14px]' : 'text-[10px]',
+			label:         s === 's' ? 'text-[7px]' : s === 'l' ? 'text-[9px]' : s === 'xl' ? 'text-[11px]' : 'text-[8px]',
+			rate:          s === 's' ? 'text-[8px]' : s === 'l' ? 'text-[11px]' : s === 'xl' ? 'text-[14px]' : 'text-[9px]',
+			minBadge:      s === 'xl' ? 'text-[10px]' : s === 'l' ? 'text-[8px]' : 'text-[6px]',
+			// font sizes — print
+			printDayNum:   s === 's' ? 'text-[7pt]' : s === 'l' ? 'text-[9pt]' : s === 'xl' ? 'text-[12pt]' : 'text-[8pt]',
+			printLabel:    s === 's' ? 'text-[5pt]' : s === 'l' ? 'text-[7pt]' : s === 'xl' ? 'text-[9pt]' : 'text-[6pt]',
+			printRate:     s === 's' ? 'text-[6pt]' : s === 'l' ? 'text-[8pt]' : s === 'xl' ? 'text-[11pt]' : 'text-[7pt]',
+			printMinBadge: s === 'xl' ? 'text-[8pt]' : s === 'l' ? 'text-[6pt]' : 'text-[5pt]',
+		};
+	});
+
 	// ─── Derived: seasons + room types for current property ───────────────────
-	const seasons      = $derived(data.seasonsList.filter((s) => s.propertyId === propertyId));
+	const seasons      = $derived(data.seasonsList.filter((s) =>
+		s.propertyId === propertyId &&
+		s.startDate  <= `${year}-12-31` &&
+		s.endDate    >= `${year}-01-01`
+	));
 	const roomTypes    = $derived(data.roomTypesList.filter((rt) => rt.propertyId === propertyId));
 	const printProperty = $derived(data.propertiesList.find(p => p.id === propertyId));
 
@@ -338,75 +416,166 @@
 	</div>
 {/if}
 
-<div class="flex min-h-screen items-start">
+<!-- ── Copy year AlertDialog ─────────────────────────────────────────────── -->
+<AlertDialog.Root bind:open={copyDialogOpen}>
+	<AlertDialog.Content class="max-w-sm">
+		<AlertDialog.Header>
+			<AlertDialog.Title>Copy {year - 1} seasons into {year}?</AlertDialog.Title>
+			<AlertDialog.Description>
+				All seasons from <strong>{year - 1}</strong> will be duplicated into <strong>{year}</strong> with dates shifted by one year. Existing {year} seasons are kept — duplicates won't be created if the dates already exist.
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+			<AlertDialog.Action
+				onclick={submitCopyYear}
+				disabled={copyingYear}
+				class="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+			>{copyingYear ? 'Copying…' : `Copy from ${year - 1}`}</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
 
+<!-- ── Clear year AlertDialog (type-to-confirm) ──────────────────────────── -->
+<AlertDialog.Root bind:open={clearDialogOpen}>
+	<AlertDialog.Content class="max-w-sm">
+		<AlertDialog.Header>
+			<AlertDialog.Title>Clear {year} seasons?</AlertDialog.Title>
+			<AlertDialog.Description>
+				This will permanently delete <strong>all rate seasons for {year}</strong>. Room type rates will fall back to defaults. This cannot be undone.
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<div class="px-6 pb-2 space-y-2">
+			<label class="text-sm text-muted-foreground">
+				Type <strong class="text-foreground font-mono">{year}</strong> to confirm
+			</label>
+			<input
+				type="text"
+				bind:value={clearConfirmText}
+				placeholder="Enter year"
+				class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-destructive/50"
+			/>
+		</div>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel onclick={() => clearConfirmText = ''}>Cancel</AlertDialog.Cancel>
+			<AlertDialog.Action
+				onclick={submitDeleteYear}
+				disabled={clearConfirmText !== String(year) || deletingYear}
+				class="bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+			>{deletingYear ? 'Clearing…' : `Delete all ${year} seasons`}</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
+
+<div class="flex min-h-screen items-start">
 	<!-- ── Main calendar area ───────────────────────────────────────────────── -->
 	<div class="flex-1 min-w-0 px-4 py-5">
 
 		<!-- Toolbar -->
-		<div class="no-print mb-4 flex flex-wrap items-center gap-3">
-			<h1 class="text-lg font-bold">Rate Calendar</h1>
+		<div class="no-print mb-4 space-y-2">
 
-			<!-- Year nav -->
-			<div class="flex items-center gap-0.5 rounded-lg border px-1">
-				<a href={navUrl(year - 1)} class="px-2 py-1 text-sm hover:bg-muted rounded">‹</a>
-				<span class="px-2 text-sm font-semibold">{year}</span>
-				<a href={navUrl(year + 1)} class="px-2 py-1 text-sm hover:bg-muted rounded">›</a>
+			<!-- Row 1: navigation + ⚙ Display popover -->
+			<div class="flex flex-wrap items-center gap-2">
+				<h1 class="text-lg font-bold">Rate Calendar</h1>
+
+				<!-- Year nav -->
+				<div class="flex items-center gap-0.5 rounded-lg border px-1">
+					<a href={navUrl(year - 1)} class="px-2 py-1 text-sm hover:bg-muted rounded">‹</a>
+					<span class="px-2 text-sm font-semibold">{year}</span>
+					<a href={navUrl(year + 1)} class="px-2 py-1 text-sm hover:bg-muted rounded">›</a>
+				</div>
+
+				<!-- Property selector -->
+				{#if data.propertiesList.length > 1}
+					<select
+						class="rounded border border-input bg-background px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-ring"
+						onchange={(e) => goto(navUrl(year, (e.target as HTMLSelectElement).value))}>
+						{#each data.propertiesList as prop}
+							<option value={prop.id} selected={propertyId === prop.id}>{prop.name}</option>
+						{/each}
+					</select>
+				{:else}
+					<span class="text-xs font-semibold">{data.propertiesList[0]?.name ?? ''}</span>
+				{/if}
+
+				<!-- Display popover (right-aligned) -->
+				<div class="ml-auto">
+					<Popover.Root bind:open={displayPopoverOpen}>
+						<Popover.Trigger
+							class="flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
+						>⚙ Display</Popover.Trigger>
+
+						<Popover.Content align="end" class="w-60 p-0 gap-0 print:hidden">
+							<div class="p-4 space-y-4">
+
+								<!-- Label format (only when rates visible) -->
+								{#if hasVisibleRTs}
+									<div>
+										<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Label format</p>
+										<div class="flex rounded-md border border-input overflow-hidden text-xs font-medium">
+											{#each [{ m: 'code', lbl: 'Code' }, { m: 'name', lbl: 'Name' }, { m: 'none', lbl: '$ only' }] as opt}
+												<button
+													onclick={() => setLabelMode(opt.m as 'code' | 'name' | 'none')}
+													class={['flex-1 px-2 py-1.5 border-r border-input last:border-0 transition-colors',
+														labelMode === opt.m ? 'bg-foreground text-background' : 'bg-background text-muted-foreground hover:bg-muted'
+													].join(' ')}
+												>{opt.lbl}</button>
+											{/each}
+										</div>
+									</div>
+								{/if}
+
+								<!-- Cell size -->
+								<div>
+									<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Cell size · print size</p>
+									<div class="flex rounded-md border border-input overflow-hidden text-xs font-medium">
+										{#each [{ s: 's', lbl: 'S', title: '4/row' }, { s: 'm', lbl: 'M', title: '3/row' }, { s: 'l', lbl: 'L', title: '2/row' }, { s: 'xl', lbl: 'XL', title: '1/row' }] as opt}
+											<button
+												onclick={() => setSizeMode(opt.s as 's' | 'm' | 'l' | 'xl')}
+												title={opt.title}
+												class={['flex-1 px-2 py-1.5 border-r border-input last:border-0 transition-colors',
+													sizeMode === opt.s ? 'bg-foreground text-background' : 'bg-background text-muted-foreground hover:bg-muted'
+												].join(' ')}
+											>{opt.lbl}</button>
+										{/each}
+									</div>
+									<p class="text-[9px] text-muted-foreground mt-1">
+										{sizeMode === 's' ? '4 months/row — compact overview' :
+										 sizeMode === 'm' ? '3 months/row — balanced' :
+										 sizeMode === 'l' ? '2 months/row — easy to read' :
+										 '1 month/row — full page per month'}
+									</p>
+								</div>
+
+								<!-- Print -->
+								<button onclick={() => { displayPopoverOpen = false; window.print(); }}
+									class="w-full rounded-md border px-3 py-1.5 text-sm hover:bg-muted text-left font-medium">
+									🖨 Print calendar
+								</button>
+							</div>
+
+							<!-- Divider + year actions -->
+							<div class="border-t border-border px-4 py-3 space-y-1">
+								<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Year actions</p>
+
+								<button
+									onclick={() => copyDialogOpen = true}
+									class="w-full rounded-md px-2.5 py-1.5 text-sm text-left hover:bg-muted transition-colors flex items-center gap-2"
+								>📋 Copy from {year - 1}</button>
+
+								<button
+									onclick={() => { clearConfirmText = ''; clearDialogOpen = true; }}
+									class="w-full rounded-md px-2.5 py-1.5 text-sm text-left hover:bg-destructive/10 text-destructive transition-colors flex items-center gap-2"
+								>🗑 Clear {year} seasons</button>
+							</div>
+						</Popover.Content>
+					</Popover.Root>
+				</div>
 			</div>
 
-			<!-- Property selector -->
-			{#if data.propertiesList.length > 1}
-				<select
-					class="rounded border border-input bg-background px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-ring"
-					onchange={(e) => goto(navUrl(year, (e.target as HTMLSelectElement).value))}>
-					{#each data.propertiesList as prop}
-						<option value={prop.id} selected={propertyId === prop.id}>{prop.name}</option>
-					{/each}
-				</select>
-			{:else}
-				<span class="text-xs font-semibold">{data.propertiesList[0]?.name ?? ''}</span>
-			{/if}
-
-			<!-- Copy from previous year -->
-			<form method="POST" action="?/copyYear"
-				use:enhance={() => {
-					copyingYear = true;
-					return async ({ update }) => { copyingYear = false; await update(); };
-				}}
-			>
-				<input type="hidden" name="propertyId" value={propertyId} />
-				<input type="hidden" name="fromYear" value={year - 1} />
-				<input type="hidden" name="toYear" value={year} />
-				<button type="submit" disabled={copyingYear}
-					class="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50"
-					title="Copy all seasons from {year - 1} into {year}, shifting dates by one year">
-					{copyingYear ? 'Copying…' : `Copy from ${year - 1}`}
-				</button>
-			</form>
-
-			<!-- Clear current year -->
-			<form method="POST" action="?/deleteYear"
-				use:enhance={({ cancel }) => {
-					if (!confirm(`Delete ALL ${year} seasons for this property? This cannot be undone.`)) {
-						cancel();
-						return;
-					}
-					deletingYear = true;
-					return async ({ update }) => { deletingYear = false; selectedSeason = null; await update(); };
-				}}
-			>
-				<input type="hidden" name="propertyId" value={propertyId} />
-				<input type="hidden" name="year" value={year} />
-				<button type="submit" disabled={deletingYear}
-					class="rounded-md border border-destructive/40 text-destructive px-2.5 py-1 text-xs hover:bg-destructive/5 disabled:opacity-50"
-					title="Delete all {year} seasons for this property">
-					{deletingYear ? 'Clearing…' : `Clear ${year}`}
-				</button>
-			</form>
-
-			<!-- Room type rate toggles -->
+			<!-- Row 2: room-type toggles -->
 			{#if roomTypes.length > 0}
-				<div class="flex items-center gap-1.5 flex-wrap">
+				<div class="flex flex-wrap items-center gap-2">
 					<span class="text-xs text-muted-foreground">Show rates:</span>
 					{#each roomTypes as rt}
 						<button
@@ -421,29 +590,6 @@
 					{/if}
 				</div>
 			{/if}
-
-			<!-- Label mode -->
-			{#if hasVisibleRTs}
-				<div class="flex rounded-md border border-input overflow-hidden text-xs font-medium" title="Label format in cells">
-					{#each [{ m: 'code', lbl: 'Code' }, { m: 'name', lbl: 'Name' }, { m: 'none', lbl: '$ only' }] as opt}
-						<button
-							onclick={() => setLabelMode(opt.m as 'code' | 'name' | 'none')}
-							class={['px-2 py-1 border-r border-input last:border-0 transition-colors',
-								labelMode === opt.m ? 'bg-foreground text-background' : 'bg-background text-muted-foreground hover:bg-muted'
-							].join(' ')}
-						>{opt.lbl}</button>
-					{/each}
-				</div>
-			{/if}
-
-			<button
-				onclick={() => window.print()}
-				class="ml-auto rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-			>Print</button>
-
-			<a href="/settings" class="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2 no-print">
-				Settings →
-			</a>
 		</div>
 
 		<!-- Drag hint -->
@@ -511,9 +657,22 @@
 	</div>
 
 	<!-- 12-month grid -->
-	<div class="grid grid-cols-3 gap-4 xl:grid-cols-4 print:grid-cols-4 print:gap-2"
+	<div class="grid {sz.grid} {sz.gap} {sz.printGrid} {sz.printGap}"
 			style={dragAnchor ? 'user-select:none' : ''}>
-			{#each calMonths as month}
+
+		<!-- Print-only repeat key — appears on the calendar page if it breaks from the cover header -->
+		<div class="hidden print:block col-span-full border-b border-black/20 pb-1 mb-1">
+			<div class="flex items-baseline justify-between">
+				<span class="text-[7pt] font-bold">{printProperty?.name ?? ''} — Rate Calendar {year}</span>
+				{#if hasVisibleRTs}
+					<span class="text-[6pt] text-muted-foreground">
+						{roomTypes.filter(rt => rtVisible[rt.id]).map(rt => rt.category).join(' · ')}
+					</span>
+				{/if}
+			</div>
+		</div>
+
+		{#each calMonths as month}
 				<div class="print-full">
 					<!-- Month heading -->
 					<div class="mb-1 text-center text-xs font-bold uppercase tracking-wider text-muted-foreground print:text-[8pt]">
@@ -532,69 +691,69 @@
 						<div class="grid grid-cols-7 gap-px mb-px">
 							{#each week as cell}
 								{#if !cell.inMonth}
-									<div class={hasVisibleRTs ? 'min-h-8 print:min-h-7' : 'h-6 print:h-5'}></div>
+								<div class={hasVisibleRTs ? `${sz.cellH} ${sz.printCellH}` : 'h-6 print:h-5'}></div>
 								{:else}
 									{@const style = dayStyle(cell.iso)}
 									{@const isToday = cell.iso === today}
 									{@const hasSeason = dayMap.has(cell.iso)}
 									{@const cellSeason = dayMap.get(cell.iso)}
 									{@const inDrag = dragAnchor !== null && dragDates.has(cell.iso)}
-								<!-- Screen version -->
-								<button
-									class={['no-print w-full rounded text-[10px] font-medium leading-none transition-all hover:brightness-90 active:scale-95 flex flex-col items-center justify-start pt-0.5 pb-0.5 cursor-pointer relative',
-										hasVisibleRTs ? 'min-h-8' : 'h-6',
-										isToday ? 'ring-2 ring-primary ring-offset-1' : '',
-										!hasSeason ? 'text-foreground hover:bg-muted' : '',
-										selectedSeason && dayMap.get(cell.iso)?.id === selectedSeason.id ? 'ring-1 ring-black/40' : '',
-										inDrag && !hasSeason ? 'bg-primary/20 ring-1 ring-primary' : '',
-										inDrag && hasSeason ? 'brightness-110 ring-1 ring-primary' : '',
-										cellSeason?.minNights > 1 ? 'border-b-4 border-b-black/50' : ''
-									].join(' ')}
-										style={style || ''}
-										onmousedown={(e) => { if (e.button === 0 && cell.iso) { e.preventDefault(); dragAnchor = cell.iso; dragTip = cell.iso; } }}
-										onmouseover={() => { if (dragAnchor && cell.iso) dragTip = cell.iso; }}
-									>
-										<span class={hasVisibleRTs ? 'text-[9px] font-bold leading-none mb-0.5' : ''}>{cell.day}</span>
-										{#if hasVisibleRTs}
-											{#each roomTypes.filter(rt => rtVisible[rt.id]) as rt, ri}
-												{@const tier = cellSeason?.tiers.find(t => t.roomTypeId === rt.id)}
-												{#if tier}
-													<span class={['flex flex-col items-center leading-none w-full', ri % 2 === 0 ? 'opacity-100' : 'opacity-70'].join(' ')}>
-														{#if labelMode !== 'none'}<span class="text-[7px] font-medium leading-tight truncate max-w-full">{rtLabel(rt)}</span>{/if}
-														<span class="text-[8px] font-bold leading-tight">{fmt(tier.nightlyRate)}</span>
-													</span>
-												{/if}
-											{/each}
-										{/if}
-										{#if cellSeason?.minNights > 1}
-											<span class="absolute bottom-0.5 right-0.5 text-[6px] font-bold leading-none opacity-70">{cellSeason.minNights}n</span>
-										{/if}
-									</button>
-								<!-- Print version -->
-								<div
-									class={['hidden print:flex flex-col items-center justify-start pt-0.5 w-full rounded font-medium leading-none relative',
-										hasVisibleRTs ? 'min-h-7 pb-0.5' : 'h-5 justify-center',
-										isToday ? 'ring-1 ring-black' : '',
-										cellSeason?.minNights > 1 ? 'border-b-4 border-b-black/60' : ''
-									].join(' ')}
-										style={style || ''}
-									>
-										<span class={hasVisibleRTs ? 'text-[7pt] font-bold leading-none mb-px' : 'text-[7pt]'}>{cell.day}</span>
-										{#if hasVisibleRTs}
-											{#each roomTypes.filter(rt => rtVisible[rt.id]) as rt, ri}
-												{@const tier = cellSeason?.tiers.find(t => t.roomTypeId === rt.id)}
-												{#if tier}
-													<span class={['flex flex-col items-center leading-none w-full', ri % 2 === 0 ? 'opacity-100' : 'opacity-70'].join(' ')}>
-														{#if labelMode !== 'none'}<span class="text-[5pt] font-medium leading-tight">{rtLabel(rt)}</span>{/if}
-														<span class="text-[6pt] font-bold leading-tight">{fmt(tier.nightlyRate)}</span>
-													</span>
-												{/if}
-											{/each}
-										{/if}
-										{#if cellSeason?.minNights > 1}
-											<span class="absolute bottom-0.5 right-0.5 text-[5pt] font-bold leading-none opacity-70">{cellSeason.minNights}n</span>
-										{/if}
-									</div>
+							<!-- Screen version -->
+							<button
+								class={['no-print w-full rounded text-[10px] font-medium leading-none transition-all hover:brightness-90 active:scale-95 flex flex-col items-center justify-start pt-0.5 pb-0.5 cursor-pointer relative',
+									hasVisibleRTs ? sz.cellH : 'h-6',
+									isToday ? 'ring-2 ring-primary ring-offset-1' : '',
+									!hasSeason ? 'text-foreground hover:bg-muted' : '',
+									selectedSeason && dayMap.get(cell.iso)?.id === selectedSeason.id ? 'ring-1 ring-black/40' : '',
+									inDrag && !hasSeason ? 'bg-primary/20 ring-1 ring-primary' : '',
+									inDrag && hasSeason ? 'brightness-110 ring-1 ring-primary' : '',
+									cellSeason?.minNights > 1 ? 'border-b-4 border-b-black/50' : ''
+								].join(' ')}
+									style={style || ''}
+									onmousedown={(e) => { if (e.button === 0 && cell.iso) { e.preventDefault(); dragAnchor = cell.iso; dragTip = cell.iso; } }}
+									onmouseover={() => { if (dragAnchor && cell.iso) dragTip = cell.iso; }}
+								>
+									<span class={hasVisibleRTs ? `${sz.dayNum} font-bold leading-none mb-0.5` : ''}>{cell.day}</span>
+									{#if hasVisibleRTs}
+										{#each roomTypes.filter(rt => rtVisible[rt.id]) as rt, ri}
+											{@const tier = cellSeason?.tiers.find(t => t.roomTypeId === rt.id)}
+											{#if tier}
+												<span class={['flex flex-col items-center leading-none w-full', ri % 2 === 0 ? 'opacity-100' : 'opacity-80'].join(' ')}>
+													{#if labelMode !== 'none'}<span class="{sz.label} font-medium leading-tight truncate max-w-full">{rtLabel(rt)}</span>{/if}
+													<span class="{sz.rate} font-bold leading-tight">{fmt(tier.nightlyRate)}</span>
+												</span>
+											{/if}
+										{/each}
+									{/if}
+									{#if cellSeason?.minNights > 1}
+										<span class="absolute bottom-0.5 right-0.5 {sz.minBadge} font-bold leading-none opacity-70">{cellSeason.minNights}n</span>
+									{/if}
+								</button>
+							<!-- Print version -->
+							<div
+								class={['hidden print:flex flex-col items-center justify-start pt-0.5 w-full rounded font-medium leading-none relative',
+									hasVisibleRTs ? `${sz.printCellH} pb-0.5` : 'h-5 justify-center',
+									isToday ? 'ring-1 ring-black' : '',
+									cellSeason?.minNights > 1 ? 'border-b-4 border-b-black/60' : ''
+								].join(' ')}
+									style={style || ''}
+								>
+									<span class={hasVisibleRTs ? `${sz.printDayNum} font-bold leading-none mb-px` : sz.printDayNum}>{cell.day}</span>
+									{#if hasVisibleRTs}
+										{#each roomTypes.filter(rt => rtVisible[rt.id]) as rt, ri}
+											{@const tier = cellSeason?.tiers.find(t => t.roomTypeId === rt.id)}
+											{#if tier}
+												<span class={['flex flex-col items-center leading-none w-full', ri % 2 === 0 ? 'opacity-100' : 'opacity-80'].join(' ')}>
+													{#if labelMode !== 'none'}<span class="{sz.printLabel} font-medium leading-tight">{rtLabel(rt)}</span>{/if}
+													<span class="{sz.printRate} font-bold leading-tight">{fmt(tier.nightlyRate)}</span>
+												</span>
+											{/if}
+										{/each}
+									{/if}
+									{#if cellSeason?.minNights > 1}
+										<span class="absolute bottom-0.5 right-0.5 {sz.printMinBadge} font-bold leading-none opacity-70">{cellSeason.minNights}n</span>
+									{/if}
+								</div>
 								{/if}
 							{/each}
 						</div>
