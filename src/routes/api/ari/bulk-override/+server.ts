@@ -12,6 +12,7 @@ interface BulkOverrideBody {
 	rateMode: 'none' | 'set' | 'increase_pct';
 	rateValue?: number | null;
 	minNights?: number | null;
+	availabilityOverride?: number | null; // null = clear override, -1 = no change
 	stopSell?: boolean | null;
 	closedToArrival?: boolean | null;
 	closedToDeparture?: boolean | null;
@@ -43,7 +44,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
 
 	const body = (await request.json()) as BulkOverrideBody;
-	const { dates, rateMode, rateValue, minNights, stopSell, closedToArrival, closedToDeparture } =
+	const { dates, rateMode, rateValue, minNights, availabilityOverride, stopSell, closedToArrival, closedToDeparture } =
 		body;
 
 	if (!dates?.length) return json({ error: 'No dates provided' }, { status: 400 });
@@ -73,6 +74,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 			const currentRate = existing?.rateCents ?? null;
 			const currentMin = existing?.minNights ?? null;
+			const currentAvailOverride = existing?.availabilityOverride ?? null;
 			const currentStop = existing?.stopSell ?? false;
 			const currentCTA = existing?.closedToArrival ?? false;
 			const currentCTD = existing?.closedToDeparture ?? false;
@@ -86,8 +88,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				if (base != null) newRate = Math.round(base * (1 + rateValue / 100));
 			}
 
-			// Apply field changes ("no change" = null means keep current)
-			const newMin = minNights != null ? minNights : currentMin;
+			// Apply field changes; undefined = no change sentinel, null = clear override
+			const newMin = minNights !== undefined ? minNights : currentMin;
+			// availabilityOverride: -1 = no change, null = clear, number = set
+			const newAvailOverride = availabilityOverride === undefined || availabilityOverride === -1
+				? currentAvailOverride
+				: availabilityOverride;
 			const newStop = stopSell != null ? stopSell : currentStop;
 			const newCTA = closedToArrival != null ? closedToArrival : currentCTA;
 			const newCTD = closedToDeparture != null ? closedToDeparture : currentCTD;
@@ -99,7 +105,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 			// Only insert if there's a non-default value to store
 			const hasContent =
-				newRate != null || (newMin != null && newMin > 1) || newStop || newCTA || newCTD;
+				newRate != null || (newMin != null && newMin > 1) ||
+				newAvailOverride != null ||
+				newStop || newCTA || newCTD;
 			if (hasContent) {
 				await db.insert(rateOverrides).values({
 					id: crypto.randomUUID(),
@@ -107,6 +115,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					date,
 					rateCents: newRate,
 					minNights: newMin,
+					availabilityOverride: newAvailOverride,
 					stopSell: newStop,
 					closedToArrival: newCTA,
 					closedToDeparture: newCTD,

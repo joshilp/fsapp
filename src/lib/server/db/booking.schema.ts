@@ -189,6 +189,9 @@ export const rateOverrides = sqliteTable(
 		rateCents: integer('rate_cents'),
 		// null = use season minNights; set to override minimum stay for this date
 		minNights: integer('min_nights'),
+		// Selling availability cap: null = use computed (totalRooms - bookings);
+		// set to limit how many rooms are offered online for this date (OTA allotment)
+		availabilityOverride: integer('availability_override'),
 		// Channel restrictions
 		stopSell: integer('stop_sell', { mode: 'boolean' }).notNull().default(false),
 		closedToArrival: integer('closed_to_arrival', { mode: 'boolean' }).notNull().default(false),

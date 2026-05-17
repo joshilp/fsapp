@@ -20,8 +20,10 @@ function addDays(iso: string, n: number) {
 }
 
 export type ARICell = {
-	available: number;
+	available: number;         // effective selling availability (may be capped by override)
+	physicalAvailable: number; // real computed availability (totalRooms - bookings)
 	totalRooms: number;
+	availabilityOverride: number | null; // set = operator-capped selling limit
 	baseRateCents: number | null;
 	overrideRateCents: number | null;
 	effectiveRateCents: number | null;
@@ -160,7 +162,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 					(b) => b.requestedRoomTypeId === rt.id &&
 					       b.checkInDate <= date && b.checkOutDate > date
 				).length;
-				const available = Math.max(0, totalRooms - booked - unassigned);
+				const physicalAvailable = Math.max(0, totalRooms - booked - unassigned);
 
 				let baseRateCents: number | null = null;
 				let baseMinNights = 1;
@@ -184,13 +186,20 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 				const stopSell            = ov?.stopSell ?? false;
 				const closedToArrival     = ov?.closedToArrival ?? false;
 				const closedToDeparture   = ov?.closedToDeparture ?? false;
+				const availabilityOverride = ov?.availabilityOverride ?? null;
+				// Selling availability: cap physical availability by the override if set
+				const available = availabilityOverride != null
+					? Math.min(physicalAvailable, availabilityOverride)
+					: physicalAvailable;
 				const hasOverride = !!ov && (
 					ov.rateCents != null || ov.minNights != null ||
+					ov.availabilityOverride != null ||
 					ov.stopSell || ov.closedToArrival || ov.closedToDeparture
 				);
 
 				ariData[rt.id][date] = {
-					available, totalRooms, baseRateCents, overrideRateCents, effectiveRateCents,
+					available, physicalAvailable, totalRooms, availabilityOverride,
+					baseRateCents, overrideRateCents, effectiveRateCents,
 					baseMinNights, minNights, stopSell, closedToArrival, closedToDeparture,
 					hasOverride, seasonColour
 				};

@@ -125,13 +125,18 @@ async function _pushForDate(roomTypeId: string, date: string): Promise<void> {
 	const effectiveRate = override?.rateCents ?? rate;
 	if (!effectiveRate) return;
 
+	// If an availabilityOverride is set, use it as the selling cap (but never exceed real availability)
+	const effectiveAvail = override?.availabilityOverride != null
+		? Math.min(avail, override.availabilityOverride)
+		: avail;
+
 	await pushARI([{
 		channexPropertyId: rt.property.channexPropertyId!,
 		channexRoomTypeId: rt.channexRoomTypeId!,
 		channexRatePlanId: rt.channexRatePlanId!,
 		dateFrom: date,
 		dateTo: date,
-		availability: avail,
+		availability: effectiveAvail,
 		rateCents: effectiveRate,
 		minNights: override?.minNights ?? minNights,
 		stopSell: override?.stopSell ?? false,

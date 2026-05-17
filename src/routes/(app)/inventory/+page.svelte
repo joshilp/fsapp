@@ -68,11 +68,12 @@
 	let bulkRateMode  = $state<'none' | 'set' | 'increase_pct'>('none');
 	let bulkRateValue = $state('');
 	let bulkMinNights = $state('');
-	let bulkStopSell  = $state<'no_change' | 'enable' | 'disable'>('no_change');
-	let bulkCTA       = $state<'no_change' | 'enable' | 'disable'>('no_change');
-	let bulkCTD       = $state<'no_change' | 'enable' | 'disable'>('no_change');
-	let bulkApplyTo   = $state<'roomType' | 'property'>('roomType');
-	let bulkSaving    = $state(false);
+	let bulkStopSell      = $state<'no_change' | 'enable' | 'disable'>('no_change');
+	let bulkCTA           = $state<'no_change' | 'enable' | 'disable'>('no_change');
+	let bulkCTD           = $state<'no_change' | 'enable' | 'disable'>('no_change');
+	let bulkAvailOverride = $state(''); // '' = no change, number = set cap, 'clear' = remove
+	let bulkApplyTo       = $state<'roomType' | 'property'>('roomType');
+	let bulkSaving        = $state(false);
 
 	const bulkCount = $derived.by(() => {
 		if (!editRange) return 0;
@@ -112,6 +113,8 @@
 					rateMode: bulkRateMode,
 					rateValue: bulkRateValue ? Number(bulkRateValue) : null,
 					minNights: bulkMinNights ? Number(bulkMinNights) : null,
+					// -1 = no change sentinel; null = clear override; number = set cap
+					availabilityOverride: bulkAvailOverride === '' ? -1 : bulkAvailOverride === 'clear' ? null : Number(bulkAvailOverride),
 					stopSell: bulkStopSell === 'enable' ? true : bulkStopSell === 'disable' ? false : null,
 					closedToArrival: bulkCTA === 'enable' ? true : bulkCTA === 'disable' ? false : null,
 					closedToDeparture: bulkCTD === 'enable' ? true : bulkCTD === 'disable' ? false : null,
@@ -134,6 +137,12 @@
 	}
 
 	function getAri(propId: string) { return data.propData[propId]?.ariData ?? {}; }
+
+	// Svelte action: auto-focus + select on mount (used for inline availability input)
+	function focusOnMount(node: HTMLInputElement) {
+		node.focus();
+		node.select();
+	}
 
 	function findRtProp(roomTypeId: string) {
 		return data.propertiesList.find((p) => data.propData[p.id]?.roomTypesList.some((r) => r.id === roomTypeId));
@@ -209,7 +218,7 @@
 				editRange = { roomTypeId: r.rowId, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name, minCol: r.minCol, maxCol: r.maxCol };
 				bulkRateMode = 'none'; bulkRateValue = ''; bulkMinNights = '';
 				bulkStopSell = 'no_change'; bulkCTA = 'no_change'; bulkCTD = 'no_change';
-				bulkDOW = [true, true, true, true, true, true, true];
+				bulkDOW = [true, true, true, true, true, true, true]; bulkAvailOverride = '';
 			}
 			return;
 		}
@@ -287,6 +296,48 @@
 	let editCTD      = $state(false);
 	let savingCell   = $state(false);
 	let overrideDate = $state('');   // which night's override is being edited (may differ from check-in when multi-night)
+
+	// ─── Inline availability editing ─────────────────────────────────────────
+	// Key = "roomTypeId|date", value = current edit value ('' = not editing)
+	let inlineAvailEdit = $state<{ roomTypeId: string; date: string; value: string } | null>(null);
+	let savingInlineAvail = $state(false);
+
+	function startInlineAvail(roomTypeId: string, date: string, currentOverride: number | null) {
+		if (mode !== 'edit') return;
+		inlineAvailEdit = { roomTypeId, date, value: currentOverride != null ? String(currentOverride) : '' };
+	}
+
+	async function commitInlineAvail() {
+		if (!inlineAvailEdit || savingInlineAvail) return;
+		const { roomTypeId, date, value } = inlineAvailEdit;
+		const parsed = value.trim() === '' ? null : parseInt(value, 10);
+		// null = clear override (restore to computed), number = set cap
+		inlineAvailEdit = null;
+		savingInlineAvail = true;
+		try {
+			const r = await fetch('/api/ari/bulk-override', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					roomTypeId,
+					dates: [date],
+					rateMode: 'none',
+					// -1 = sentinel "no change for other fields", but availabilityOverride is explicit
+					availabilityOverride: parsed, // null clears it
+				})
+			});
+			if (r.ok) {
+				await invalidateAll();
+			} else {
+				const err = await r.json();
+				toast.error(err.error ?? 'Save failed');
+			}
+		} catch {
+			toast.error('Save failed');
+		} finally {
+			savingInlineAvail = false;
+		}
+	}
 
 	// Array of ISO dates for each night in the selected range (check-in inclusive, check-out exclusive)
 	const nightDates = $derived.by(() => {
@@ -575,28 +626,44 @@
 								wState === 'drawing' ? 'bg-orange-100' : wState === 'drawing-conflict' ? 'bg-red-100' :
 								inSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-400' : (cell ? cellBg(iso, cell) : '')
 							].join(' ')}
-								onmousedown={(e) => onAvailMouseDown(e, rt.id, i)}
-								onmouseenter={() => onAvailMouseEnter(rt.id, i)}
-								ontouchstart={(e) => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }}
-								ontouchend={(e) => {
-									const t = e.changedTouches[0];
-									if (Math.abs(t.clientX - touchStartX) < 10 && Math.abs(t.clientY - touchStartY) < 10) {
-										e.preventDefault();
-										openPopover(rt.id, iso);
-									}
-								}}
-								title="Click = info & book · drag = multi-night"
-							>
-									{#if cell}
-										{#if inSel}
-											<span class="text-[10px] font-bold text-orange-700">✓</span>
-										{:else}
-											<span class={availClass(cell)}>{cell.stopSell ? 'STOP' : cell.available}</span>
-											<div class="text-[8px] text-muted-foreground leading-none">/{cell.totalRooms}</div>
-										{/if}
+							onmousedown={(e) => { if (mode === 'edit') { e.preventDefault(); dragMoved = false; dragSel.start(rt.id, i); } else onAvailMouseDown(e, rt.id, i); }}
+							onmouseenter={() => onAvailMouseEnter(rt.id, i)}
+							onclick={() => { if (mode === 'edit' && !dragMoved) startInlineAvail(rt.id, iso, cell?.availabilityOverride ?? null); }}
+							ontouchstart={(e) => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }}
+							ontouchend={(e) => {
+								const t = e.changedTouches[0];
+								if (Math.abs(t.clientX - touchStartX) < 10 && Math.abs(t.clientY - touchStartY) < 10) {
+									e.preventDefault();
+									if (mode === 'edit') startInlineAvail(rt.id, iso, cell?.availabilityOverride ?? null);
+									else openPopover(rt.id, iso);
+								}
+							}}
+							title={mode === 'edit' ? 'Click to edit availability · drag to bulk edit' : 'Click = info & book · drag = multi-night'}
+						>
+								{#if cell}
+									{#if inSel}
+										<span class="text-[10px] font-bold text-orange-700">✓</span>
+								{:else if mode === 'edit' && inlineAvailEdit?.roomTypeId === rt.id && inlineAvailEdit?.date === iso}
+									<!-- Inline availability input -->
+									<input
+										type="number" min="0"
+										value={inlineAvailEdit.value}
+										oninput={(e) => { if (inlineAvailEdit) inlineAvailEdit.value = (e.target as HTMLInputElement).value; }}
+										onblur={commitInlineAvail}
+										onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitInlineAvail(); } if (e.key === 'Escape') inlineAvailEdit = null; }}
+										class="w-full text-center text-[11px] font-mono bg-blue-50 border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 px-0 py-0.5"
+										onclick={(e) => e.stopPropagation()}
+										use:focusOnMount
+									/>
 									{:else}
-										<span class="text-muted-foreground">—</span>
+										<span class={availClass(cell)}>{cell.stopSell ? 'STOP' : cell.available}</span>
+										<div class="text-[8px] leading-none {cell.availabilityOverride != null ? 'text-blue-600 font-medium' : 'text-muted-foreground'}">
+											{cell.availabilityOverride != null ? `${cell.available}↓${cell.physicalAvailable}` : `/${cell.totalRooms}`}
+										</div>
 									{/if}
+								{:else}
+									<span class="text-muted-foreground">—</span>
+								{/if}
 								</td>
 							{/each}
 						</tr>
@@ -953,6 +1020,21 @@
 				<p class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Min nights</p>
 				<input type="number" min="1" max="30" bind:value={bulkMinNights} placeholder="No change"
 					class="w-full rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+			</div>
+
+			<!-- Availability override -->
+			<div>
+				<p class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Selling availability</p>
+				<p class="text-[10px] text-muted-foreground mb-1.5">Cap rooms offered online (OTA allotment). Empty = no change.</p>
+				<div class="flex gap-2 items-center">
+					<input type="number" min="0" bind:value={bulkAvailOverride} placeholder="No change"
+						class="flex-1 rounded border border-input bg-background px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+						disabled={bulkAvailOverride === 'clear'} />
+					<button onclick={() => bulkAvailOverride = bulkAvailOverride === 'clear' ? '' : 'clear'}
+						class={['rounded border px-2 py-1.5 text-xs font-medium transition-colors', bulkAvailOverride === 'clear' ? 'bg-destructive/10 border-destructive/30 text-destructive' : 'border-input text-muted-foreground hover:bg-muted'].join(' ')}
+						title="Remove cap — restore to computed availability"
+					>{bulkAvailOverride === 'clear' ? 'Clearing…' : 'Clear cap'}</button>
+				</div>
 			</div>
 
 			<!-- Restrictions -->
