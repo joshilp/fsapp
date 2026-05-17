@@ -148,6 +148,9 @@ export const rateSeasons = sqliteTable(
 		// Minimum stay required for this season (e.g. 3 for long weekends)
 		minNights: integer('min_nights').notNull().default(1),
 		sortOrder: integer('sort_order').notNull().default(0),
+		// Optional base rate in cents. When set, room-type tiers store an upcharge on top.
+		// Effective rate = baseRateCents + tier.nightlyRate_upcharge → stored as tier.nightlyRate.
+		baseRateCents: integer('base_rate_cents'),
 		...timestamps
 	},
 	(t) => [index('rate_seasons_property_idx').on(t.propertyId)]

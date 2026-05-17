@@ -369,24 +369,31 @@
 							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
 					</div>
 				</div>
-				<div class="grid grid-cols-2 gap-2">
-					<div class="flex flex-col gap-1">
-						<label class="text-xs text-muted-foreground">Colour</label>
-						<input type="color" name="colour" value="#fde68a"
-							class="h-8 w-full rounded border cursor-pointer" />
-					</div>
-					<div class="flex flex-col gap-1">
-						<label class="text-xs text-muted-foreground">Min nights</label>
-						<input name="minNights" type="number" min="1" max="14" value="1"
-							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-					</div>
+			<div class="grid grid-cols-2 gap-2">
+				<div class="flex flex-col gap-1">
+					<label class="text-xs text-muted-foreground">Colour</label>
+					<input type="color" name="colour" value="#fde68a"
+						class="h-8 w-full rounded border cursor-pointer" />
 				</div>
+				<div class="flex flex-col gap-1">
+					<label class="text-xs text-muted-foreground">Min nights</label>
+					<input name="minNights" type="number" min="1" max="14" value="1"
+						class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+				</div>
+			</div>
 
-				<!-- Rates per room type -->
-				<div class="border-t pt-3">
-					<p class="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Nightly Rates</p>
-					<p class="text-xs text-muted-foreground mb-2">You can set rates after saving.</p>
+			<!-- Base rate -->
+			<div class="border-t pt-3">
+				<p class="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Base Rate</p>
+				<div class="flex items-center gap-1">
+					<span class="text-xs text-muted-foreground">$</span>
+					<input name="baseRateCents" type="number" min="0" step="1"
+						placeholder="e.g. 100"
+						class="border-input bg-background w-24 rounded border px-2 py-1.5 text-sm font-mono" />
+					<span class="text-xs text-muted-foreground">/night</span>
 				</div>
+				<p class="text-[10px] text-muted-foreground mt-1">Optional. Auto-sets all room types on create; adjust per-type upcharges after.</p>
+			</div>
 
 				<div class="flex gap-2 pt-1">
 					<button type="submit" disabled={saving}
@@ -451,18 +458,29 @@
 								class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
 						</div>
 					</div>
-					<div class="grid grid-cols-2 gap-2">
-						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">Colour</label>
-							<input type="color" name="colour" value={s.colour}
-								class="h-8 w-full rounded border cursor-pointer" />
-						</div>
-						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">Min nights</label>
-							<input name="minNights" type="number" min="1" max="14" value={s.minNights}
-								class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-						</div>
+				<div class="grid grid-cols-2 gap-2">
+					<div class="flex flex-col gap-1">
+						<label class="text-xs text-muted-foreground">Colour</label>
+						<input type="color" name="colour" value={s.colour}
+							class="h-8 w-full rounded border cursor-pointer" />
 					</div>
+					<div class="flex flex-col gap-1">
+						<label class="text-xs text-muted-foreground">Min nights</label>
+						<input name="minNights" type="number" min="1" max="14" value={s.minNights}
+							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+					</div>
+				</div>
+				<div class="flex flex-col gap-1">
+					<label class="text-xs text-muted-foreground">Base rate (optional)</label>
+					<div class="flex items-center gap-1">
+						<span class="text-xs text-muted-foreground">$</span>
+						<input name="baseRateCents" type="number" min="0" step="1"
+							value={s.baseRateCents ? (s.baseRateCents / 100).toFixed(0) : ''}
+							placeholder="e.g. 100"
+							class="border-input bg-background w-24 rounded border px-2 py-1.5 text-sm font-mono" />
+						<span class="text-xs text-muted-foreground">/night</span>
+					</div>
+				</div>
 					<button type="submit" disabled={saving}
 						class="w-full rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
 						{saving ? 'Saving…' : 'Save Changes'}
@@ -482,14 +500,75 @@
 						{deleting ? 'Deleting…' : 'Delete Season'}
 					</button>
 				</form>
-			{:else}
-				<!-- Rate table (view + inline edit) -->
-				<div class="mb-2 text-xs text-muted-foreground">
-					{#if s.minNights > 1}
-						<span class="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-medium">{s.minNights}-night minimum</span>
+		{:else}
+			<!-- Rate table (view + inline edit) -->
+			<div class="mb-2 text-xs text-muted-foreground">
+				{#if s.minNights > 1}
+					<span class="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-medium">{s.minNights}-night minimum</span>
+				{/if}
+				{#if s.baseRateCents}
+					<span class="ml-1 rounded bg-primary/10 text-primary px-1.5 py-0.5 font-medium font-mono">
+						Base ${(s.baseRateCents / 100).toFixed(0)}/night
+					</span>
+				{/if}
+			</div>
+
+			{#if s.baseRateCents}
+				<!-- Upcharge mode -->
+				<form method="POST" action="?/upsertAllTiersAtBase"
+					use:enhance={() => {
+						saving = true;
+						return async ({ update }) => { saving = false; await update({ reset: false }); };
+					}}
+					class="mb-3"
+				>
+					<input type="hidden" name="seasonId" value={s.id} />
+					<input type="hidden" name="propertyId" value={s.propertyId} />
+					<button type="submit" disabled={saving}
+						class="w-full rounded border px-2 py-1 text-xs hover:bg-muted">
+						{saving ? 'Saving…' : `Reset all to $${(s.baseRateCents / 100).toFixed(0)}`}
+					</button>
+				</form>
+				<div class="space-y-2">
+					{#each roomTypes as rt}
+						{@const tier = s.tiers.find(t => t.roomTypeId === rt.id)}
+						{@const upcharge = tier ? tier.nightlyRate - s.baseRateCents : 0}
+						<form method="POST" action="?/upsertRateTier"
+							use:enhance={() => {
+								saving = true;
+								return async ({ update }) => { saving = false; await update({ reset: false }); };
+							}}
+							class="flex items-center gap-2"
+						>
+							<input type="hidden" name="seasonId" value={s.id} />
+							<input type="hidden" name="roomTypeId" value={rt.id} />
+							<input type="hidden" name="baseRateCents" value={s.baseRateCents} />
+							<div class="flex-1 min-w-0">
+								<span class="text-xs font-medium">{rt.category}: {rt.name}</span>
+								{#if tier}
+									<span class="text-[10px] text-muted-foreground ml-1">= ${(tier.nightlyRate / 100).toFixed(0)}/night</span>
+								{/if}
+							</div>
+							<div class="flex items-center gap-1">
+								<span class="text-xs text-muted-foreground">+$</span>
+								<input
+									name="upcharge"
+									type="number"
+									step="1"
+									value={(upcharge / 100).toFixed(0)}
+									placeholder="0"
+									class="border-input bg-background w-16 rounded border px-2 py-1 text-sm font-mono text-right"
+								/>
+								<button type="submit" class="rounded border px-2 py-1 text-xs hover:bg-muted" disabled={saving}>✓</button>
+							</div>
+						</form>
+					{/each}
+					{#if roomTypes.length === 0}
+						<p class="text-xs text-muted-foreground">No room types configured for this property.</p>
 					{/if}
 				</div>
-
+			{:else}
+				<!-- Direct rate mode -->
 				<div class="space-y-2">
 					{#each roomTypes as rt}
 						{@const tier = s.tiers.find(t => t.roomTypeId === rt.id)}
@@ -525,6 +604,7 @@
 					{/if}
 				</div>
 			{/if}
+		{/if}
 
 		{:else}
 			<!-- Empty state -->

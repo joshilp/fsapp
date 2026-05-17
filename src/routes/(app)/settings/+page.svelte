@@ -644,10 +644,9 @@
 					</div>
 				</div>
 
-				<p class="text-xs text-muted-foreground">
-					Rate seasons are date ranges tied to a pricing tier. Each season can have a different
-					nightly rate per room type. Long-weekend seasons should have <strong>min nights = 3</strong>.
-				</p>
+			<p class="text-xs text-muted-foreground">
+				Rate seasons define pricing for a date range. Set a <strong>Base rate</strong> on a season and all room types get that rate automatically — then just enter upcharges (+ or −) for room types that differ. Or leave base rate blank to set each room type's rate individually. Long-weekend seasons should have <strong>min nights = 3</strong>.
+			</p>
 
 				<div class="space-y-3">
 					{#each pricingSeasons as season (season.id)}
@@ -666,8 +665,13 @@
 										<span class="ml-2 rounded bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 font-semibold">{season.minNights}n min</span>
 									{/if}
 								</div>
-								<!-- Rate summary pills -->
-								<div class="flex gap-1.5 flex-wrap justify-end">
+								<!-- Rate summary -->
+								<div class="flex gap-1.5 flex-wrap justify-end items-center">
+									{#if season.baseRateCents}
+										<span class="font-mono text-xs bg-primary/10 text-primary rounded px-1.5 py-0.5 font-semibold">
+											Base ${fmt(season.baseRateCents)}/night
+										</span>
+									{/if}
 									{#each season.tiers as tier}
 										<span class="font-mono text-xs bg-muted rounded px-1.5 py-0.5">
 											{tier.roomType.category}: ${fmt(tier.nightlyRate)}
@@ -713,16 +717,27 @@
 												<span class="font-mono text-xs text-muted-foreground">{season.colour}</span>
 											</div>
 										</div>
-										<div class="flex flex-col gap-1">
-											<label class="text-xs text-muted-foreground">Min nights</label>
-											<input name="minNights" type="number" min="1" max="14" value={season.minNights}
-												class="border-input bg-background rounded border px-2 py-1.5 text-sm w-20" />
+									<div class="flex flex-col gap-1">
+										<label class="text-xs text-muted-foreground">Min nights</label>
+										<input name="minNights" type="number" min="1" max="14" value={season.minNights}
+											class="border-input bg-background rounded border px-2 py-1.5 text-sm w-20" />
+									</div>
+									<div class="flex flex-col gap-1">
+										<label class="text-xs text-muted-foreground">Base rate (optional)</label>
+										<div class="flex items-center gap-1">
+											<span class="text-sm text-muted-foreground">$</span>
+											<input name="baseRateCents" type="number" min="0" step="1"
+												value={season.baseRateCents ? fmt(season.baseRateCents) : ''}
+												placeholder="e.g. 100"
+												class="border-input bg-background rounded border px-2 py-1.5 text-sm w-24 font-mono" />
+											<span class="text-xs text-muted-foreground">/night</span>
 										</div>
-										<div class="flex items-end gap-2 col-span-2">
-											<Button type="submit" size="sm" class="h-8" disabled={savingSeason}>
-												{savingSeason ? '…' : 'Save dates'}
-											</Button>
-										</div>
+									</div>
+									<div class="flex items-end gap-2 col-span-2">
+										<Button type="submit" size="sm" class="h-8" disabled={savingSeason}>
+											{savingSeason ? '…' : 'Save dates'}
+										</Button>
+									</div>
 									</form>
 									<form method="POST" action="?/deleteSeason"
 										use:enhance={() => {
@@ -738,9 +753,68 @@
 										</Button>
 									</form>
 
-									<!-- Rate table per room type -->
-									<div>
-										<p class="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Nightly Rates</p>
+								<!-- Rate table per room type -->
+								<div>
+									<p class="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Nightly Rates</p>
+									{#if season.baseRateCents}
+										<!-- Upcharge mode: each room type shows offset from the base rate -->
+										<p class="text-xs text-muted-foreground mb-2">
+											Base is <strong>${fmt(season.baseRateCents)}/night</strong>. Enter upcharge per room type (+/− dollars).
+										</p>
+										<form method="POST" action="?/upsertAllTiersAtBase"
+											use:enhance={() => {
+												savingTier = season.id + '__all';
+												return async ({ update }) => { savingTier = null; await update({ reset: false }); };
+											}}
+											class="mb-3"
+										>
+											<input type="hidden" name="seasonId" value={season.id} />
+											<input type="hidden" name="propertyId" value={pricingPropertyId} />
+											<Button type="submit" variant="outline" size="sm" class="h-7 text-xs"
+												disabled={savingTier === season.id + '__all'}>
+												{savingTier === season.id + '__all' ? '…' : `Set all room types to $${fmt(season.baseRateCents)}`}
+											</Button>
+										</form>
+										<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+											{#each propTypes as rt}
+												{@const existing = season.tiers.find((t) => t.roomTypeId === rt.id)}
+												{@const upcharge = existing ? existing.nightlyRate - season.baseRateCents : 0}
+												<form method="POST" action="?/upsertRateTier"
+													use:enhance={() => {
+														savingTier = season.id + rt.id;
+														return async ({ update }) => { savingTier = null; await update({ reset: false }); };
+													}}
+													class="flex flex-col gap-1"
+												>
+													<input type="hidden" name="seasonId" value={season.id} />
+													<input type="hidden" name="roomTypeId" value={rt.id} />
+													<input type="hidden" name="baseRateCents" value={season.baseRateCents} />
+													<label class="text-xs text-muted-foreground">{rt.category}: {rt.name}</label>
+													<div class="flex items-center gap-1">
+														<span class="text-sm text-muted-foreground">+$</span>
+														<input name="upcharge" type="number" step="1"
+															value={(upcharge / 100).toFixed(0)}
+															placeholder="0"
+															class="border-input bg-background rounded border px-2 py-1.5 text-sm w-20 font-mono"
+														/>
+														<Button type="submit" variant="ghost" size="sm" class="h-8 px-2 text-xs"
+															disabled={savingTier === season.id + rt.id}>
+															{savingTier === season.id + rt.id ? '…' : '✓'}
+														</Button>
+													</div>
+													{#if existing}
+														<span class="text-[10px] text-muted-foreground">= ${fmt(existing.nightlyRate)}/night</span>
+													{:else}
+														<span class="text-[10px] text-muted-foreground italic">not set</span>
+													{/if}
+												</form>
+											{/each}
+										</div>
+									{:else}
+										<!-- Direct rate mode (no base set) -->
+										<p class="text-xs text-muted-foreground mb-2">
+											Set a <strong>Base rate</strong> above to use the upcharge model, or enter absolute rates per room type.
+										</p>
 										<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
 											{#each propTypes as rt}
 												{@const existing = season.tiers.find((t) => t.roomTypeId === rt.id)}
@@ -769,56 +843,68 @@
 												</form>
 											{/each}
 										</div>
-									</div>
+									{/if}
+								</div>
 								</div>
 							{/if}
 						</div>
 					{/each}
 				</div>
 
-				<!-- Add new season -->
-				<div class="bg-card border-border rounded-lg border p-4 shadow-sm">
-					<p class="text-sm font-medium mb-3">Add Season</p>
-					<form method="POST" action="?/upsertSeason"
-						use:enhance={() => {
-							savingSeason = true;
-							return async ({ update }) => { savingSeason = false; await update(); };
-						}}
-						class="grid grid-cols-2 gap-3 sm:grid-cols-4"
-					>
-						<input type="hidden" name="propertyId" value={pricingPropertyId} />
-						<div class="flex flex-col gap-1 col-span-2">
-							<label class="text-xs text-muted-foreground">Name</label>
-							<input name="name" placeholder="e.g. Easter Weekend" required
-								class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+			<!-- Add new season -->
+			<div class="bg-card border-border rounded-lg border p-4 shadow-sm">
+				<p class="text-sm font-medium mb-3">Add Season</p>
+				<form method="POST" action="?/upsertSeason"
+					use:enhance={() => {
+						savingSeason = true;
+						return async ({ update }) => { savingSeason = false; await update(); };
+					}}
+					class="grid grid-cols-2 gap-3 sm:grid-cols-4"
+				>
+					<input type="hidden" name="propertyId" value={pricingPropertyId} />
+					<div class="flex flex-col gap-1 col-span-2">
+						<label class="text-xs text-muted-foreground">Name</label>
+						<input name="name" placeholder="e.g. Easter Weekend" required
+							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<label class="text-xs text-muted-foreground">Start date</label>
+						<input name="startDate" type="date" required
+							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<label class="text-xs text-muted-foreground">End date</label>
+						<input name="endDate" type="date" required
+							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<label class="text-xs text-muted-foreground">Colour</label>
+						<input type="color" name="colour" value="#b7fab7"
+							class="h-8 w-16 rounded border cursor-pointer" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<label class="text-xs text-muted-foreground">Min nights</label>
+						<input name="minNights" type="number" min="1" value="1"
+							class="border-input bg-background rounded border px-2 py-1.5 text-sm w-20" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<label class="text-xs text-muted-foreground">Base rate (optional)</label>
+						<div class="flex items-center gap-1">
+							<span class="text-sm text-muted-foreground">$</span>
+							<input name="baseRateCents" type="number" min="0" step="1"
+								placeholder="e.g. 100"
+								class="border-input bg-background rounded border px-2 py-1.5 text-sm w-24 font-mono" />
+							<span class="text-xs text-muted-foreground">/night</span>
 						</div>
-						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">Start date</label>
-							<input name="startDate" type="date" required
-								class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-						</div>
-						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">End date</label>
-							<input name="endDate" type="date" required
-								class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-						</div>
-						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">Colour</label>
-							<input type="color" name="colour" value="#b7fab7"
-								class="h-8 w-16 rounded border cursor-pointer" />
-						</div>
-						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">Min nights</label>
-							<input name="minNights" type="number" min="1" value="1"
-								class="border-input bg-background rounded border px-2 py-1.5 text-sm w-20" />
-						</div>
-						<div class="flex items-end col-span-2">
-							<Button type="submit" size="sm" class="h-8" disabled={savingSeason}>
-								{savingSeason ? '…' : '+ Add season'}
-							</Button>
-						</div>
-					</form>
-				</div>
+						<p class="text-[10px] text-muted-foreground">Sets all room types automatically</p>
+					</div>
+					<div class="flex items-end col-span-2">
+						<Button type="submit" size="sm" class="h-8" disabled={savingSeason}>
+							{savingSeason ? '…' : '+ Add season'}
+						</Button>
+					</div>
+				</form>
+			</div>
 			</div>
 		</Tabs.Content>
 
