@@ -9,7 +9,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
 
 	const body = await request.json();
-	const { roomTypeId, date, rateCents, minNights, stopSell, closedToArrival, closedToDeparture } = body as {
+	const { roomTypeId, date, rateCents, minNights, stopSell, closedToArrival, closedToDeparture, availabilityOverride } = body as {
 		roomTypeId: string;
 		date: string;
 		rateCents?: number | null;
@@ -17,6 +17,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		stopSell?: boolean;
 		closedToArrival?: boolean;
 		closedToDeparture?: boolean;
+		availabilityOverride?: number | null;
 	};
 
 	if (!roomTypeId || !date) return json({ error: 'Missing roomTypeId or date' }, { status: 400 });
@@ -25,7 +26,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		and(eq(rateOverrides.roomTypeId, roomTypeId), eq(rateOverrides.date, date))
 	);
 
-	const hasContent = rateCents != null || minNights != null || stopSell || closedToArrival || closedToDeparture;
+	const hasContent = rateCents != null || minNights != null || stopSell || closedToArrival || closedToDeparture || availabilityOverride != null;
 	if (hasContent) {
 		await db.insert(rateOverrides).values({
 			id: crypto.randomUUID(),
@@ -36,6 +37,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			stopSell: stopSell ?? false,
 			closedToArrival: closedToArrival ?? false,
 			closedToDeparture: closedToDeparture ?? false,
+			availabilityOverride: availabilityOverride ?? null,
 			updatedAt: new Date()
 		});
 	}

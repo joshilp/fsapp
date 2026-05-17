@@ -7,7 +7,7 @@ import { user } from '$lib/server/db/schema';
 import { pushARI } from '$lib/server/channex';
 import { fail } from '@sveltejs/kit';
 
-const WINDOW = 60;
+const WINDOW = 28;
 
 function isoDate(d: Date) {
 	return d.toISOString().slice(0, 10);
