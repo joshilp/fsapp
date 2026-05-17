@@ -5,26 +5,24 @@
 
 	let { data }: { data: PageData } = $props();
 
-	// ─── URL-driven state (derived so they stay in sync with navigation) ───────
+	// ─── URL-driven state ─────────────────────────────────────────────────────
 	const year       = $derived(data.year);
 	const propertyId = $derived(data.activePropId);
 
 	// ─── Panel state (reset when property changes) ────────────────────────────
 	let selectedSeason = $state<typeof data.seasonsList[0] | null>(null);
-	let panelMode = $state<'view' | 'edit' | 'create'>('view');
-	let createStart = $state('');
-	let createEnd = $state('');
+	let panelMode = $state<'view' | 'edit'>('view');
 	let saving = $state(false);
 	let deleting = $state(false);
+	let copyingYear = $state(false);
 
 	$effect(() => {
-		propertyId; // reactive — fires when property changes
+		propertyId;
 		selectedSeason = null;
 		panelMode = 'view';
 	});
 
 	// ─── Room type rate overlays ──────────────────────────────────────────────
-	// rtVisible[id] = true means that room type's rate is shown in each cell
 	let rtVisible = $state<Record<string, boolean>>({});
 	const hasVisibleRTs = $derived(Object.values(rtVisible).some(Boolean));
 	function toggleRT(id: string) { rtVisible[id] = !rtVisible[id]; }
@@ -42,7 +40,7 @@
 	}
 	function rtLabel(rt: { category: string; name: string }): string {
 		if (labelMode === 'name') return rt.name.slice(0, 14);
-		return rt.category.slice(0, 6); // 'code' mode
+		return rt.category.slice(0, 6);
 	}
 
 	// ─── Derived: seasons + room types for current property ───────────────────
@@ -116,13 +114,6 @@
 		return `background:${s.colour};color:${textColour(s.colour)}`;
 	}
 
-	function clickDay(iso: string) {
-		if (!iso) return;
-		const s = dayMap.get(iso);
-		if (s) { selectedSeason = s; panelMode = 'view'; }
-		else { createStart = iso; createEnd = iso; selectedSeason = null; panelMode = 'create'; }
-	}
-
 	function seasonRuns(weeks: CalDay[][]): { iso: string; season: typeof seasons[0] }[] {
 		const seen = new Set<string>();
 		const runs: { iso: string; season: typeof seasons[0] }[] = [];
@@ -140,7 +131,74 @@
 	function navUrl(y: number, p?: string) {
 		return `?year=${y}&prop=${p ?? propertyId}`;
 	}
+
+	// ─── Drag-to-create ──────────────────────────────────────────────────────
+	const PALETTE = ['#fde68a','#bbf7d0','#bfdbfe','#fca5a5','#ddd6fe','#fed7aa','#a7f3d0','#e9d5ff','#c7d2fe'];
+
+	function nextColour(): string {
+		const used = new Set(seasons.map(s => s.colour));
+		return PALETTE.find(c => !used.has(c)) ?? PALETTE[seasons.length % PALETTE.length];
+	}
+
+	function autoName(start: string, end: string): string {
+		const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+		const s = new Date(start + 'T12:00:00');
+		const e = new Date(end + 'T12:00:00');
+		if (start === end) return `${MON[s.getMonth()]} ${s.getDate()}`;
+		if (s.getMonth() === e.getMonth()) return `${MON[s.getMonth()]} ${s.getDate()}–${e.getDate()}`;
+		return `${MON[s.getMonth()]} ${s.getDate()} – ${MON[e.getMonth()]} ${e.getDate()}`;
+	}
+
+	let dragAnchor = $state<string | null>(null);
+	let dragTip    = $state<string | null>(null);
+	let savingDrag = $state(false);
+
+	const dragRange = $derived.by(() => {
+		if (!dragAnchor || !dragTip) return null;
+		const [a, b] = dragAnchor <= dragTip ? [dragAnchor, dragTip] : [dragTip, dragAnchor];
+		return { start: a, end: b };
+	});
+
+	const dragDates = $derived.by(() => {
+		if (!dragRange) return new Set<string>();
+		const s = new Set<string>();
+		let cur = new Date(dragRange.start + 'T12:00:00');
+		const end = new Date(dragRange.end + 'T12:00:00');
+		while (cur <= end) { s.add(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1); }
+		return s;
+	});
+
+	let dragPopover = $state<{
+		start: string; end: string;
+		name: string; colour: string;
+		rate: string; minNights: string;
+	} | null>(null);
+
+	function openCreate(start: string, end: string) {
+		dragPopover = { start, end, name: autoName(start, end), colour: nextColour(), rate: '', minNights: '1' };
+		selectedSeason = null;
+		panelMode = 'view';
+	}
+
+	function handleDocMouseUp() {
+		if (!dragAnchor) return;
+		const dr = dragRange;
+		if (dr) {
+			const isSingleCell = dr.start === dr.end;
+			if (isSingleCell) {
+				const s = dayMap.get(dr.start);
+				if (s) { selectedSeason = s; panelMode = 'view'; dragPopover = null; }
+				else openCreate(dr.start, dr.end);
+			} else {
+				openCreate(dr.start, dr.end);
+			}
+		}
+		dragAnchor = null;
+		dragTip = null;
+	}
 </script>
+
+<svelte:document onmouseup={handleDocMouseUp} />
 
 <svelte:head>
 	<title>Rate Calendar {year}</title>
@@ -152,10 +210,100 @@
 		.print-full { break-inside: avoid; }
 		:global(body) { font-size: 9pt; }
 		* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-		/* Landscape fits 4-col grid better; switch to portrait when showing many rates */
 		@page { margin: 0.35in; size: letter landscape; }
 	}
 </style>
+
+<!-- Drag-to-create popover -->
+{#if dragPopover}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+		role="dialog" aria-modal="true"
+		onmousedown={(e) => { if (e.target === e.currentTarget) dragPopover = null; }}>
+		<div class="bg-background border border-border rounded-xl shadow-2xl p-5 w-80 space-y-3"
+			onmousedown={(e) => e.stopPropagation()}>
+			<div class="flex items-center justify-between">
+				<h3 class="font-semibold text-sm">New Rate Season</h3>
+				<button type="button" onclick={() => { dragPopover = null; }}
+					class="text-muted-foreground hover:text-foreground text-lg leading-none px-1">✕</button>
+			</div>
+
+			<form method="POST" action="?/upsertSeason"
+				use:enhance={() => {
+					savingDrag = true;
+					return async ({ update }) => { savingDrag = false; dragPopover = null; await update(); };
+				}}
+				class="space-y-3"
+			>
+				<input type="hidden" name="propertyId" value={propertyId} />
+				<input type="hidden" name="sortOrder" value="0" />
+
+				<div class="flex flex-col gap-1">
+					<label for="dp-name" class="text-xs text-muted-foreground">Season name</label>
+					<input id="dp-name" name="name" bind:value={dragPopover.name} required
+						class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+				</div>
+
+				<div class="grid grid-cols-2 gap-2">
+					<div class="flex flex-col gap-1">
+						<label for="dp-start" class="text-xs text-muted-foreground">Start</label>
+						<input id="dp-start" name="startDate" type="date" bind:value={dragPopover.start} required
+							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<label for="dp-end" class="text-xs text-muted-foreground">End</label>
+						<input id="dp-end" name="endDate" type="date" bind:value={dragPopover.end} required
+							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+					</div>
+				</div>
+
+				<div class="grid grid-cols-2 gap-2">
+					<div class="flex flex-col gap-1">
+						<label for="dp-rate" class="text-xs text-muted-foreground">Base rate / night</label>
+						<div class="flex items-center gap-1">
+							<span class="text-xs text-muted-foreground">$</span>
+							<input id="dp-rate" name="baseRateCents" type="number" min="0" step="1"
+								bind:value={dragPopover.rate}
+								placeholder="100"
+								class="border-input bg-background rounded border px-2 py-1.5 text-sm font-mono w-full" />
+						</div>
+					</div>
+					<div class="flex flex-col gap-1">
+						<label for="dp-min" class="text-xs text-muted-foreground">Min nights</label>
+						<input id="dp-min" name="minNights" type="number" min="1" max="14"
+							bind:value={dragPopover.minNights}
+							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+					</div>
+				</div>
+
+				<div class="flex flex-col gap-1">
+					<label class="text-xs text-muted-foreground">Colour</label>
+					<div class="flex items-center gap-2 flex-wrap">
+						<input type="color" name="colour" bind:value={dragPopover.colour}
+							class="h-7 w-9 rounded border cursor-pointer shrink-0" />
+						{#each PALETTE as c}
+							<button type="button"
+								onclick={() => { if (dragPopover) dragPopover.colour = c; }}
+								class={['h-5 w-5 rounded border-2 transition-all shrink-0',
+									dragPopover.colour === c ? 'border-foreground scale-110' : 'border-transparent hover:border-foreground/40'
+								].join(' ')}
+								style="background:{c}"
+							></button>
+						{/each}
+					</div>
+				</div>
+
+				<div class="flex gap-2 pt-1">
+					<button type="submit" disabled={savingDrag}
+						class="flex-1 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
+						{savingDrag ? 'Saving…' : 'Create Season'}
+					</button>
+					<button type="button" onclick={() => { dragPopover = null; }}
+						class="rounded-md border px-3 py-1.5 text-sm hover:bg-muted">Cancel</button>
+				</div>
+			</form>
+		</div>
+	</div>
+{/if}
 
 <div class="flex min-h-screen">
 
@@ -186,6 +334,23 @@
 				<span class="text-xs font-semibold">{data.propertiesList[0]?.name ?? ''}</span>
 			{/if}
 
+			<!-- Copy from previous year -->
+			<form method="POST" action="?/copyYear"
+				use:enhance={() => {
+					copyingYear = true;
+					return async ({ update }) => { copyingYear = false; await update(); };
+				}}
+			>
+				<input type="hidden" name="propertyId" value={propertyId} />
+				<input type="hidden" name="fromYear" value={year - 1} />
+				<input type="hidden" name="toYear" value={year} />
+				<button type="submit" disabled={copyingYear}
+					class="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50"
+					title="Copy all seasons from {year - 1} into {year}, shifting dates by one year">
+					{copyingYear ? 'Copying…' : `Copy from ${year - 1}`}
+				</button>
+			</form>
+
 			<!-- Room type rate toggles -->
 			{#if roomTypes.length > 0}
 				<div class="flex items-center gap-1.5 flex-wrap">
@@ -204,7 +369,7 @@
 				</div>
 			{/if}
 
-			<!-- Label mode (only visible when rates are toggled on) -->
+			<!-- Label mode -->
 			{#if hasVisibleRTs}
 				<div class="flex rounded-md border border-input overflow-hidden text-xs font-medium" title="Label format in cells">
 					{#each [{ m: 'code', lbl: 'Code' }, { m: 'name', lbl: 'Name' }, { m: 'none', lbl: '$ only' }] as opt}
@@ -228,12 +393,17 @@
 			</a>
 		</div>
 
+		<!-- Drag hint -->
+		<p class="no-print mb-3 text-xs text-muted-foreground">
+			<strong>Click</strong> a day to select a season · <strong>Drag</strong> across days to create a new season
+		</p>
+
 		<!-- Season legend -->
 		{#if seasons.length > 0}
 			<div class="no-print mb-4 flex flex-wrap gap-2">
 				{#each seasons as s}
 					<button
-						onclick={() => { selectedSeason = s; panelMode = 'view'; }}
+						onclick={() => { selectedSeason = s; panelMode = 'view'; dragPopover = null; }}
 						class="flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-opacity {selectedSeason?.id === s.id ? 'ring-2 ring-offset-1 ring-foreground' : 'hover:opacity-80'}"
 						style="background:{s.colour};color:{textColour(s.colour)};border-color:{s.colour}"
 					>
@@ -246,8 +416,9 @@
 		{/if}
 
 		<!-- 12-month grid -->
-		<div class="grid grid-cols-3 gap-4 xl:grid-cols-4 print:grid-cols-4 print:gap-2">
-			{#each calMonths as month, mi}
+		<div class="grid grid-cols-3 gap-4 xl:grid-cols-4 print:grid-cols-4 print:gap-2"
+			style={dragAnchor ? 'user-select:none' : ''}>
+			{#each calMonths as month}
 				<div class="print-full">
 					<!-- Month heading -->
 					<div class="mb-1 text-center text-xs font-bold uppercase tracking-wider text-muted-foreground print:text-[8pt]">
@@ -261,8 +432,8 @@
 						{/each}
 					</div>
 
-				<!-- Weeks -->
-				{#each month.weeks as week}
+					<!-- Weeks -->
+					{#each month.weeks as week}
 						<div class="grid grid-cols-7 gap-px mb-px">
 							{#each week as cell}
 								{#if !cell.inMonth}
@@ -272,16 +443,20 @@
 									{@const isToday = cell.iso === today}
 									{@const hasSeason = dayMap.has(cell.iso)}
 									{@const cellSeason = dayMap.get(cell.iso)}
+									{@const inDrag = dragAnchor !== null && dragDates.has(cell.iso)}
 									<!-- Screen version -->
 									<button
-										class={['no-print w-full rounded text-[10px] font-medium leading-none transition-all hover:brightness-90 active:scale-95 flex flex-col items-center justify-start pt-0.5 pb-0.5',
+										class={['no-print w-full rounded text-[10px] font-medium leading-none transition-all hover:brightness-90 active:scale-95 flex flex-col items-center justify-start pt-0.5 pb-0.5 cursor-pointer',
 											hasVisibleRTs ? 'min-h-8' : 'h-6',
 											isToday ? 'ring-2 ring-primary ring-offset-1' : '',
 											!hasSeason ? 'text-foreground hover:bg-muted' : '',
-											selectedSeason && dayMap.get(cell.iso)?.id === selectedSeason.id ? 'ring-1 ring-black/40' : ''
+											selectedSeason && dayMap.get(cell.iso)?.id === selectedSeason.id ? 'ring-1 ring-black/40' : '',
+											inDrag && !hasSeason ? 'bg-primary/20 ring-1 ring-primary' : '',
+											inDrag && hasSeason ? 'brightness-110 ring-1 ring-primary' : ''
 										].join(' ')}
 										style={style || ''}
-										onclick={() => clickDay(cell.iso)}
+										onmousedown={(e) => { if (e.button === 0 && cell.iso) { e.preventDefault(); dragAnchor = cell.iso; dragTip = cell.iso; } }}
+										onmouseover={() => { if (dragAnchor && cell.iso) dragTip = cell.iso; }}
 									>
 										<span class={hasVisibleRTs ? 'text-[9px] font-bold leading-none mb-0.5' : ''}>{cell.day}</span>
 										{#if hasVisibleRTs}
@@ -322,7 +497,7 @@
 						</div>
 					{/each}
 
-					<!-- Season colour bar under each month (print hint) -->
+					<!-- Season colour bar under each month -->
 					<div class="mt-1 flex gap-0.5 flex-wrap">
 						{#each seasonRuns(month.weeks) as run}
 							<span class="rounded px-1 text-[8px] leading-none py-0.5 print:text-[6pt]"
@@ -339,73 +514,7 @@
 	<!-- ── Side panel ──────────────────────────────────────────────────────── -->
 	<div class="no-print border-l w-80 shrink-0 overflow-y-auto bg-background p-4">
 
-		{#if panelMode === 'create'}
-			<!-- Create new season -->
-			<h2 class="mb-3 font-semibold text-sm">New Season</h2>
-			<form method="POST" action="?/upsertSeason"
-				use:enhance={() => {
-					saving = true;
-					return async ({ update }) => { saving = false; panelMode = 'view'; await update(); };
-				}}
-				class="space-y-3"
-			>
-				<input type="hidden" name="propertyId" value={propertyId} />
-				<input type="hidden" name="sortOrder" value="0" />
-
-				<div class="flex flex-col gap-1">
-					<label class="text-xs text-muted-foreground">Season name</label>
-					<input name="name" required placeholder="e.g. Easter Long Weekend"
-						class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-				</div>
-				<div class="grid grid-cols-2 gap-2">
-					<div class="flex flex-col gap-1">
-						<label class="text-xs text-muted-foreground">Start</label>
-						<input name="startDate" type="date" bind:value={createStart} required
-							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-					</div>
-					<div class="flex flex-col gap-1">
-						<label class="text-xs text-muted-foreground">End</label>
-						<input name="endDate" type="date" bind:value={createEnd} required
-							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-					</div>
-				</div>
-			<div class="grid grid-cols-2 gap-2">
-				<div class="flex flex-col gap-1">
-					<label class="text-xs text-muted-foreground">Colour</label>
-					<input type="color" name="colour" value="#fde68a"
-						class="h-8 w-full rounded border cursor-pointer" />
-				</div>
-				<div class="flex flex-col gap-1">
-					<label class="text-xs text-muted-foreground">Min nights</label>
-					<input name="minNights" type="number" min="1" max="14" value="1"
-						class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-				</div>
-			</div>
-
-			<!-- Base rate -->
-			<div class="border-t pt-3">
-				<p class="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Base Rate</p>
-				<div class="flex items-center gap-1">
-					<span class="text-xs text-muted-foreground">$</span>
-					<input name="baseRateCents" type="number" min="0" step="1"
-						placeholder="e.g. 100"
-						class="border-input bg-background w-24 rounded border px-2 py-1.5 text-sm font-mono" />
-					<span class="text-xs text-muted-foreground">/night</span>
-				</div>
-				<p class="text-[10px] text-muted-foreground mt-1">Optional. Auto-sets all room types on create; adjust per-type upcharges after.</p>
-			</div>
-
-				<div class="flex gap-2 pt-1">
-					<button type="submit" disabled={saving}
-						class="flex-1 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
-						{saving ? 'Saving…' : 'Create Season'}
-					</button>
-					<button type="button" onclick={() => { panelMode = 'view'; selectedSeason = null; }}
-						class="rounded-md border px-3 py-1.5 text-sm hover:bg-muted">Cancel</button>
-				</div>
-			</form>
-
-		{:else if selectedSeason}
+		{#if selectedSeason}
 			<!-- View / Edit season -->
 			{@const s = selectedSeason}
 
@@ -431,7 +540,6 @@
 							saving = false;
 							panelMode = 'view';
 							await update();
-							// Re-select season with updated data
 							selectedSeason = data.seasonsList.find(x => x.id === s.id) ?? null;
 						};
 					}}
@@ -442,45 +550,45 @@
 					<input type="hidden" name="sortOrder" value={s.sortOrder} />
 
 					<div class="flex flex-col gap-1">
-						<label class="text-xs text-muted-foreground">Name</label>
-						<input name="name" value={s.name} required
+						<label for="edit-name" class="text-xs text-muted-foreground">Name</label>
+						<input id="edit-name" name="name" value={s.name} required
 							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
 					</div>
 					<div class="grid grid-cols-2 gap-2">
 						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">Start</label>
-							<input name="startDate" type="date" value={s.startDate}
+							<label for="edit-start" class="text-xs text-muted-foreground">Start</label>
+							<input id="edit-start" name="startDate" type="date" value={s.startDate}
 								class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
 						</div>
 						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">End</label>
-							<input name="endDate" type="date" value={s.endDate}
+							<label for="edit-end" class="text-xs text-muted-foreground">End</label>
+							<input id="edit-end" name="endDate" type="date" value={s.endDate}
 								class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
 						</div>
 					</div>
-				<div class="grid grid-cols-2 gap-2">
-					<div class="flex flex-col gap-1">
-						<label class="text-xs text-muted-foreground">Colour</label>
-						<input type="color" name="colour" value={s.colour}
-							class="h-8 w-full rounded border cursor-pointer" />
+					<div class="grid grid-cols-2 gap-2">
+						<div class="flex flex-col gap-1">
+							<label for="edit-colour" class="text-xs text-muted-foreground">Colour</label>
+							<input id="edit-colour" type="color" name="colour" value={s.colour}
+								class="h-8 w-full rounded border cursor-pointer" />
+						</div>
+						<div class="flex flex-col gap-1">
+							<label for="edit-min" class="text-xs text-muted-foreground">Min nights</label>
+							<input id="edit-min" name="minNights" type="number" min="1" max="14" value={s.minNights}
+								class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+						</div>
 					</div>
 					<div class="flex flex-col gap-1">
-						<label class="text-xs text-muted-foreground">Min nights</label>
-						<input name="minNights" type="number" min="1" max="14" value={s.minNights}
-							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
+						<label for="edit-base" class="text-xs text-muted-foreground">Base rate (optional)</label>
+						<div class="flex items-center gap-1">
+							<span class="text-xs text-muted-foreground">$</span>
+							<input id="edit-base" name="baseRateCents" type="number" min="0" step="1"
+								value={s.baseRateCents ? (s.baseRateCents / 100).toFixed(0) : ''}
+								placeholder="e.g. 100"
+								class="border-input bg-background w-24 rounded border px-2 py-1.5 text-sm font-mono" />
+							<span class="text-xs text-muted-foreground">/night</span>
+						</div>
 					</div>
-				</div>
-				<div class="flex flex-col gap-1">
-					<label class="text-xs text-muted-foreground">Base rate (optional)</label>
-					<div class="flex items-center gap-1">
-						<span class="text-xs text-muted-foreground">$</span>
-						<input name="baseRateCents" type="number" min="0" step="1"
-							value={s.baseRateCents ? (s.baseRateCents / 100).toFixed(0) : ''}
-							placeholder="e.g. 100"
-							class="border-input bg-background w-24 rounded border px-2 py-1.5 text-sm font-mono" />
-						<span class="text-xs text-muted-foreground">/night</span>
-					</div>
-				</div>
 					<button type="submit" disabled={saving}
 						class="w-full rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
 						{saving ? 'Saving…' : 'Save Changes'}
@@ -500,117 +608,125 @@
 						{deleting ? 'Deleting…' : 'Delete Season'}
 					</button>
 				</form>
-		{:else}
-			<!-- Rate table (view + inline edit) -->
-			<div class="mb-2 text-xs text-muted-foreground">
-				{#if s.minNights > 1}
-					<span class="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-medium">{s.minNights}-night minimum</span>
-				{/if}
-				{#if s.baseRateCents}
-					<span class="ml-1 rounded bg-primary/10 text-primary px-1.5 py-0.5 font-medium font-mono">
-						Base ${(s.baseRateCents / 100).toFixed(0)}/night
-					</span>
-				{/if}
-			</div>
 
-			{#if s.baseRateCents}
-				<!-- Upcharge mode -->
-				<form method="POST" action="?/upsertAllTiersAtBase"
-					use:enhance={() => {
-						saving = true;
-						return async ({ update }) => { saving = false; await update({ reset: false }); };
-					}}
-					class="mb-3"
-				>
-					<input type="hidden" name="seasonId" value={s.id} />
-					<input type="hidden" name="propertyId" value={s.propertyId} />
-					<button type="submit" disabled={saving}
-						class="w-full rounded border px-2 py-1 text-xs hover:bg-muted">
-						{saving ? 'Saving…' : `Reset all to $${(s.baseRateCents / 100).toFixed(0)}`}
-					</button>
-				</form>
-				<div class="space-y-2">
-					{#each roomTypes as rt}
-						{@const tier = s.tiers.find(t => t.roomTypeId === rt.id)}
-						{@const upcharge = tier ? tier.nightlyRate - s.baseRateCents : 0}
-						<form method="POST" action="?/upsertRateTier"
-							use:enhance={() => {
-								saving = true;
-								return async ({ update }) => { saving = false; await update({ reset: false }); };
-							}}
-							class="flex items-center gap-2"
-						>
-							<input type="hidden" name="seasonId" value={s.id} />
-							<input type="hidden" name="roomTypeId" value={rt.id} />
-							<input type="hidden" name="baseRateCents" value={s.baseRateCents} />
-							<div class="flex-1 min-w-0">
-								<span class="text-xs font-medium">{rt.category}: {rt.name}</span>
-								{#if tier}
-									<span class="text-[10px] text-muted-foreground ml-1">= ${(tier.nightlyRate / 100).toFixed(0)}/night</span>
-								{/if}
-							</div>
-							<div class="flex items-center gap-1">
-								<span class="text-xs text-muted-foreground">+$</span>
-								<input
-									name="upcharge"
-									type="number"
-									step="1"
-									value={(upcharge / 100).toFixed(0)}
-									placeholder="0"
-									class="border-input bg-background w-16 rounded border px-2 py-1 text-sm font-mono text-right"
-								/>
-								<button type="submit" class="rounded border px-2 py-1 text-xs hover:bg-muted" disabled={saving}>✓</button>
-							</div>
-						</form>
-					{/each}
-					{#if roomTypes.length === 0}
-						<p class="text-xs text-muted-foreground">No room types configured for this property.</p>
-					{/if}
-				</div>
 			{:else}
-				<!-- Direct rate mode -->
-				<div class="space-y-2">
-					{#each roomTypes as rt}
-						{@const tier = s.tiers.find(t => t.roomTypeId === rt.id)}
-						<form method="POST" action="?/upsertRateTier"
-							use:enhance={() => {
-								saving = true;
-								return async ({ update }) => { saving = false; await update({ reset: false }); };
-							}}
-							class="flex items-center gap-2"
-						>
-							<input type="hidden" name="seasonId" value={s.id} />
-							<input type="hidden" name="roomTypeId" value={rt.id} />
-							<div class="flex-1 min-w-0">
-								<span class="text-xs font-medium">{rt.category}: {rt.name}</span>
-							</div>
-							<div class="flex items-center gap-1">
-								<span class="text-xs text-muted-foreground">$</span>
-								<input
-									name="nightlyRate"
-									type="number"
-									min="0"
-									step="1"
-									value={tier ? (tier.nightlyRate / 100).toFixed(0) : ''}
-									placeholder="—"
-									class="border-input bg-background w-20 rounded border px-2 py-1 text-sm font-mono text-right"
-								/>
-								<button type="submit" class="rounded border px-2 py-1 text-xs hover:bg-muted" disabled={saving}>✓</button>
-							</div>
-						</form>
-					{/each}
-					{#if roomTypes.length === 0}
-						<p class="text-xs text-muted-foreground">No room types configured for this property.</p>
+				<!-- Rate table (view + inline edit) -->
+				<div class="mb-2 flex flex-wrap gap-1 text-xs">
+					{#if s.minNights > 1}
+						<span class="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-medium">{s.minNights}-night minimum</span>
+					{/if}
+					{#if s.baseRateCents}
+						<span class="rounded bg-primary/10 text-primary px-1.5 py-0.5 font-medium font-mono">
+							Base ${(s.baseRateCents / 100).toFixed(0)}/night
+						</span>
 					{/if}
 				</div>
+
+				{#if s.baseRateCents}
+					<!-- Upcharge mode -->
+					<form method="POST" action="?/upsertAllTiersAtBase"
+						use:enhance={() => {
+							saving = true;
+							return async ({ update }) => { saving = false; await update({ reset: false }); };
+						}}
+						class="mb-3"
+					>
+						<input type="hidden" name="seasonId" value={s.id} />
+						<input type="hidden" name="propertyId" value={s.propertyId} />
+						<button type="submit" disabled={saving}
+							class="w-full rounded border px-2 py-1 text-xs hover:bg-muted">
+							{saving ? 'Saving…' : `Reset all to $${(s.baseRateCents / 100).toFixed(0)}`}
+						</button>
+					</form>
+					<div class="space-y-2">
+						{#each roomTypes as rt}
+							{@const tier = s.tiers.find(t => t.roomTypeId === rt.id)}
+							{@const upcharge = tier ? tier.nightlyRate - s.baseRateCents : 0}
+							<form method="POST" action="?/upsertRateTier"
+								use:enhance={() => {
+									saving = true;
+									return async ({ update }) => { saving = false; await update({ reset: false }); };
+								}}
+								class="flex items-center gap-2"
+							>
+								<input type="hidden" name="seasonId" value={s.id} />
+								<input type="hidden" name="roomTypeId" value={rt.id} />
+								<input type="hidden" name="baseRateCents" value={s.baseRateCents} />
+								<div class="flex-1 min-w-0">
+									<span class="text-xs font-medium">{rt.category}: {rt.name}</span>
+									{#if tier}
+										<span class="text-[10px] text-muted-foreground ml-1">= ${(tier.nightlyRate / 100).toFixed(0)}/night</span>
+									{/if}
+								</div>
+								<div class="flex items-center gap-1">
+									<span class="text-xs text-muted-foreground">+$</span>
+									<input
+										name="upcharge"
+										type="number"
+										step="1"
+										value={(upcharge / 100).toFixed(0)}
+										placeholder="0"
+										class="border-input bg-background w-16 rounded border px-2 py-1 text-sm font-mono text-right"
+									/>
+									<button type="submit" class="rounded border px-2 py-1 text-xs hover:bg-muted" disabled={saving}>✓</button>
+								</div>
+							</form>
+						{/each}
+						{#if roomTypes.length === 0}
+							<p class="text-xs text-muted-foreground">No room types configured for this property.</p>
+						{/if}
+					</div>
+				{:else}
+					<!-- Direct rate mode -->
+					<div class="space-y-2">
+						{#each roomTypes as rt}
+							{@const tier = s.tiers.find(t => t.roomTypeId === rt.id)}
+							<form method="POST" action="?/upsertRateTier"
+								use:enhance={() => {
+									saving = true;
+									return async ({ update }) => { saving = false; await update({ reset: false }); };
+								}}
+								class="flex items-center gap-2"
+							>
+								<input type="hidden" name="seasonId" value={s.id} />
+								<input type="hidden" name="roomTypeId" value={rt.id} />
+								<div class="flex-1 min-w-0">
+									<span class="text-xs font-medium">{rt.category}: {rt.name}</span>
+								</div>
+								<div class="flex items-center gap-1">
+									<span class="text-xs text-muted-foreground">$</span>
+									<input
+										name="nightlyRate"
+										type="number"
+										min="0"
+										step="1"
+										value={tier ? (tier.nightlyRate / 100).toFixed(0) : ''}
+										placeholder="—"
+										class="border-input bg-background w-20 rounded border px-2 py-1 text-sm font-mono text-right"
+									/>
+									<button type="submit" class="rounded border px-2 py-1 text-xs hover:bg-muted" disabled={saving}>✓</button>
+								</div>
+							</form>
+						{/each}
+						{#if roomTypes.length === 0}
+							<p class="text-xs text-muted-foreground">No room types configured for this property.</p>
+						{/if}
+					</div>
+				{/if}
 			{/if}
-		{/if}
 
 		{:else}
 			<!-- Empty state -->
-			<div class="text-center py-12">
-				<p class="text-muted-foreground text-sm">Click any day to view or edit its season.</p>
-				<p class="text-muted-foreground text-xs mt-1">Click an uncoloured day to create a new season.</p>
+			<div class="py-8 text-center space-y-2">
+				<p class="text-muted-foreground text-sm font-medium">No season selected</p>
+				<p class="text-muted-foreground text-xs">
+					Drag across days on the calendar to create a season, or click an existing coloured day to edit it.
+				</p>
+				{#if seasons.length === 0}
+					<p class="text-xs text-primary mt-3">
+						Tip: use <strong>Copy from {year - 1}</strong> in the toolbar if you already have {year - 1} seasons set up.
+					</p>
+				{/if}
 			</div>
 		{/if}
 	</div>

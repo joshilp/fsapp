@@ -116,6 +116,60 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
+	// Copy all seasons (+ tiers) from fromYear to toYear, shifting dates by the year difference
+	copyYear: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const propertyId = g('propertyId');
+		const fromYear = parseInt(g('fromYear') ?? '') || 0;
+		const toYear = parseInt(g('toYear') ?? '') || 0;
+		if (!propertyId || !fromYear || !toYear || fromYear === toYear)
+			return fail(400, { error: 'Invalid parameters' });
+
+		function shiftYear(dateStr: string, diff: number): string {
+			const [y, m, d] = dateStr.split('-').map(Number);
+			return `${y + diff}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+		}
+
+		const diff = toYear - fromYear;
+		const fromSeasons = await db.query.rateSeasons.findMany({
+			where: eq(rateSeasons.propertyId, propertyId),
+			with: { tiers: true }
+		});
+
+		let copied = 0;
+		for (const season of fromSeasons) {
+			const newStart = shiftYear(season.startDate, diff);
+			const newEnd = shiftYear(season.endDate, diff);
+			// Skip if a season with identical dates already exists (prevent double-copy)
+			const dup = await db.query.rateSeasons.findFirst({
+				where: and(
+					eq(rateSeasons.propertyId, propertyId),
+					eq(rateSeasons.startDate, newStart),
+					eq(rateSeasons.endDate, newEnd)
+				)
+			});
+			if (dup) continue;
+			const newSeasonId = crypto.randomUUID();
+			await db.insert(rateSeasons).values({
+				id: newSeasonId, propertyId,
+				name: season.name, colour: season.colour,
+				startDate: newStart, endDate: newEnd,
+				minNights: season.minNights, sortOrder: season.sortOrder,
+				baseRateCents: season.baseRateCents
+			});
+			for (const tier of season.tiers) {
+				await db.insert(rateTiers).values({
+					id: crypto.randomUUID(), seasonId: newSeasonId,
+					roomTypeId: tier.roomTypeId, nightlyRate: tier.nightlyRate
+				});
+			}
+			copied++;
+		}
+		return { success: true, copied };
+	},
+
 	// Set all room types in a season to the base rate (upcharge = 0)
 	upsertAllTiersAtBase: async ({ request, locals }) => {
 		if (!locals.user) return fail(401, { error: 'Unauthorized' });
