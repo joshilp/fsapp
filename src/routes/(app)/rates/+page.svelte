@@ -15,6 +15,7 @@
 	let saving = $state(false);
 	let deleting = $state(false);
 	let copyingYear = $state(false);
+	let deletingYear = $state(false);
 
 	$effect(() => {
 		propertyId;
@@ -348,6 +349,26 @@
 					class="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50"
 					title="Copy all seasons from {year - 1} into {year}, shifting dates by one year">
 					{copyingYear ? 'Copying…' : `Copy from ${year - 1}`}
+				</button>
+			</form>
+
+			<!-- Clear current year -->
+			<form method="POST" action="?/deleteYear"
+				use:enhance={({ cancel }) => {
+					if (!confirm(`Delete ALL ${year} seasons for this property? This cannot be undone.`)) {
+						cancel();
+						return;
+					}
+					deletingYear = true;
+					return async ({ update }) => { deletingYear = false; selectedSeason = null; await update(); };
+				}}
+			>
+				<input type="hidden" name="propertyId" value={propertyId} />
+				<input type="hidden" name="year" value={year} />
+				<button type="submit" disabled={deletingYear}
+					class="rounded-md border border-destructive/40 text-destructive px-2.5 py-1 text-xs hover:bg-destructive/5 disabled:opacity-50"
+					title="Delete all {year} seasons for this property">
+					{deletingYear ? 'Clearing…' : `Clear ${year}`}
 				</button>
 			</form>
 

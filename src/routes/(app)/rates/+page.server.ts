@@ -1,5 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte, lte } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { rateSeasons, rateTiers, roomTypes } from '$lib/server/db/schema';
@@ -133,8 +133,15 @@ export const actions: Actions = {
 		}
 
 		const diff = toYear - fromYear;
+		// Only copy seasons that actually overlap with fromYear (prevents pulling in old years)
+		const yearStart = `${fromYear}-01-01`;
+		const yearEnd = `${fromYear}-12-31`;
 		const fromSeasons = await db.query.rateSeasons.findMany({
-			where: eq(rateSeasons.propertyId, propertyId),
+			where: and(
+				eq(rateSeasons.propertyId, propertyId),
+				lte(rateSeasons.startDate, yearEnd),
+				gte(rateSeasons.endDate, yearStart)
+			),
 			with: { tiers: true }
 		});
 
@@ -168,6 +175,29 @@ export const actions: Actions = {
 			copied++;
 		}
 		return { success: true, copied };
+	},
+
+	// Delete all seasons for a property that overlap with a given year
+	deleteYear: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const propertyId = (fd.get('propertyId') as string)?.trim();
+		const year = parseInt((fd.get('year') as string)?.trim() ?? '') || 0;
+		if (!propertyId || !year) return fail(400, { error: 'Missing fields' });
+		const yearStart = `${year}-01-01`;
+		const yearEnd = `${year}-12-31`;
+		const toDelete = await db.query.rateSeasons.findMany({
+			where: and(
+				eq(rateSeasons.propertyId, propertyId),
+				lte(rateSeasons.startDate, yearEnd),
+				gte(rateSeasons.endDate, yearStart)
+			),
+			columns: { id: true }
+		});
+		for (const s of toDelete) {
+			await db.delete(rateSeasons).where(eq(rateSeasons.id, s.id));
+		}
+		return { success: true, deleted: toDelete.length };
 	},
 
 	// Set all room types in a season to the base rate (upcharge = 0)

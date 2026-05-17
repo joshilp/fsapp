@@ -1,5 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gte, lte, sql } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import {
@@ -288,6 +288,28 @@ export const actions: Actions = {
 		if (!id) return fail(400, { error: 'Missing ID' });
 		await db.delete(rateSeasons).where(eq(rateSeasons.id, id));
 		return { success: true };
+	},
+
+	deleteYear: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const propertyId = (fd.get('propertyId') as string)?.trim();
+		const year = parseInt((fd.get('year') as string)?.trim() ?? '') || 0;
+		if (!propertyId || !year) return fail(400, { error: 'Missing fields' });
+		const yearStart = `${year}-01-01`;
+		const yearEnd = `${year}-12-31`;
+		const toDelete = await db.query.rateSeasons.findMany({
+			where: and(
+				eq(rateSeasons.propertyId, propertyId),
+				lte(rateSeasons.startDate, yearEnd),
+				gte(rateSeasons.endDate, yearStart)
+			),
+			columns: { id: true }
+		});
+		for (const s of toDelete) {
+			await db.delete(rateSeasons).where(eq(rateSeasons.id, s.id));
+		}
+		return { success: true, deleted: toDelete.length };
 	},
 
 	upsertRateTier: async ({ request, locals }) => {
