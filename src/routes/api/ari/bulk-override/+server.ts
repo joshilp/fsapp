@@ -9,7 +9,7 @@ interface BulkOverrideBody {
 	roomTypeId?: string;
 	propertyId?: string;
 	dates: string[];
-	rateMode: 'none' | 'set' | 'increase_pct';
+	rateMode: 'none' | 'set' | 'increase_pct' | 'clear';
 	rateValue?: number | null;
 	minNights?: number | null;
 	availabilityOverride?: number | null; // null = clear override, -1 = no change
@@ -83,6 +83,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			let newRate = currentRate;
 			if (rateMode === 'set' && rateValue != null) {
 				newRate = Math.round(rateValue * 100);
+			} else if (rateMode === 'clear') {
+				newRate = null; // remove rate override → fall back to season rate
 			} else if (rateMode === 'increase_pct' && rateValue != null) {
 				const base = currentRate ?? (await getSeasonRate(roomTypeId, date));
 				if (base != null) newRate = Math.round(base * (1 + rateValue / 100));

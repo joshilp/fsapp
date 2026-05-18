@@ -6,6 +6,7 @@ import { bookings, rateOverrides, rateSeasons, rooms, roomTypes, properties, boo
 import { user } from '$lib/server/db/schema';
 import { pushARI } from '$lib/server/channex';
 import { fail } from '@sveltejs/kit';
+import { resolveNightRate } from '$lib/server/pricing';
 
 const WINDOW = 28;
 
@@ -28,6 +29,7 @@ export type ARICell = {
 	overrideRateCents: number | null;
 	effectiveRateCents: number | null;
 	baseMinNights: number;
+	overrideMinNights: number | null; // null = no min-nights override active
 	minNights: number;
 	stopSell: boolean;
 	closedToArrival: boolean;
@@ -164,34 +166,14 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 				).length;
 				const physicalAvailable = Math.max(0, totalRooms - booked - unassigned);
 
-				let baseRateCents: number | null = null;
-				let baseMinNights = 1;
-				let seasonColour: string | null = null;
-				// Sort by date range length ascending — shortest (most specific) season wins
-				const matchingSeasons = propSeasons
-					.filter(s => s.startDate <= date && s.endDate >= date)
-					.sort((a, b) => {
-						const lenA = new Date(a.endDate + 'T12:00:00').getTime() - new Date(a.startDate + 'T12:00:00').getTime();
-						const lenB = new Date(b.endDate + 'T12:00:00').getTime() - new Date(b.startDate + 'T12:00:00').getTime();
-						return lenA - lenB;
-					});
-				for (const s of matchingSeasons) {
-					const tier = s.tiers.find((t) => t.roomTypeId === rt.id);
-					if (tier) {
-						baseRateCents = tier.nightlyRate;
-						baseMinNights = s.minNights;
-						seasonColour  = s.colour;
-						break;
-					}
-				}
-				// Fallback to room type default rate when no season applies
-				if (baseRateCents === null && rt.defaultRateCents) {
-					baseRateCents = rt.defaultRateCents;
-				}
-
-				const ov = overrideMap[rt.id]?.[date];
-				const overrideRateCents   = ov?.rateCents ?? null;
-				const effectiveRateCents  = overrideRateCents ?? baseRateCents;
+			const ov = overrideMap[rt.id]?.[date];
+			const overrideByDateSingle = new Map<string, number>(ov?.rateCents != null ? [[date, ov.rateCents]] : []);
+			const nightRate       = resolveNightRate(date, propSeasons, rt.id, rt.defaultRateCents ?? null, overrideByDateSingle);
+			const baseRateCents   = nightRate.baseRateCents;
+			const baseMinNights   = nightRate.minNights;
+			const seasonColour    = nightRate.colour === '#888888' ? null : nightRate.colour;
+			const overrideRateCents  = ov?.rateCents ?? null;
+			const effectiveRateCents = nightRate.rateCents;
 				const minNights           = ov?.minNights ?? baseMinNights;
 				const stopSell            = ov?.stopSell ?? false;
 				const closedToArrival     = ov?.closedToArrival ?? false;
@@ -207,12 +189,13 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 					ov.stopSell || ov.closedToArrival || ov.closedToDeparture
 				);
 
-				ariData[rt.id][date] = {
-					available, physicalAvailable, totalRooms, availabilityOverride,
-					baseRateCents, overrideRateCents, effectiveRateCents,
-					baseMinNights, minNights, stopSell, closedToArrival, closedToDeparture,
-					hasOverride, seasonColour
-				};
+			ariData[rt.id][date] = {
+				available, physicalAvailable, totalRooms, availabilityOverride,
+				baseRateCents, overrideRateCents, effectiveRateCents,
+				baseMinNights, overrideMinNights: ov?.minNights ?? null, minNights,
+				stopSell, closedToArrival, closedToDeparture,
+				hasOverride, seasonColour
+			};
 			}
 		}
 

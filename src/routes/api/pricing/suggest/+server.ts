@@ -2,7 +2,8 @@ import { json } from '@sveltejs/kit';
 import { and, eq, lte, gte } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { properties, rateOverrides, rateSeasons, rateTiers, rooms } from '$lib/server/db/schema';
+import { properties, rateOverrides, rateSeasons, rateTiers, roomTypes, rooms } from '$lib/server/db/schema';
+import { resolveStayRates, buildRateLines } from '$lib/server/pricing';
 
 export type RateLine = {
 	seasonId: string;
@@ -23,12 +24,6 @@ export type PricingSuggestion = {
 	minNightWarning: string | null;
 	nightsTotal: number;
 };
-
-function addDays(iso: string, n: number): string {
-	const d = new Date(iso + 'T12:00:00');
-	d.setDate(d.getDate() + n);
-	return d.toISOString().slice(0, 10);
-}
 
 function daysBetween(from: string, to: string): number {
 	return Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000);
@@ -52,6 +47,12 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	});
 	if (!room) return json({ error: 'Room not found' }, { status: 404 });
 
+	// Load room type for defaultRateCents fallback
+	const roomType = await db.query.roomTypes.findFirst({
+		where: eq(roomTypes.id, room.roomTypeId),
+		columns: { defaultRateCents: true }
+	});
+
 	// Load property for deposit policy
 	const property = await db.query.properties.findFirst({
 		where: eq(properties.id, room.propertyId),
@@ -63,7 +64,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		}
 	});
 
-	// Load all rate seasons for this property that overlap the stay
+	// Load all rate seasons for this property that overlap the stay (with tiers for this room type)
 	const seasons = await db.query.rateSeasons.findMany({
 		where: and(
 			eq(rateSeasons.propertyId, room.propertyId),
@@ -74,8 +75,8 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			tiers: room.roomTypeId
 				? { where: eq(rateTiers.roomTypeId, room.roomTypeId) }
 				: undefined
-		},
-		orderBy: (t, { asc }) => [asc(t.startDate)]
+		}
+		// No orderBy here — resolveStayRates uses "most specific wins" sort internally
 	});
 
 	// Load any per-date rate overrides for this room type within the stay
@@ -83,61 +84,26 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		where: and(
 			eq(rateOverrides.roomTypeId, room.roomTypeId),
 			gte(rateOverrides.date, checkIn),
-			lte(rateOverrides.date, addDays(checkOut, -1))
+			lte(rateOverrides.date, checkOut)
 		),
 		columns: { date: true, rateCents: true }
 	});
-	const overrideByDate = new Map(overrides.filter(o => o.rateCents != null).map(o => [o.date, o.rateCents!]));
+	const overrideByDate = new Map(
+		overrides.filter((o) => o.rateCents != null).map((o) => [o.date, o.rateCents!])
+	);
 
-	// Walk each night of the stay and find the applicable season
+	// Resolve rates using the same logic as the inventory grid
+	const perNight = resolveStayRates(
+		checkIn,
+		checkOut,
+		seasons,
+		room.roomTypeId,
+		roomType?.defaultRateCents ?? null,
+		overrideByDate
+	);
+
+	const lines = buildRateLines(perNight);
 	const nightsTotal = daysBetween(checkIn, checkOut);
-	const perNight: Array<{ seasonId: string; seasonName: string; colour: string; rate: number; minNights: number }> = [];
-
-	for (let i = 0; i < nightsTotal; i++) {
-		const night = addDays(checkIn, i);
-		const season = seasons.find((s) => s.startDate <= night && s.endDate >= night);
-		if (!season) {
-			perNight.push({ seasonId: '', seasonName: '(no rate)', colour: '#cccccc', rate: 0, minNights: 1 });
-			continue;
-		}
-		const tier = season.tiers?.[0];
-		const baseRate = tier?.nightlyRate ?? 0;
-		// ARI override wins over season rate — matches what is pushed to Channex/OTAs
-		const effectiveRate = overrideByDate.get(night) ?? baseRate;
-		perNight.push({
-			seasonId: season.id,
-			seasonName: season.name,
-			colour: season.colour,
-			rate: effectiveRate,
-			minNights: season.minNights
-		});
-	}
-
-	// Group consecutive nights that share the same season AND effective rate into line items
-	const lines: RateLine[] = [];
-	let i = 0;
-	while (i < perNight.length) {
-		const cur = perNight[i];
-		let count = 1;
-		while (
-			i + count < perNight.length &&
-			perNight[i + count].seasonId === cur.seasonId &&
-			perNight[i + count].rate === cur.rate
-		) {
-			count++;
-		}
-		lines.push({
-			seasonId: cur.seasonId,
-			seasonName: cur.seasonName,
-			colour: cur.colour,
-			nights: count,
-			unitCents: cur.rate,
-			totalCents: cur.rate * count,
-			minNights: cur.minNights
-		});
-		i += count;
-	}
-
 	const subtotalCents = lines.reduce((s, l) => s + l.totalCents, 0);
 
 	// ── Calculate suggested deposit based on property policy ─────────────────
@@ -156,7 +122,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		let counted = 0;
 		for (const n of perNight) {
 			if (counted >= depNights) break;
-			suggestedDepositCents += n.rate;
+			suggestedDepositCents += n.rateCents;
 			counted++;
 		}
 	}

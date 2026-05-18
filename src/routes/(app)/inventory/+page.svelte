@@ -51,11 +51,11 @@
 	const dragSel = new DragSelect();
 	type InvDrawExtra = { roomTypeId: string; roomTypeName: string; propertyId: string; propertyName: string };
 	const drawSel = new DrawSelect<InvDrawExtra>();
-	let mode      = $state<'book' | 'edit' | 'group'>('book');
+	let mode      = $state<'book' | 'group'>('book');
 	let dragMoved = $state(false);
 	let legendOpen = $state(false);
 
-	function setMode(m: 'book' | 'edit' | 'group') {
+	function setMode(m: 'book' | 'group') {
 		mode = m;
 		drawSel.clear();
 		editRange = null;
@@ -87,7 +87,7 @@
 	});
 
 	function cellEditState(roomTypeId: string, colIdx: number): boolean {
-		if (mode !== 'edit' || !editRange) return false;
+		if (!editRange) return false;
 		return editRange.roomTypeId === roomTypeId && colIdx >= editRange.minCol && colIdx <= editRange.maxCol;
 	}
 
@@ -206,33 +206,37 @@
 			const rt = data.propData[prop.id]?.roomTypesList.find((x) => x.id === r.rowId);
 			if (rt) drawSel.commit(r.rowId, r.minCol, r.maxCol, { roomTypeId: rt.id, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name });
 			return;
+	}
+	// Restriction / rate row drag — opens bulk edit regardless of Book/Group mode
+	if (dragRowType !== null) {
+		if (!dragSel.active) { dragRowType = null; return; }
+		// Single click (mouse never moved to a different cell) — cancel drag and let
+		// the onclick handler fire (toggleRestriction / startInlineRate / openPopover).
+		if (!dragMoved) { dragSel.cancel(); dragRowType = null; return; }
+		const r = dragSel.range;
+		const prop = r ? findRtProp(r.rowId) : null;
+		dragSel.cancel();
+		if (!r || !prop) { dragRowType = null; return; }
+		const rt = data.propData[prop.id]?.roomTypesList.find((x) => x.id === r.rowId);
+		if (rt) {
+			editRange = { roomTypeId: r.rowId, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name, minCol: r.minCol, maxCol: r.maxCol };
+			editRangeFocus = dragRowType;
+			dragRowType = null;
+			bulkRateMode = 'none'; bulkRateValue = ''; bulkMinNights = '';
+			bulkStopSell = 'no_change'; bulkCTA = 'no_change'; bulkCTD = 'no_change';
+			bulkDOW = [true, true, true, true, true, true, true]; bulkAvailOverride = '';
 		}
-		if (mode === 'edit') {
-			if (!dragSel.active) return;
-			const r = dragSel.range;
-			const prop = r ? findRtProp(r.rowId) : null;
-			dragSel.cancel();
-			if (!r || !prop) return;
-			const rt = data.propData[prop.id]?.roomTypesList.find((x) => x.id === r.rowId);
-			if (rt) {
-				editRange = { roomTypeId: r.rowId, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name, minCol: r.minCol, maxCol: r.maxCol };
-				editRangeFocus = dragRowType ?? 'avail';
-				dragRowType = null;
-				bulkRateMode = 'none'; bulkRateValue = ''; bulkMinNights = '';
-				bulkStopSell = 'no_change'; bulkCTA = 'no_change'; bulkCTD = 'no_change';
-				bulkDOW = [true, true, true, true, true, true, true]; bulkAvailOverride = '';
-			}
-			return;
-		}
-		// ── book mode ───────────────────────────────────────────────────────────
-		if (!dragSel.active) return;
+		return;
+	}
+	// ── book mode ───────────────────────────────────────────────────────────
+	if (!dragSel.active) return;
 		const wasMoved = dragMoved;
 		const r = dragSel.range;
 		const prop = r ? findRtProp(r.rowId) : null;
 		const hasConflict = r && prop ? hasConflictInRange(r.rowId, prop.id, r.minCol, r.maxCol) : false;
 		dragSel.cancel();
 		if (!r || !prop) return;
-		if (hasConflict) { conflictMessage = 'No availability for part of that range.'; setTimeout(() => (conflictMessage = ''), 3000); return; }
+		if (hasConflict && wasMoved) { conflictMessage = 'No availability for part of that range.'; setTimeout(() => (conflictMessage = ''), 3000); return; }
 		// Single click or drag: always open the unified popover.
 		// The popover shows occupancy info + New Booking CTA + rate override.
 		const checkIn  = data.dates[r.minCol];
@@ -310,11 +314,10 @@
 	/** Which bulk panel section to highlight when the panel opens. */
 	let editRangeFocus = $state<'avail' | 'rate' | 'minStay' | 'cta' | 'ctd'>('avail');
 
-	let inlineRateEdit = $state<{ roomTypeId: string; date: string; value: string } | null>(null);
-	let savingInlineRate = $state(false);
+	// Replaced by floatingEdit above; kept declaration avoids errors from leftover touch path
+	// inlineRateEdit is no longer used
 
 	function startInlineAvail(roomTypeId: string, date: string, currentOverride: number | null) {
-		if (mode !== 'edit') return;
 		inlineAvailEdit = { roomTypeId, date, value: currentOverride != null ? String(currentOverride) : '' };
 	}
 
@@ -350,29 +353,125 @@
 		}
 	}
 
-	function startInlineRate(roomTypeId: string, date: string, currentCents: number | null) {
-		if (mode !== 'edit') return;
-		inlineRateEdit = { roomTypeId, date, value: currentCents != null ? String(Math.round(currentCents) / 100) : '' };
+	// ─── Unified floating edit overlay (Rate / Avail Cap / Min Stay) ─────────
+	type FloatingEditType = 'rate' | 'availCap' | 'minStay';
+	type FloatingEdit = {
+		type: FloatingEditType;
+		roomTypeId: string;
+		date: string;
+		value: string;
+		cx: number;
+		cy: number;
+		contextLabel: string;
+		/** For availCap: totalRooms — enables "Reset to N" instead of plain Clear */
+		resetTo?: number;
+		/** For availCap: whether an override is currently active */
+		hasOverride?: boolean;
+	};
+	let floatingEdit = $state<FloatingEdit | null>(null);
+	let savingFloatingEdit = $state(false);
+
+	function startFloatingEdit(
+		type: FloatingEditType,
+		roomTypeId: string,
+		date: string,
+		currentValue: number | null,
+		contextLabel: string,
+		e: MouseEvent,
+		resetTo?: number,
+		hasOverride?: boolean
+	) {
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		floatingEdit = {
+			type, roomTypeId, date,
+			value: currentValue != null
+				? (type === 'rate' ? String(currentValue / 100) : String(currentValue))
+				: '',
+		cx: rect.left + rect.width / 2,
+		cy: rect.top,
+		contextLabel,
+		resetTo,
+		hasOverride
+		};
 	}
 
-	async function commitInlineRate() {
-		if (!inlineRateEdit || savingInlineRate) return;
-		const { roomTypeId, date, value } = inlineRateEdit;
-		if (!value.trim()) { inlineRateEdit = null; return; }
-		const dollars = parseFloat(value);
-		if (isNaN(dollars) || dollars < 0) { inlineRateEdit = null; return; }
-		inlineRateEdit = null;
-		savingInlineRate = true;
+	async function commitFloatingEdit() {
+		if (!floatingEdit || savingFloatingEdit) return;
+		const { type, roomTypeId, date, value } = floatingEdit;
+		const empty = !value.trim();
+		floatingEdit = null;
+		savingFloatingEdit = true;
+		let body: Record<string, unknown>;
 		try {
+			if (type === 'rate') {
+				if (empty) {
+					body = { roomTypeId, dates: [date], rateMode: 'clear' };
+				} else {
+					const dollars = parseFloat(value);
+					if (isNaN(dollars) || dollars < 0) return;
+					body = { roomTypeId, dates: [date], rateMode: 'set', rateValue: dollars };
+				}
+			} else if (type === 'availCap') {
+				const parsed = empty ? null : parseInt(value, 10);
+				body = { roomTypeId, dates: [date], rateMode: 'none', availabilityOverride: parsed };
+			} else {
+				// minStay — empty clears the override (null → DB removes it → falls back to season)
+				const nights = empty ? null : parseInt(value, 10);
+				if (!empty && (isNaN(nights!) || nights! < 1)) return;
+				body = { roomTypeId, dates: [date], rateMode: 'none', minNights: nights };
+			}
 			const r = await fetch('/api/ari/bulk-override', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ roomTypeId, dates: [date], rateMode: 'set', rateValue: dollars })
+				body: JSON.stringify(body)
 			});
 			if (r.ok) await invalidateAll();
 			else { const err = await r.json(); toast.error(err.error ?? 'Save failed'); }
 		} catch { toast.error('Save failed'); }
-		finally { savingInlineRate = false; }
+		finally { savingFloatingEdit = false; }
+	}
+
+	// Legacy wrappers kept for touch fallback paths
+	function startInlineRate(roomTypeId: string, date: string, currentCents: number | null) {
+		// Delegate to floating overlay with a synthetic position (center of viewport)
+		const cx = window.innerWidth / 2;
+		const cy = window.innerHeight / 2;
+		floatingEdit = { type: 'rate', roomTypeId, date, value: currentCents != null ? String(currentCents / 100) : '', cx, cy, contextLabel: '' };
+	}
+
+	// ─── Inline Avail Cap editing ────────────────────────────────────────────
+	// ─── Inline Min Stay editing ─────────────────────────────────────────────
+	// (Replaced by unified floatingEdit above)
+
+	// ─── Remove stop sell quick action ───────────────────────────────────────
+	async function removeStopSell(roomTypeId: string, date: string) {
+		try {
+			const r = await fetch('/api/ari/bulk-override', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ roomTypeId, dates: [date], rateMode: 'none', stopSell: false })
+			});
+			if (r.ok) await invalidateAll();
+			else toast.error('Save failed');
+		} catch { toast.error('Save failed'); }
+	}
+
+	// ─── Toolbar Bulk Edit button ────────────────────────────────────────────
+	function openBulkPanel() {
+		const prop = data.propData[activeProp];
+		if (!prop) return;
+		const rt = prop.roomTypesList[0];
+		if (!rt) return;
+		// Start from today or the first visible date, whichever is later
+		const startDate = today > data.dates[0] ? today : data.dates[0];
+		const col = data.dates.indexOf(startDate);
+		const startCol = col >= 0 ? col : 0;
+		const endCol = Math.min(startCol + 6, data.dates.length - 1);
+		editRange = { roomTypeId: rt.id, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name, minCol: startCol, maxCol: endCol };
+		editRangeFocus = 'rate';
+		bulkRateMode = 'none'; bulkRateValue = ''; bulkMinNights = '';
+		bulkStopSell = 'no_change'; bulkCTA = 'no_change'; bulkCTD = 'no_change';
+		bulkDOW = [true, true, true, true, true, true, true]; bulkAvailOverride = '';
 	}
 
 	async function toggleRestriction(roomTypeId: string, date: string, field: 'cta' | 'ctd', current: boolean) {
@@ -470,6 +569,22 @@
 		editCTD      = c?.closedToDeparture ?? false;
 	}
 	function closePopover() { popoverCell = null; }
+
+	function openBulkFromPopover() {
+		if (!popoverCell) return;
+		const col = data.dates.indexOf(popoverCell.date);
+		if (col === -1) return;
+		const prop = findRtProp(popoverCell.roomTypeId);
+		if (!prop) return;
+		const rt = data.propData[prop.id]?.roomTypesList.find(r => r.id === popoverCell!.roomTypeId);
+		if (!rt) return;
+		editRange = { roomTypeId: popoverCell.roomTypeId, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name, minCol: col, maxCol: col };
+		editRangeFocus = 'avail';
+		bulkRateMode = 'none'; bulkRateValue = ''; bulkMinNights = '';
+		bulkStopSell = 'no_change'; bulkCTA = 'no_change'; bulkCTD = 'no_change';
+		bulkDOW = [true, true, true, true, true, true, true]; bulkAvailOverride = '';
+		closePopover();
+	}
 
 	// Touch helpers — track touchstart position to distinguish tap from scroll
 	let touchStartX = 0;
@@ -582,11 +697,14 @@
 			<!-- Mode segmented control -->
 			<div class="flex rounded-md border border-input overflow-hidden text-xs font-medium">
 				<button onclick={() => setMode('book')} class={['px-2.5 py-1 border-r border-input transition-colors', mode === 'book' ? 'bg-foreground text-background' : 'bg-background text-muted-foreground hover:bg-muted'].join(' ')}>Book</button>
-				<button onclick={() => setMode('edit')} class={['px-2.5 py-1 border-r border-input transition-colors', mode === 'edit' ? 'bg-blue-600 text-white' : 'bg-background text-muted-foreground hover:bg-muted'].join(' ')}>✎ Rates</button>
 				<button onclick={() => setMode('group')} class={['px-2.5 py-1 transition-colors', mode === 'group' ? 'bg-orange-500 text-white' : 'bg-background text-muted-foreground hover:bg-muted'].join(' ')}>Group</button>
 			</div>
 
 			<!-- Sync Channex -->
+			<button
+				onclick={openBulkPanel}
+				class="flex items-center gap-1.5 rounded-md border border-blue-300 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 transition-colors"
+			>✎ Bulk Edit</button>
 			<form method="POST" action="?/syncChannex&prop={activeProp}"
 				use:enhance={() => {
 					syncing = true;
@@ -660,187 +778,203 @@
 							</td>
 						</tr>
 
-						<!-- Available row — drag to book -->
-						<tr class="border-b border-border/20">
-							<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
-								Available
-								<div class="text-[8px] normal-case font-normal opacity-60 mt-0.5">{mode === 'edit' ? 'drag to edit' : 'drag to book'}</div>
-							</td>
-							{#each data.dates as iso, i}
-								{@const cell = propAri[rt.id]?.[iso]}
-								{@const dState = cellDragState(rt.id, prop.id, i)}
-								{@const wState = cellDrawState(rt.id, prop.id, i)}
-								{@const sel = drawSel.selections.find(s => s.rowId === rt.id)}
-								{@const inSel = sel && i >= sel.minCol && i <= sel.maxCol}
-						<td style="width:{COL_W}px"
-							class={['border-r border-border/20 px-0.5 py-1.5 text-center transition-colors',
-								mode === 'edit' ? 'cursor-pointer' : 'cursor-crosshair',
-								dState === 'selected' ? (mode === 'edit' ? 'bg-blue-100' : 'bg-teal-100') : dState === 'conflict' ? 'bg-red-100' :
-								cellEditState(rt.id, i) ? 'bg-blue-100/60 ring-1 ring-inset ring-blue-300' :
-								wState === 'drawing' ? 'bg-orange-100' : wState === 'drawing-conflict' ? 'bg-red-100' :
-								inSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-400' : (cell ? cellBg(iso, cell) : '')
-							].join(' ')}
-							onmousedown={(e) => { if (mode === 'edit') { e.preventDefault(); dragMoved = false; dragSel.start(rt.id, i); } else onAvailMouseDown(e, rt.id, i); }}
-							onmouseenter={() => onAvailMouseEnter(rt.id, i)}
-							onclick={() => { if (mode === 'edit' && !dragMoved) startInlineAvail(rt.id, iso, cell?.availabilityOverride ?? null); }}
-							ontouchstart={(e) => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }}
-							ontouchend={(e) => {
-								const t = e.changedTouches[0];
-								if (Math.abs(t.clientX - touchStartX) < 10 && Math.abs(t.clientY - touchStartY) < 10) {
-									e.preventDefault();
-									if (mode === 'edit') startInlineAvail(rt.id, iso, cell?.availabilityOverride ?? null);
-									else openPopover(rt.id, iso);
-								}
-							}}
-							title={mode === 'edit' ? 'Click to edit availability · drag to bulk edit' : 'Click = info & book · drag = multi-night'}
-						>
-								{#if cell}
-									{#if inSel}
-										<span class="text-[10px] font-bold text-orange-700">✓</span>
-								{:else if mode === 'edit' && inlineAvailEdit?.roomTypeId === rt.id && inlineAvailEdit?.date === iso}
-									<!-- Inline availability input -->
-									<input
-										type="number" min="0"
-										value={inlineAvailEdit.value}
-										oninput={(e) => { if (inlineAvailEdit) inlineAvailEdit.value = (e.target as HTMLInputElement).value; }}
-										onblur={commitInlineAvail}
-										onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitInlineAvail(); } if (e.key === 'Escape') inlineAvailEdit = null; }}
-										class="w-full text-center text-[11px] font-mono bg-blue-50 border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 px-0 py-0.5"
-										onclick={(e) => e.stopPropagation()}
-										use:focusOnMount
-									/>
-									{:else}
-										<span class={availClass(cell)}>{cell.stopSell ? 'STOP' : cell.available}</span>
-										<div class="text-[8px] leading-none {cell.availabilityOverride != null ? 'text-blue-600 font-medium' : 'text-muted-foreground'}">
-											{cell.availabilityOverride != null ? `${cell.available}↓${cell.physicalAvailable}` : `/${cell.totalRooms}`}
-										</div>
-									{/if}
-								{:else}
-									<span class="text-muted-foreground">—</span>
-								{/if}
-								</td>
-							{/each}
-						</tr>
-
-					<!-- Rate row -->
-					<tr class="border-b border-border/20 hover:bg-muted/5">
+					<!-- Available row — drag to book -->
+					<tr class="border-b border-border/20">
 						<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
-							Rate / night
-							{#if mode === 'edit'}<div class="text-[8px] normal-case font-normal opacity-60 mt-0.5">click/drag to edit</div>{/if}
+							Available
 						</td>
 						{#each data.dates as iso, i}
 							{@const cell = propAri[rt.id]?.[iso]}
-							{@const rDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1)}
-							<td style="width:{COL_W}px"
-								class={['border-r border-border/20 px-0.5 py-1.5 text-center transition-colors',
-									mode === 'edit' ? 'cursor-pointer' : 'cursor-pointer',
-									rDragSel && mode === 'edit' ? 'bg-blue-100 ring-1 ring-inset ring-blue-300' : (cell ? cellBg(iso, cell) : ''),
-									'hover:bg-muted/40'
-								].join(' ')}
-								onmousedown={(e) => { if (mode === 'edit') { e.preventDefault(); dragMoved = false; dragRowType = 'rate'; dragSel.start(rt.id, i); } }}
-								onmouseenter={() => onRestrictMouseEnter(rt.id, i)}
-								onclick={() => { if (mode === 'edit' && !dragMoved) startInlineRate(rt.id, iso, cell?.overrideRateCents ?? cell?.effectiveRateCents ?? null); else if (mode !== 'edit') openPopover(rt.id, iso, undefined, 'rate'); }}
-								ontouchstart={(e) => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }}
-								ontouchend={(e) => { const t = e.changedTouches[0]; if (Math.abs(t.clientX - touchStartX) < 10 && Math.abs(t.clientY - touchStartY) < 10) { e.preventDefault(); openPopover(rt.id, iso, undefined, 'rate'); } }}
-							>
-								{#if mode === 'edit' && inlineRateEdit?.roomTypeId === rt.id && inlineRateEdit?.date === iso}
-									<input
-										type="number" min="0" step="1"
-										value={inlineRateEdit.value}
-										oninput={(e) => { if (inlineRateEdit) inlineRateEdit.value = (e.target as HTMLInputElement).value; }}
-										onblur={() => commitInlineRate()}
-										onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitInlineRate(); } if (e.key === 'Escape') inlineRateEdit = null; }}
-										use:focusOnMount
-										class="w-full text-center text-xs font-mono bg-background rounded border border-primary outline-none px-0.5 py-0" />
-								{:else if cell}
-									<span class={['font-mono text-[11px]', cell.overrideRateCents != null ? 'text-blue-700 font-bold' : ''].join(' ')} style={cell.seasonColour && !cell.overrideRateCents ? `color:${cell.seasonColour}; filter:brightness(0.6)` : ''}>
-										{fmt(cell.effectiveRateCents)}
-									</span>
-									{#if cell.overrideRateCents != null}
-										<div class="text-[8px] text-muted-foreground line-through leading-none">{fmt(cell.baseRateCents)}</div>
-									{/if}
-								{:else}<span class="text-muted-foreground">—</span>{/if}
-							</td>
+							{@const dState = cellDragState(rt.id, prop.id, i)}
+							{@const wState = cellDrawState(rt.id, prop.id, i)}
+							{@const sel = drawSel.selections.find(s => s.rowId === rt.id)}
+							{@const inSel = sel && i >= sel.minCol && i <= sel.maxCol}
+					<td style="width:{COL_W}px"
+						class={['border-r border-border/20 px-0.5 py-1.5 text-center transition-colors cursor-crosshair',
+							dState === 'selected' ? 'bg-teal-100' : dState === 'conflict' ? 'bg-red-100' :
+							cellEditState(rt.id, i) ? 'bg-blue-100/60 ring-1 ring-inset ring-blue-300' :
+							wState === 'drawing' ? 'bg-orange-100' : wState === 'drawing-conflict' ? 'bg-red-100' :
+							inSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-400' : (cell ? cellBg(iso, cell) : '')
+						].join(' ')}
+						onmousedown={(e) => onAvailMouseDown(e, rt.id, i)}
+						onmouseenter={() => onAvailMouseEnter(rt.id, i)}
+						ontouchstart={(e) => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }}
+						ontouchend={(e) => {
+							const t = e.changedTouches[0];
+							if (Math.abs(t.clientX - touchStartX) < 10 && Math.abs(t.clientY - touchStartY) < 10) {
+								e.preventDefault();
+								openPopover(rt.id, iso);
+							}
+						}}
+						title="Click = info & book · drag = multi-night"
+					>
+				{#if cell}
+					{#if inSel}
+						<span class="text-[10px] font-bold text-orange-700">✓</span>
+					{:else}
+						<span class={availClass(cell)}>{cell.stopSell ? 'STOP' : cell.available}</span>
+					{/if}
+				{:else}
+					<span class="text-muted-foreground">—</span>
+				{/if}
+						</td>
 						{/each}
 					</tr>
 
-					<!-- Min Stay row -->
+			<!-- Sellable row — drag to bulk-edit availability -->
+			<tr class="border-b border-border/20 hover:bg-muted/5">
+			<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
+					Sellable
+				</td>
+				{#each data.dates as iso, i}
+					{@const cell = propAri[rt.id]?.[iso]}
+					{@const acDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'avail'}
+					{@const ceiling = cell?.availabilityOverride ?? cell?.totalRooms ?? null}
+					<td style="width:{COL_W}px"
+						class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40',
+							acDragSel ? 'bg-teal-100 ring-1 ring-inset ring-teal-400' :
+							cell?.availabilityOverride != null ? 'bg-teal-50' : ''
+						].join(' ')}
+						onmousedown={(e) => { e.preventDefault(); dragMoved = false; dragRowType = 'avail'; dragSel.start(rt.id, i); }}
+						onmouseenter={() => { if (dragRowType === 'avail') onRestrictMouseEnter(rt.id, i); }}
+						onclick={(e) => { if (!dragMoved) startFloatingEdit('availCap', rt.id, iso, cell?.availabilityOverride ?? cell?.totalRooms ?? null, '', e, cell?.totalRooms, cell?.availabilityOverride != null); }}
+					>
+						{#if ceiling != null}
+							<span class={['font-mono leading-none', cell?.availabilityOverride != null ? 'font-semibold text-teal-700' : 'text-muted-foreground/60'].join(' ')}>{ceiling}</span>
+						{:else}
+							<span class="text-[9px] text-muted-foreground/30 leading-none">—</span>
+						{/if}
+						</td>
+					{/each}
+				</tr>
+
+			<!-- Booked row — read-only, shows rooms currently booked -->
+			<tr class="border-b border-border/20 hover:bg-muted/5">
+				<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
+					Booked
+				</td>
+				{#each data.dates as iso, i}
+					{@const cell = propAri[rt.id]?.[iso]}
+					{@const booked = cell ? cell.totalRooms - cell.physicalAvailable : 0}
+					<td style="width:{COL_W}px"
+						class="border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40"
+						onclick={() => openPopover(rt.id, iso)}
+						title="Click to see who's booked"
+					>
+						{#if cell}
+							<span class={['font-mono leading-none', booked > 0 ? 'font-semibold text-orange-700' : 'text-muted-foreground/30'].join(' ')}>{booked}</span>
+						{:else}
+							<span class="text-muted-foreground/30">—</span>
+						{/if}
+					</td>
+				{/each}
+			</tr>
+
+			<!-- Rate row -->
 					<tr class="border-b border-border/20 hover:bg-muted/5">
-						<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
-							Min Stay
-							{#if mode === 'edit'}<div class="text-[8px] normal-case font-normal opacity-60 mt-0.5">click/drag</div>{/if}
-						</td>
-						{#each data.dates as iso, i}
-							{@const cell = propAri[rt.id]?.[iso]}
-							{@const msDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'minStay'}
-							<td style="width:{COL_W}px"
-								class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40',
-									msDragSel ? 'bg-amber-100 ring-1 ring-inset ring-amber-300' : (cell ? cellBg(iso, cell) : '')
-								].join(' ')}
-								onmousedown={(e) => { if (mode === 'edit') { e.preventDefault(); dragMoved = false; dragRowType = 'minStay'; dragSel.start(rt.id, i); } }}
-								onmouseenter={() => { if (dragRowType === 'minStay') onRestrictMouseEnter(rt.id, i); }}
-								onclick={() => { if (!dragMoved) openPopover(rt.id, iso, undefined, 'rate'); }}
-							>
-								{#if cell}
-									<span class={['text-[10px] font-mono leading-none', cell.minNights > 1 ? 'font-semibold text-amber-700' : 'text-muted-foreground/50'].join(' ')}>{cell.minNights}n</span>
-								{:else}<span class="text-muted-foreground/30">—</span>{/if}
-							</td>
-						{/each}
-					</tr>
+					<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
+						Rate / night
+					</td>
+					{#each data.dates as iso, i}
+						{@const cell = propAri[rt.id]?.[iso]}
+						{@const rDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1)}
+						<td style="width:{COL_W}px"
+							class={['border-r border-border/20 px-0.5 py-1.5 text-center transition-colors cursor-pointer',
+								rDragSel ? 'bg-blue-100 ring-1 ring-inset ring-blue-300' : (cell ? cellBg(iso, cell) : ''),
+								'hover:bg-muted/40'
+							].join(' ')}
+							onmousedown={(e) => { e.preventDefault(); dragMoved = false; dragRowType = 'rate'; dragSel.start(rt.id, i); }}
+							onmouseenter={() => onRestrictMouseEnter(rt.id, i)}
+						onclick={(e) => { if (!dragMoved) startFloatingEdit('rate', rt.id, iso, cell?.overrideRateCents ?? null, cell?.baseRateCents ? `Season ${fmt(cell.baseRateCents)}` : '', e); }}
+						ontouchstart={(e) => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }}
+						ontouchend={(e) => { const t = e.changedTouches[0]; if (Math.abs(t.clientX - touchStartX) < 10 && Math.abs(t.clientY - touchStartY) < 10) { e.preventDefault(); openPopover(rt.id, iso, undefined, 'rate'); } }}
+					>
+						{#if cell}
+							<span class={['font-mono', cell.overrideRateCents != null ? 'text-blue-700 font-bold' : ''].join(' ')} style={cell.seasonColour && !cell.overrideRateCents ? `color:${cell.seasonColour}; filter:brightness(0.6)` : ''}>
+								{fmt(cell.effectiveRateCents)}
+							</span>
+							{#if cell.overrideRateCents != null}
+								<div class="text-muted-foreground line-through leading-none">{fmt(cell.baseRateCents)}</div>
+							{/if}
+						{:else}<span class="text-muted-foreground">—</span>{/if}
+					</td>
+					{/each}
+				</tr>
 
-					<!-- CTA row -->
-					<tr class="border-b border-border/20 hover:bg-muted/5">
-						<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
-							CTA
-							<div class="text-[8px] normal-case font-normal opacity-60 mt-0.5">{mode === 'edit' ? 'click/drag' : 'no arrival'}</div>
+				<!-- Min Stay row -->
+				<tr class="border-b border-border/20 hover:bg-muted/5">
+				<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
+					Min Stay
+				</td>
+					{#each data.dates as iso, i}
+						{@const cell = propAri[rt.id]?.[iso]}
+						{@const msDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'minStay'}
+						<td style="width:{COL_W}px"
+							class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40',
+								msDragSel ? 'bg-amber-100 ring-1 ring-inset ring-amber-300' : (cell ? cellBg(iso, cell) : '')
+							].join(' ')}
+							onmousedown={(e) => { e.preventDefault(); dragMoved = false; dragRowType = 'minStay'; dragSel.start(rt.id, i); }}
+							onmouseenter={() => { if (dragRowType === 'minStay') onRestrictMouseEnter(rt.id, i); }}
+							onclick={(e) => { if (!dragMoved) startFloatingEdit('minStay', rt.id, iso, cell?.overrideMinNights ?? null, `Base: ${cell?.baseMinNights ?? 1}n`, e); }}
+						>
+							{#if cell}
+								<span class={['font-mono leading-none', cell.minNights > 1 ? 'font-semibold text-amber-700' : 'text-muted-foreground/50'].join(' ')}>{cell.minNights}n</span>
+							{:else}<span class="text-muted-foreground/30">—</span>{/if}
 						</td>
-						{#each data.dates as iso, i}
-							{@const cell = propAri[rt.id]?.[iso]}
-							{@const ctaDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'cta'}
-							<td style="width:{COL_W}px"
-								class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors',
-									ctaDragSel ? 'bg-red-100 ring-1 ring-inset ring-red-300' :
-									cell?.closedToArrival ? 'bg-red-50' : 'hover:bg-muted/40'
-								].join(' ')}
-								onmousedown={(e) => { if (mode === 'edit') { e.preventDefault(); dragMoved = false; dragRowType = 'cta'; dragSel.start(rt.id, i); } }}
-								onmouseenter={() => { if (dragRowType === 'cta') onRestrictMouseEnter(rt.id, i); }}
-								onclick={() => { if (mode === 'edit' && !dragMoved) toggleRestriction(rt.id, iso, 'cta', cell?.closedToArrival ?? false); else if (!dragMoved) openPopover(rt.id, iso, undefined, 'rate'); }}
-							>
-								{#if cell?.closedToArrival}
-									<span class="text-[9px] font-bold text-red-600 leading-none">CTA</span>
-								{:else}
-									<span class="text-[9px] text-muted-foreground/30 leading-none">—</span>
-								{/if}
-							</td>
-						{/each}
-					</tr>
+					{/each}
+				</tr>
 
-					<!-- CTD row -->
-					<tr class="border-b-2 border-border hover:bg-muted/5">
-						<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
-							CTD
-							<div class="text-[8px] normal-case font-normal opacity-60 mt-0.5">{mode === 'edit' ? 'click/drag' : 'no departure'}</div>
+				<!-- CTA row -->
+				<tr class="border-b border-border/20 hover:bg-muted/5">
+				<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
+					CTA
+				</td>
+					{#each data.dates as iso, i}
+						{@const cell = propAri[rt.id]?.[iso]}
+						{@const ctaDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'cta'}
+						<td style="width:{COL_W}px"
+							class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors',
+								ctaDragSel ? 'bg-red-100 ring-1 ring-inset ring-red-300' :
+								cell?.closedToArrival ? 'bg-red-50' : 'hover:bg-muted/40'
+							].join(' ')}
+							onmousedown={(e) => { e.preventDefault(); dragMoved = false; dragRowType = 'cta'; dragSel.start(rt.id, i); }}
+							onmouseenter={() => { if (dragRowType === 'cta') onRestrictMouseEnter(rt.id, i); }}
+							onclick={() => { if (!dragMoved) toggleRestriction(rt.id, iso, 'cta', cell?.closedToArrival ?? false); }}
+						>
+						{#if cell?.closedToArrival}
+							<span class="font-bold text-red-600 leading-none">CTA</span>
+						{:else}
+							<span class="text-muted-foreground/30 leading-none">—</span>
+						{/if}
 						</td>
-						{#each data.dates as iso, i}
-							{@const cell = propAri[rt.id]?.[iso]}
-							{@const ctdDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'ctd'}
-							<td style="width:{COL_W}px"
-								class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors',
-									ctdDragSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-300' :
-									cell?.closedToDeparture ? 'bg-orange-50' : 'hover:bg-muted/40'
-								].join(' ')}
-								onmousedown={(e) => { if (mode === 'edit') { e.preventDefault(); dragMoved = false; dragRowType = 'ctd'; dragSel.start(rt.id, i); } }}
-								onmouseenter={() => { if (dragRowType === 'ctd') onRestrictMouseEnter(rt.id, i); }}
-								onclick={() => { if (mode === 'edit' && !dragMoved) toggleRestriction(rt.id, iso, 'ctd', cell?.closedToDeparture ?? false); else if (!dragMoved) openPopover(rt.id, iso, undefined, 'rate'); }}
-							>
-								{#if cell?.closedToDeparture}
-									<span class="text-[9px] font-bold text-orange-600 leading-none">CTD</span>
-								{:else}
-									<span class="text-[9px] text-muted-foreground/30 leading-none">—</span>
-								{/if}
-							</td>
-						{/each}
-					</tr>
+					{/each}
+				</tr>
+
+				<!-- CTD row -->
+				<tr class="border-b-2 border-border hover:bg-muted/5">
+				<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
+					CTD
+				</td>
+					{#each data.dates as iso, i}
+						{@const cell = propAri[rt.id]?.[iso]}
+						{@const ctdDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'ctd'}
+						<td style="width:{COL_W}px"
+							class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors',
+								ctdDragSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-300' :
+								cell?.closedToDeparture ? 'bg-orange-50' : 'hover:bg-muted/40'
+							].join(' ')}
+							onmousedown={(e) => { e.preventDefault(); dragMoved = false; dragRowType = 'ctd'; dragSel.start(rt.id, i); }}
+							onmouseenter={() => { if (dragRowType === 'ctd') onRestrictMouseEnter(rt.id, i); }}
+							onclick={() => { if (!dragMoved) toggleRestriction(rt.id, iso, 'ctd', cell?.closedToDeparture ?? false); }}
+						>
+						{#if cell?.closedToDeparture}
+							<span class="font-bold text-orange-600 leading-none">CTD</span>
+						{:else}
+							<span class="text-muted-foreground/30 leading-none">—</span>
+						{/if}
+						</td>
+					{/each}
+				</tr>
 					{:else}
 						<tr>
 							<td colspan={1 + data.dates.length} class="px-4 py-6 text-center text-muted-foreground text-sm">
@@ -902,14 +1036,14 @@
 					{:else}
 						{new Date(popoverCell.date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
 					{/if}
-					{#if cell?.totalRooms} · {cell.available}/{cell.totalRooms} avail{/if}
+					{#if cell?.totalRooms} · {cell.available} avail{#if cell.totalRooms - cell.physicalAvailable > 0}, {cell.totalRooms - cell.physicalAvailable} booked{/if}{/if}
 				</p>
 			</div>
 			<button onclick={closePopover} class="text-muted-foreground hover:text-foreground text-lg leading-none px-1 shrink-0">×</button>
 		</div>
 
 	<!-- ── New Booking CTA (full width) ───────────────────────────────────── -->
-	{#if popoverSource === 'avail' && mode === 'book'}
+		{#if mode === 'book'}
 		<div class="px-4 pt-3 pb-2">
 			{#if (cell?.available ?? 0) > 0 && !cell?.stopSell}
 				<button
@@ -919,10 +1053,16 @@
 					}}
 					class="w-full rounded-lg bg-green-600 text-white py-2 text-sm font-semibold hover:bg-green-700 transition-colors"
 				>+ New Booking{multiNight ? ` · ${popNights} nights` : ''}</button>
+			{:else if cell?.stopSell}
+				<div class="rounded-lg bg-red-50 border border-red-200 px-3 py-2 flex items-center justify-between gap-2">
+					<p class="text-sm text-red-700 font-medium">Stop sell active</p>
+					<button
+						onclick={() => { removeStopSell(popoverCell!.roomTypeId, popoverCell!.date); closePopover(); }}
+						class="text-xs text-red-600 font-semibold hover:underline shrink-0"
+					>Remove →</button>
+				</div>
 			{:else}
-				<p class="rounded-lg bg-muted px-3 py-2 text-center text-sm text-muted-foreground">
-					{cell?.stopSell ? 'Stop sell active — edit restrictions below to re-open.' : 'No availability — edit restrictions or increase inventory.'}
-				</p>
+				<p class="rounded-lg bg-muted px-3 py-2 text-center text-sm text-muted-foreground">No availability — increase via the Sellable row.</p>
 			{/if}
 		</div>
 	{/if}
@@ -933,7 +1073,7 @@
 			<!-- Left: Rates -->
 			<div class="pr-3 space-y-1 min-w-0">
 				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-					{multiNight ? 'Rates · tap to override' : 'Rate'}
+					{multiNight ? 'Rates' : 'Rate'}
 				</p>
 				{#if multiNight}
 					<div class="max-h-52 overflow-y-auto space-y-0.5 pr-0.5">
@@ -1027,67 +1167,73 @@
 			</div>
 		</div>
 
-		<!-- ── Override (full width below columns) ────────────────────────────── -->
-		<div class="border-t border-border px-4 py-3 space-y-3">
-			<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
-				{#if multiNight}
-					Override · {new Date(overrideDate + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}
-				{:else}
-					Rate & Restrictions Override
-				{/if}
-			</p>
-		<div class="grid grid-cols-3 gap-2">
-			<div>
-				<label class="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Rate/night</label>
-				<div class="flex items-center gap-1 mt-0.5">
-					<span class="text-xs text-muted-foreground">$</span>
-					<input type="number" min="0" step="1" bind:value={editRate}
-						placeholder={overrideCell?.baseRateCents ? String(overrideCell.baseRateCents / 100) : '—'}
-						title={overrideCell?.baseRateCents ? `Season: ${fmt(overrideCell.baseRateCents)}` : 'Season rate'}
-						class="flex-1 min-w-0 rounded border border-input bg-background px-1.5 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-					{#if editRate}<button onclick={() => editRate = ''} class="text-[10px] text-muted-foreground hover:text-foreground shrink-0">✕</button>{/if}
-				</div>
-			</div>
-			<div>
-				<label class="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Min nights</label>
-				<input type="number" min="1" max="30" bind:value={editMin}
-					placeholder={String(overrideCell?.baseMinNights ?? 1)}
-					class="mt-0.5 w-full rounded border border-input bg-background px-1.5 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-			</div>
-			<div>
-				<label class="text-[10px] text-muted-foreground font-medium uppercase tracking-wide"
-					title={overrideCell?.totalRooms ? `${overrideCell.totalRooms} total rooms` : 'Override available rooms offered online'}>Avail cap</label>
-				<div class="flex items-center gap-1 mt-0.5">
-					<input type="number" min="0" bind:value={editAvail}
-						placeholder={overrideCell?.totalRooms != null ? String(overrideCell.totalRooms) : '—'}
-						class="flex-1 min-w-0 rounded border border-input bg-background px-1.5 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-					{#if editAvail !== ''}<button onclick={() => editAvail = ''} class="text-[10px] text-muted-foreground hover:text-foreground shrink-0">✕</button>{/if}
-				</div>
-			</div>
-		</div>
-			<div class="flex flex-wrap gap-x-4 gap-y-1.5">
-				<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editStopSell} class="h-4 w-4 rounded border-input" /><span class="text-sm">Stop sell</span></label>
-				<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTA} class="h-4 w-4 rounded border-input" /><span class="text-sm">CTA</span></label>
-				<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" bind:checked={editCTD} class="h-4 w-4 rounded border-input" /><span class="text-sm">CTD</span></label>
-			</div>
-			<div class="flex gap-2">
-				<button onclick={saveOverride} disabled={savingCell} class="flex-1 rounded-lg bg-primary text-primary-foreground py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">{savingCell ? 'Saving…' : 'Save override'}</button>
-				{#if overrideCell?.hasOverride}<button onclick={clearOverride} disabled={savingCell} class="rounded-lg border border-border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50">Clear</button>{/if}
-			</div>
-			<div class="flex items-center justify-between">
-				<p class="text-[10px] text-muted-foreground">Changes sync to Channex automatically</p>
-				<button
-					type="button"
-					onclick={() => { closePopover(); setMode('edit'); }}
-					class="text-[10px] text-primary hover:underline underline-offset-2"
-				>Bulk edit multiple dates →</button>
-			</div>
+		<!-- ── Footer: Bulk edit link ─────────────────────────────────────────── -->
+		<div class="border-t border-border px-4 py-2 flex justify-end">
+			<button
+				type="button"
+				onclick={openBulkFromPopover}
+				class="text-[11px] text-primary hover:underline underline-offset-2"
+			>Bulk edit multiple dates →</button>
 		</div>
 	</div>
 {/if}
 
+<!-- ── Floating Edit Overlay (Rate / Avail Cap / Min Stay) ──────────────── -->
+{#if floatingEdit}
+	{@const fe = floatingEdit}
+	{@const label = fe.type === 'rate' ? 'Rate/night' : fe.type === 'availCap' ? 'Sellable' : 'Min stay'}
+	{@const accent = fe.type === 'rate' ? 'border-blue-500' : fe.type === 'availCap' ? 'border-teal-500' : 'border-amber-500'}
+	<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+	<div class="fixed inset-0 z-40" onclick={() => commitFloatingEdit()}></div>
+	<div
+		style="position:fixed; left:{fe.cx}px; top:{fe.cy - 6}px; transform:translate(-50%,-100%); z-index:50;"
+		class="bg-background border border-border rounded-xl shadow-2xl p-3 w-36 pointer-events-auto"
+	>
+		<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">{label}</p>
+		{#if fe.contextLabel}
+			<p class="text-[9px] text-muted-foreground mb-1.5">{fe.contextLabel}</p>
+		{/if}
+		<div class="flex items-center gap-1">
+			{#if fe.type === 'rate'}<span class="text-xs text-muted-foreground">$</span>{/if}
+			<input
+				type="number"
+				min={fe.type === 'minStay' ? 1 : 0}
+				step={fe.type === 'rate' ? 1 : 1}
+				value={fe.value}
+				oninput={(e) => { if (floatingEdit) floatingEdit.value = (e.target as HTMLInputElement).value; }}
+				onblur={commitFloatingEdit}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') { e.preventDefault(); commitFloatingEdit(); }
+					if (e.key === 'Escape') { floatingEdit = null; }
+				}}
+				use:focusOnMount
+			placeholder="—"
+			class={['flex-1 min-w-0 rounded border text-center text-sm font-mono bg-background px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-ring', accent].join(' ')}
+		/>
+		{#if fe.type === 'minStay'}<span class="text-xs text-muted-foreground shrink-0">n</span>{/if}
+	</div>
+	<div class="flex justify-end mt-1.5">
+		{#if fe.type === 'availCap' && fe.hasOverride && fe.resetTo != null}
+			<button
+				type="button"
+				onmousedown={(e) => e.preventDefault()}
+				onclick={() => { if (floatingEdit) { floatingEdit.value = ''; commitFloatingEdit(); } }}
+				class="text-[9px] text-destructive hover:underline shrink-0"
+			>Reset to {fe.resetTo} ✕</button>
+		{:else if fe.value}
+			<button
+				type="button"
+				onmousedown={(e) => e.preventDefault()}
+				onclick={() => { if (floatingEdit) { floatingEdit.value = ''; commitFloatingEdit(); } }}
+				class="text-[9px] text-destructive hover:underline shrink-0"
+			>Clear ✕</button>
+		{/if}
+	</div>
+	</div>
+{/if}
+
 <!-- ── Bulk Edit Side Panel ──────────────────────────────────────────────── -->
-{#if mode === 'edit' && editRange}
+{#if editRange}
 	<div class="fixed right-0 top-14 bottom-0 w-80 z-30 border-l border-border bg-background shadow-xl overflow-hidden flex flex-col">
 		<!-- Header -->
 		<div class="flex items-center gap-2 px-4 py-3 border-b border-border bg-blue-600 text-white">
