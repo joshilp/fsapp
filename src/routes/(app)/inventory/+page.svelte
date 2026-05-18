@@ -8,6 +8,7 @@
 	import BookingCard from '$lib/components/booking/BookingCard.svelte';
 	import GroupCard from '$lib/components/booking/GroupCard.svelte';
 	import RoomAssignmentDialog from '$lib/components/booking/RoomAssignmentDialog.svelte';
+	import * as Popover from '$lib/components/ui/popover/index.js';
 
 	let { data }: { data: PageData } = $props();
 
@@ -25,6 +26,23 @@
 		layoutMode = layoutMode === 'single' ? 'stacked' : 'single';
 		if (typeof localStorage !== 'undefined') localStorage.setItem(INV_LAYOUT_KEY, layoutMode);
 	}
+
+	// ─── Row visibility ────────────────────────────────────────────────────────
+	const INV_ROWS_KEY = 'inventory-rows';
+	type RowVisibility = { sellable: boolean; booked: boolean; minStay: boolean; cta: boolean; ctd: boolean };
+	const ROW_DEFAULTS: RowVisibility = { sellable: true, booked: false, minStay: true, cta: false, ctd: false };
+	function loadInvRows(): RowVisibility {
+		if (typeof localStorage === 'undefined') return { ...ROW_DEFAULTS };
+		try { return { ...ROW_DEFAULTS, ...JSON.parse(localStorage.getItem(INV_ROWS_KEY) ?? '{}') }; }
+		catch { return { ...ROW_DEFAULTS }; }
+	}
+	let visibleRows = $state<RowVisibility>(loadInvRows());
+	function toggleRow(key: keyof RowVisibility) {
+		visibleRows[key] = !visibleRows[key];
+		if (typeof localStorage !== 'undefined') localStorage.setItem(INV_ROWS_KEY, JSON.stringify(visibleRows));
+	}
+
+	let displayPopoverOpen = $state(false);
 
 	// Which properties to render based on layout
 	const visibleProps = $derived(
@@ -53,8 +71,6 @@
 	const drawSel = new DrawSelect<InvDrawExtra>();
 	let mode      = $state<'book' | 'group'>('book');
 	let dragMoved = $state(false);
-	let legendOpen = $state(false);
-
 	function setMode(m: 'book' | 'group') {
 		mode = m;
 		drawSel.clear();
@@ -677,12 +693,6 @@
 				{/if}
 			{/if}
 
-			<!-- Layout toggle -->
-			<button onclick={toggleLayout}
-				class="rounded border border-input px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
-				title={layoutMode === 'single' ? 'Show all properties stacked' : 'Show one property at a time'}
-			>{layoutMode === 'single' ? '⊞ Stack' : '⊟ Single'}</button>
-
 		<!-- Date navigation -->
 		<div class="flex items-center gap-1 rounded-lg border px-1 text-xs">
 			<button onclick={prevWindow} class="px-2 py-1 hover:bg-muted rounded disabled:opacity-40" disabled={data.from <= today}>← {data.window}d</button>
@@ -722,8 +732,82 @@
 				</button>
 			</form>
 
-			<button onclick={() => legendOpen = !legendOpen}
-				class={['ml-auto rounded border px-2 py-1 text-xs font-medium transition-colors', legendOpen ? 'bg-foreground text-background border-foreground' : 'border-input text-muted-foreground hover:bg-muted'].join(' ')}>Legend</button>
+			<!-- Display popover (right-aligned) -->
+			<div class="ml-auto">
+				<Popover.Root bind:open={displayPopoverOpen}>
+					<Popover.Trigger
+						class="flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
+					>⚙ Display</Popover.Trigger>
+
+					<Popover.Content align="end" class="w-64 p-0 gap-0">
+						<div class="p-4 space-y-4">
+
+							<!-- Layout -->
+							<div>
+								<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Layout</p>
+								<div class="flex rounded-md border border-input overflow-hidden text-xs font-medium">
+									<button
+										onclick={() => { if (layoutMode !== 'single') toggleLayout(); }}
+										class={['flex-1 px-2 py-1.5 border-r border-input transition-colors', layoutMode === 'single' ? 'bg-foreground text-background' : 'bg-background text-muted-foreground hover:bg-muted'].join(' ')}
+									>⊟ Single</button>
+									<button
+										onclick={() => { if (layoutMode !== 'stacked') toggleLayout(); }}
+										class={['flex-1 px-2 py-1.5 transition-colors', layoutMode === 'stacked' ? 'bg-foreground text-background' : 'bg-background text-muted-foreground hover:bg-muted'].join(' ')}
+									>⊞ Stacked</button>
+								</div>
+								<p class="text-[9px] text-muted-foreground mt-1">{layoutMode === 'stacked' ? 'All properties visible at once' : 'One property at a time'}</p>
+							</div>
+
+							<!-- Rows -->
+							<div>
+								<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Visible rows</p>
+								<div class="space-y-1">
+									{#each [
+										{ key: 'sellable', label: 'Sellable', hint: 'Inventory ceiling per room type' },
+										{ key: 'booked', label: 'Booked', hint: 'Rooms currently occupied' },
+										{ key: 'minStay', label: 'Min Stay', hint: 'Minimum night requirement' },
+										{ key: 'cta', label: 'CTA', hint: 'Closed to arrival' },
+										{ key: 'ctd', label: 'CTD', hint: 'Closed to departure' },
+									] as row}
+										<button
+											onclick={() => toggleRow(row.key as keyof RowVisibility)}
+											class={['w-full flex items-center justify-between rounded px-2.5 py-1.5 text-xs transition-colors text-left',
+												visibleRows[row.key as keyof RowVisibility] ? 'bg-foreground/5 text-foreground' : 'text-muted-foreground hover:bg-muted'
+											].join(' ')}
+										>
+											<span class="font-medium">{row.label}</span>
+											<span class={['text-[10px] px-1.5 py-0.5 rounded font-mono', visibleRows[row.key as keyof RowVisibility] ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'].join(' ')}>
+												{visibleRows[row.key as keyof RowVisibility] ? 'ON' : 'OFF'}
+											</span>
+										</button>
+									{/each}
+								</div>
+							</div>
+
+						</div>
+
+						<!-- Legend section -->
+						<div class="border-t border-border px-4 py-3">
+							<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Legend</p>
+							<div class="space-y-1 text-xs">
+								<div class="flex items-center gap-2"><span class="font-medium bg-foreground text-background rounded px-1 py-0.5 text-[10px]">Book</span><span>Click/drag to book rooms</span></div>
+								<div class="flex items-center gap-2"><span class="font-medium bg-orange-500 text-white rounded px-1 py-0.5 text-[10px]">Group</span><span>Draw multi-room group booking</span></div>
+								<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-red-100 border border-red-300 shrink-0"></span><span>Stop sell / conflict</span></div>
+								<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-blue-50 border border-blue-200 shrink-0"></span><span>Rate / restriction override</span></div>
+								<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-amber-50 border border-amber-200 shrink-0"></span><span>Today</span></div>
+								<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-teal-50 border border-teal-200 shrink-0"></span><span>Sellable override active</span></div>
+								<div class="flex items-center gap-2"><span class="text-xs font-bold text-emerald-700">2</span><span class="ml-1">Available rooms</span></div>
+								<div class="flex items-center gap-2"><span class="text-xs font-bold text-amber-600">1</span><span class="ml-1">Only 1 left</span></div>
+								<div class="flex items-center gap-2"><span class="text-xs font-bold text-red-500">0</span><span class="ml-1">Sold out</span></div>
+								<div class="flex items-center gap-2"><span class="text-xs font-bold text-red-700">STOP</span><span class="ml-1">Stop sell active</span></div>
+								<div class="flex items-center gap-2"><span class="text-xs text-amber-700 font-semibold">3n</span><span class="ml-1">Min stay 3 nights</span></div>
+								<div class="flex items-center gap-2"><span class="text-xs font-bold text-red-600">CTA</span><span class="ml-1">No check-in allowed</span></div>
+								<div class="flex items-center gap-2"><span class="text-xs font-bold text-orange-600">CTD</span><span class="ml-1">No check-out allowed</span></div>
+							</div>
+						</div>
+					</Popover.Content>
+				</Popover.Root>
+			</div>
 		</div>
 	</div>
 
@@ -779,7 +863,7 @@
 						</tr>
 
 					<!-- Available row — drag to book -->
-					<tr class="border-b border-border/20">
+					<tr class="border-b border-border/40">
 						<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
 							Available
 						</td>
@@ -790,7 +874,7 @@
 							{@const sel = drawSel.selections.find(s => s.rowId === rt.id)}
 							{@const inSel = sel && i >= sel.minCol && i <= sel.maxCol}
 					<td style="width:{COL_W}px"
-						class={['border-r border-border/20 px-0.5 py-1.5 text-center transition-colors cursor-crosshair',
+						class={['border-r border-border/40 px-0.5 py-1.5 text-center transition-colors cursor-crosshair',
 							dState === 'selected' ? 'bg-teal-100' : dState === 'conflict' ? 'bg-red-100' :
 							cellEditState(rt.id, i) ? 'bg-blue-100/60 ring-1 ring-inset ring-blue-300' :
 							wState === 'drawing' ? 'bg-orange-100' : wState === 'drawing-conflict' ? 'bg-red-100' :
@@ -822,7 +906,8 @@
 					</tr>
 
 			<!-- Sellable row — drag to bulk-edit availability -->
-			<tr class="border-b border-border/20 hover:bg-muted/5">
+			{#if visibleRows.sellable}
+			<tr class="border-b border-border/40 hover:bg-muted/5">
 			<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
 					Sellable
 				</td>
@@ -831,7 +916,7 @@
 					{@const acDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'avail'}
 					{@const ceiling = cell?.availabilityOverride ?? cell?.totalRooms ?? null}
 					<td style="width:{COL_W}px"
-						class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40',
+						class={['border-r border-border/40 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40',
 							acDragSel ? 'bg-teal-100 ring-1 ring-inset ring-teal-400' :
 							cell?.availabilityOverride != null ? 'bg-teal-50' : ''
 						].join(' ')}
@@ -847,9 +932,11 @@
 						</td>
 					{/each}
 				</tr>
+			{/if}
 
 			<!-- Booked row — read-only, shows rooms currently booked -->
-			<tr class="border-b border-border/20 hover:bg-muted/5">
+			{#if visibleRows.booked}
+			<tr class="border-b border-border/40 hover:bg-muted/5">
 				<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
 					Booked
 				</td>
@@ -857,7 +944,7 @@
 					{@const cell = propAri[rt.id]?.[iso]}
 					{@const booked = cell ? cell.totalRooms - cell.physicalAvailable : 0}
 					<td style="width:{COL_W}px"
-						class="border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40"
+						class="border-r border-border/40 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40"
 						onclick={() => openPopover(rt.id, iso)}
 						title="Click to see who's booked"
 					>
@@ -869,9 +956,10 @@
 					</td>
 				{/each}
 			</tr>
+			{/if}
 
 			<!-- Rate row -->
-					<tr class="border-b border-border/20 hover:bg-muted/5">
+					<tr class="border-b border-border/40 hover:bg-muted/5">
 					<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
 						Rate / night
 					</td>
@@ -879,7 +967,7 @@
 						{@const cell = propAri[rt.id]?.[iso]}
 						{@const rDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1)}
 						<td style="width:{COL_W}px"
-							class={['border-r border-border/20 px-0.5 py-1.5 text-center transition-colors cursor-pointer',
+							class={['border-r border-border/40 px-0.5 py-1.5 text-center transition-colors cursor-pointer',
 								rDragSel ? 'bg-blue-100 ring-1 ring-inset ring-blue-300' : (cell ? cellBg(iso, cell) : ''),
 								'hover:bg-muted/40'
 							].join(' ')}
@@ -902,7 +990,8 @@
 				</tr>
 
 				<!-- Min Stay row -->
-				<tr class="border-b border-border/20 hover:bg-muted/5">
+				{#if visibleRows.minStay}
+				<tr class="border-b border-border/40 hover:bg-muted/5">
 				<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
 					Min Stay
 				</td>
@@ -910,7 +999,7 @@
 						{@const cell = propAri[rt.id]?.[iso]}
 						{@const msDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'minStay'}
 						<td style="width:{COL_W}px"
-							class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40',
+							class={['border-r border-border/40 px-0.5 py-1 text-center cursor-pointer transition-colors hover:bg-muted/40',
 								msDragSel ? 'bg-amber-100 ring-1 ring-inset ring-amber-300' : (cell ? cellBg(iso, cell) : '')
 							].join(' ')}
 							onmousedown={(e) => { e.preventDefault(); dragMoved = false; dragRowType = 'minStay'; dragSel.start(rt.id, i); }}
@@ -923,9 +1012,11 @@
 						</td>
 					{/each}
 				</tr>
+				{/if}
 
 				<!-- CTA row -->
-				<tr class="border-b border-border/20 hover:bg-muted/5">
+				{#if visibleRows.cta}
+				<tr class="border-b border-border/40 hover:bg-muted/5">
 				<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
 					CTA
 				</td>
@@ -933,7 +1024,7 @@
 						{@const cell = propAri[rt.id]?.[iso]}
 						{@const ctaDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'cta'}
 						<td style="width:{COL_W}px"
-							class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors',
+							class={['border-r border-border/40 px-0.5 py-1 text-center cursor-pointer transition-colors',
 								ctaDragSel ? 'bg-red-100 ring-1 ring-inset ring-red-300' :
 								cell?.closedToArrival ? 'bg-red-50' : 'hover:bg-muted/40'
 							].join(' ')}
@@ -949,8 +1040,10 @@
 						</td>
 					{/each}
 				</tr>
+				{/if}
 
 				<!-- CTD row -->
+				{#if visibleRows.ctd}
 				<tr class="border-b-2 border-border hover:bg-muted/5">
 				<td class="sticky left-0 z-10 bg-background border-r border-border px-3 py-1.5 text-muted-foreground text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">
 					CTD
@@ -959,7 +1052,7 @@
 						{@const cell = propAri[rt.id]?.[iso]}
 						{@const ctdDragSel = dragSel.range?.rowId === rt.id && i >= (dragSel.range?.minCol ?? -1) && i <= (dragSel.range?.maxCol ?? -1) && dragRowType === 'ctd'}
 						<td style="width:{COL_W}px"
-							class={['border-r border-border/20 px-0.5 py-1 text-center cursor-pointer transition-colors',
+							class={['border-r border-border/40 px-0.5 py-1 text-center cursor-pointer transition-colors',
 								ctdDragSel ? 'bg-orange-100 ring-1 ring-inset ring-orange-300' :
 								cell?.closedToDeparture ? 'bg-orange-50' : 'hover:bg-muted/40'
 							].join(' ')}
@@ -975,6 +1068,7 @@
 						</td>
 					{/each}
 				</tr>
+				{/if}
 					{:else}
 						<tr>
 							<td colspan={1 + data.dates.length} class="px-4 py-6 text-center text-muted-foreground text-sm">
@@ -1387,49 +1481,7 @@
 	</div>
 {/if}
 
-<!-- ── Legend floating panel ──────────────────────────────────────────────── -->
-{#if legendOpen}
-	<div class="fixed bottom-4 right-4 z-40 rounded-lg border border-border bg-background shadow-xl p-4 w-64 text-xs">
-		<div class="flex items-center justify-between mb-3">
-			<p class="font-semibold text-sm">Legend</p>
-			<button onclick={() => legendOpen = false} class="text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
-		</div>
-		<div class="space-y-3">
-			<div>
-				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Availability count</p>
-				<div class="space-y-1">
-					<div class="flex items-center gap-2"><span class="text-emerald-700 font-semibold w-8 text-center">2+</span><span>Available</span></div>
-					<div class="flex items-center gap-2"><span class="text-amber-600 font-semibold w-8 text-center">1</span><span>Last room</span></div>
-					<div class="flex items-center gap-2"><span class="text-red-500 font-semibold w-8 text-center">0</span><span>Sold out</span></div>
-					<div class="flex items-center gap-2"><span class="text-red-700 font-bold w-8 text-center text-[10px]">STOP</span><span>Stop sell — closed online</span></div>
-				</div>
-			</div>
-			<div>
-				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Cell background</p>
-				<div class="space-y-1">
-					<div class="flex items-center gap-2"><span class="inline-block w-5 h-3.5 rounded-sm bg-red-50 border border-red-200"></span><span>Stop sell / sold out</span></div>
-					<div class="flex items-center gap-2"><span class="inline-block w-5 h-3.5 rounded-sm bg-blue-50 border border-blue-200"></span><span>Rate override active</span></div>
-					<div class="flex items-center gap-2"><span class="inline-block w-5 h-3.5 rounded-sm bg-amber-50 border border-amber-200"></span><span>Today</span></div>
-				</div>
-			</div>
-			<div>
-				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Restriction flags</p>
-				<div class="space-y-1">
-					<div class="flex items-center gap-2"><span class="text-red-600 font-bold w-8">CTA</span><span>Closed to Arrival</span></div>
-					<div class="flex items-center gap-2"><span class="text-orange-600 font-bold w-8">CTD</span><span>Closed to Departure</span></div>
-				</div>
-			</div>
-			<div>
-				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Modes</p>
-				<div class="space-y-1">
-					<div class="flex items-center gap-2"><span class="font-medium bg-foreground text-background rounded px-1 py-0.5 text-[10px]">Book</span><span>Click/drag to book rooms</span></div>
-					<div class="flex items-center gap-2"><span class="font-medium bg-blue-600 text-white rounded px-1 py-0.5 text-[10px]">✎ Rates</span><span>Click/drag to bulk edit rates</span></div>
-					<div class="flex items-center gap-2"><span class="font-medium bg-orange-500 text-white rounded px-1 py-0.5 text-[10px]">Group</span><span>Drag across room types for group</span></div>
-				</div>
-			</div>
-		</div>
-	</div>
-{/if}
+<!-- Legend is now in the ⚙ Display popover -->
 
 <!-- Booking Card (single selection or existing booking detail) -->
 <BookingCard
