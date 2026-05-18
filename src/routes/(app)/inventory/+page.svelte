@@ -673,7 +673,7 @@
 <div class="flex min-h-screen flex-col select-none">
 
 	<!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
-	<div class="sticky top-14 z-10 border-b bg-background/95 backdrop-blur">
+	<div class="sticky top-14 z-30 border-b bg-background">
 		<div class="flex flex-wrap items-center gap-2 px-4 py-2">
 			<h1 class="text-sm font-bold">Inventory</h1>
 			<span class="text-xs text-muted-foreground hidden sm:inline">Rates & Availability</span>
@@ -789,20 +789,20 @@
 						<!-- Legend section -->
 						<div class="border-t border-border px-4 py-3">
 							<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Legend</p>
-							<div class="space-y-1 text-xs">
-								<div class="flex items-center gap-2"><span class="font-medium bg-foreground text-background rounded px-1 py-0.5 text-[10px]">Book</span><span>Click/drag to book rooms</span></div>
-								<div class="flex items-center gap-2"><span class="font-medium bg-orange-500 text-white rounded px-1 py-0.5 text-[10px]">Group</span><span>Draw multi-room group booking</span></div>
-								<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-red-100 border border-red-300 shrink-0"></span><span>Stop sell / conflict</span></div>
-								<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-blue-50 border border-blue-200 shrink-0"></span><span>Rate / restriction override</span></div>
-								<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-amber-50 border border-amber-200 shrink-0"></span><span>Today</span></div>
-								<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-teal-50 border border-teal-200 shrink-0"></span><span>Sellable override active</span></div>
-								<div class="flex items-center gap-2"><span class="text-xs font-bold text-emerald-700">2</span><span class="ml-1">Available rooms</span></div>
-								<div class="flex items-center gap-2"><span class="text-xs font-bold text-amber-600">1</span><span class="ml-1">Only 1 left</span></div>
-								<div class="flex items-center gap-2"><span class="text-xs font-bold text-red-500">0</span><span class="ml-1">Sold out</span></div>
-								<div class="flex items-center gap-2"><span class="text-xs font-bold text-red-700">STOP</span><span class="ml-1">Stop sell active</span></div>
-								<div class="flex items-center gap-2"><span class="text-xs text-amber-700 font-semibold">3n</span><span class="ml-1">Min stay 3 nights</span></div>
-								<div class="flex items-center gap-2"><span class="text-xs font-bold text-red-600">CTA</span><span class="ml-1">No check-in allowed</span></div>
-								<div class="flex items-center gap-2"><span class="text-xs font-bold text-orange-600">CTD</span><span class="ml-1">No check-out allowed</span></div>
+							<div class="grid grid-cols-[auto_1fr] gap-x-2.5 gap-y-1.5 items-center text-xs">
+								<span class="font-medium bg-foreground text-background rounded px-1 py-0.5 text-[10px] justify-self-start">Book</span><span>Click/drag to book rooms</span>
+								<span class="font-medium bg-orange-500 text-white rounded px-1 py-0.5 text-[10px] justify-self-start">Group</span><span>Multi-room group booking</span>
+								<span class="w-3 h-3 rounded-sm bg-red-100 border border-red-300 justify-self-center"></span><span>Stop sell / conflict</span>
+								<span class="w-3 h-3 rounded-sm bg-blue-50 border border-blue-200 justify-self-center"></span><span>Rate / restriction override</span>
+								<span class="w-3 h-3 rounded-sm bg-amber-50 border border-amber-200 justify-self-center"></span><span>Today</span>
+								<span class="w-3 h-3 rounded-sm bg-teal-50 border border-teal-200 justify-self-center"></span><span>Sellable override active</span>
+								<span class="font-bold text-emerald-700 justify-self-center">2</span><span>Available rooms</span>
+								<span class="font-bold text-amber-600 justify-self-center">1</span><span>Only 1 left</span>
+								<span class="font-bold text-red-500 justify-self-center">0</span><span>Sold out</span>
+								<span class="font-bold text-red-700 justify-self-center">STOP</span><span>Stop sell active</span>
+								<span class="font-semibold text-amber-700 justify-self-center">3n</span><span>Min stay 3 nights</span>
+								<span class="font-bold text-red-600 justify-self-center">CTA</span><span>No check-in allowed</span>
+								<span class="font-bold text-orange-600 justify-self-center">CTD</span><span>No check-out allowed</span>
 							</div>
 						</div>
 					</Popover.Content>
@@ -819,9 +819,9 @@
 
 			{#if layoutMode === 'stacked' && visibleProps.length > 1}
 				<!-- Property divider in stacked mode -->
-				<div class="sticky top-0 z-20 bg-muted/80 border-b-2 border-border px-4 py-1.5 flex items-center gap-2 backdrop-blur">
+				<div class="sticky top-0 z-20 bg-foreground text-background border-b-2 border-border px-4 py-1.5 flex items-center gap-2">
 					<span class="font-semibold text-sm">{prop.name}</span>
-					<span class="text-xs text-muted-foreground">{propRoomTypes.length} room type{propRoomTypes.length === 1 ? '' : 's'}</span>
+					<span class="text-xs opacity-60">{propRoomTypes.length} room type{propRoomTypes.length === 1 ? '' : 's'}</span>
 				</div>
 			{/if}
 
