@@ -231,6 +231,27 @@ export const taxPresets = sqliteTable('tax_presets', {
 		.notNull()
 });
 
+// ─── Add-On Presets ───────────────────────────────────────────────────────────
+// Pre-configured charge items (pet fee, parking, etc.) shown as a dropdown in
+// the booking folio. The operator can override qty and unit price at booking time.
+// isTaxable controls whether the add-on is included in the tax subtotal.
+// Soft-deleted (isActive = false) so historical line items retain their labels.
+
+export const addonPresets = sqliteTable('addon_presets', {
+	id: id(),
+	propertyId: text('property_id')
+		.notNull()
+		.references(() => properties.id, { onDelete: 'cascade' }),
+	name: text('name').notNull(),             // e.g. "Pet fee", "Extra person"
+	defaultUnitCents: integer('default_unit_cents'), // null = ask each time
+	isTaxable: integer('is_taxable', { mode: 'boolean' }).notNull().default(true),
+	isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+	sortOrder: integer('sort_order').notNull().default(0),
+	createdAt: integer('created_at', { mode: 'timestamp_ms' })
+		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+		.notNull()
+});
+
 // ─── Booking Channels ─────────────────────────────────────────────────────────
 // Extensible source list. Seed data: Direct, Expedia, Booking.com.
 // isOta flags channels that use a separate confirmation folder workflow.
@@ -481,11 +502,16 @@ export const groupsRelations = relations(groups, ({ one, many }) => ({
 	bookings: many(bookings)
 }));
 
+export const addonPresetsRelations = relations(addonPresets, ({ one }) => ({
+	property: one(properties, { fields: [addonPresets.propertyId], references: [properties.id] })
+}));
+
 export const propertiesRelations = relations(properties, ({ many }) => ({
 	roomTypes: many(roomTypes),
 	rooms: many(rooms),
 	rateSeasons: many(rateSeasons),
 	taxPresets: many(taxPresets),
+	addonPresets: many(addonPresets),
 	bookings: many(bookings)
 }));
 

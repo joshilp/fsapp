@@ -4,13 +4,14 @@
 	import PropertyPolicy from '$lib/components/settings/PropertyPolicy.svelte';
 	import PropertyBooking from '$lib/components/settings/PropertyBooking.svelte';
 	import PropertyTaxes from '$lib/components/settings/PropertyTaxes.svelte';
+	import PropertyAddons from '$lib/components/settings/PropertyAddons.svelte';
 	import PropertyRooms from '$lib/components/settings/PropertyRooms.svelte';
 	import PropertyChannex from '$lib/components/settings/PropertyChannex.svelte';
 	import Channels from '$lib/components/settings/Channels.svelte';
 
 	let { data }: { data: PageData } = $props();
 
-	const PROP_SECTIONS = ['general', 'policy', 'booking', 'rooms', 'taxes', 'channex'] as const;
+	const PROP_SECTIONS = ['general', 'policy', 'booking', 'rooms', 'taxes', 'addons', 'channex'] as const;
 	const GLOBAL_SECTIONS = ['channels', 'email'] as const;
 	type Section = typeof PROP_SECTIONS[number] | typeof GLOBAL_SECTIONS[number];
 
@@ -20,7 +21,8 @@
 	const prop = $derived(data.propertiesList.find((p) => p.id === selectedPropId) ?? data.propertiesList[0]);
 	const propRoomTypes = $derived(data.roomTypesList.filter((rt) => rt.propertyId === selectedPropId));
 	const propRooms = $derived(data.roomsList.filter((r) => r.propertyId === selectedPropId));
-	const propTaxes = $derived(data.taxPresetsList.filter((t) => t.propertyId === selectedPropId));
+	const propTaxes  = $derived(data.taxPresetsList.filter((t) => t.propertyId === selectedPropId));
+	const propAddons = $derived(data.addonPresetsList.filter((a) => a.propertyId === selectedPropId));
 
 	const SECTION_LABELS: Record<Section, string> = {
 		general: 'General',
@@ -28,6 +30,7 @@
 		booking: 'Booking',
 		rooms: 'Rooms & Types',
 		taxes: 'Taxes',
+		addons: 'Add-Ons',
 		channex: 'Channex',
 		channels: 'Channels',
 		email: 'Email',
@@ -99,6 +102,8 @@
 				<PropertyRooms {prop} rooms={propRooms} roomTypes={propRoomTypes} />
 			{:else if prop && activeSection === 'taxes'}
 				<PropertyTaxes {prop} presets={propTaxes} />
+			{:else if prop && activeSection === 'addons'}
+				<PropertyAddons {prop} presets={propAddons} />
 			{:else if prop && activeSection === 'channex'}
 				<PropertyChannex {prop} roomTypes={propRoomTypes} />
 			{:else if activeSection === 'channels'}

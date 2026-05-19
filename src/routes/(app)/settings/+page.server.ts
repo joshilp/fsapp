@@ -7,17 +7,22 @@ import {
 	properties,
 	rooms,
 	roomTypes,
-	taxPresets
+	taxPresets,
+	addonPresets
 } from '$lib/server/db/schema';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) redirect(303, '/auth/login');
 
-	const [propertiesList, taxPresetsList, roomsList, roomTypesList, channelsList] =
+	const [propertiesList, taxPresetsList, addonPresetsList, roomsList, roomTypesList, channelsList] =
 		await Promise.all([
 			db.query.properties.findMany({ orderBy: (t, { asc }) => [asc(t.name)] }),
 			db.query.taxPresets.findMany({
 				with: { property: { columns: { name: true } } },
+				where: (t, { eq }) => eq(t.isActive, true),
+				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.sortOrder)]
+			}),
+			db.query.addonPresets.findMany({
 				where: (t, { eq }) => eq(t.isActive, true),
 				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.sortOrder)]
 			}),
@@ -38,6 +43,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	return {
 		propertiesList,
 		taxPresetsList,
+		addonPresetsList,
 		roomsList,
 		roomTypesList,
 		channelsList
@@ -206,6 +212,36 @@ export const actions: Actions = {
 		const id = (fd.get('id') as string)?.trim();
 		if (!id) return fail(400, { error: 'Missing ID' });
 		await db.update(taxPresets).set({ isActive: false }).where(eq(taxPresets.id, id));
+		return { success: true };
+	},
+
+	// ── Add-on presets ────────────────────────────────────────────────────────
+	upsertAddonPreset: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		const propertyId = g('propertyId');
+		const name = g('name');
+		if (!propertyId || !name) return fail(400, { error: 'Missing required fields' });
+		const unitStr = g('defaultUnitCents');
+		const defaultUnitCents = unitStr ? Math.round(parseFloat(unitStr) * 100) : null;
+		const isTaxable = fd.get('isTaxable') === '1';
+		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
+		if (id) {
+			await db.update(addonPresets).set({ name, defaultUnitCents, isTaxable, sortOrder }).where(eq(addonPresets.id, id));
+		} else {
+			await db.insert(addonPresets).values({ id: crypto.randomUUID(), propertyId, name, defaultUnitCents, isTaxable, sortOrder });
+		}
+		return { success: true };
+	},
+
+	deleteAddonPreset: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const id = (fd.get('id') as string)?.trim();
+		if (!id) return fail(400, { error: 'Missing ID' });
+		await db.update(addonPresets).set({ isActive: false }).where(eq(addonPresets.id, id));
 		return { success: true };
 	},
 

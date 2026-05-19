@@ -29,6 +29,8 @@
 	type TaxLine  = { id: string; presetId: string; label: string; percent: string; total: string };
 	type Payment  = { id: string; type: string; amount: number; paymentMethod: string; notes: string | null; chargedAt: number | null };
 	type TaxPreset = { id: string; label: string; ratePercent: number };
+	type AddonPreset = { id: string; name: string; defaultUnitCents: number | null; isTaxable: boolean };
+	type AddonLine  = { id: string; presetId: string; label: string; qty: string; unit: string; total: string; isTaxable: boolean };
 	type BookingType = 'walkin' | 'phone' | 'website' | 'bookingcom' | 'expedia' | 'airbnb' | 'other';
 
 	const BOOKING_TYPES: { id: BookingType; label: string; channelMatch: string }[] = [
@@ -131,9 +133,11 @@
 	let waiverSigned = $state(false);
 
 	// ── Charges ───────────────────────────────────────────────────────────────
-	let rateLines = $state<RateLine[]>([{ id: crypto.randomUUID(), label: '', qty: '', unit: '', total: '' }]);
-	let taxLines  = $state<TaxLine[]>([]);
-	let taxPresets = $state<TaxPreset[]>([]);
+	let rateLines  = $state<RateLine[]>([{ id: crypto.randomUUID(), label: '', qty: '', unit: '', total: '' }]);
+	let addonLines = $state<AddonLine[]>([]);
+	let taxLines   = $state<TaxLine[]>([]);
+	let taxPresets  = $state<TaxPreset[]>([]);
+	let addonPresets = $state<AddonPreset[]>([]);
 	let rateLoading = $state(false);
 	let minNightWarning = $state<string | null>(null);
 
@@ -141,7 +145,7 @@
 	let payments     = $state<Payment[]>([]);
 	let ccInfo       = $state<{ lastFour: string | null; cardType: string | null } | null>(null);
 	let addingPay    = $state(false);
-	let payAmt       = $state('');
+	let payAmt       = $state<number | ''>('');
 	let payMethod    = $state('cash');
 	let payType      = $state('final_charge');
 	let payNotes     = $state('');
@@ -339,9 +343,12 @@
 		if (!checkIn || !checkOut) return 0;
 		return Math.max(0, Math.round((new Date(checkOut+'T12:00:00').getTime() - new Date(checkIn+'T12:00:00').getTime()) / 86400000));
 	});
-	const rateTotal  = $derived(rateLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
-	const taxTotal   = $derived(taxLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
-	const grandTotal = $derived(rateTotal + taxTotal);
+	const rateTotal          = $derived(rateLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
+	const addonTotal         = $derived(addonLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
+	const taxableAddonTotal  = $derived(addonLines.filter(l => l.isTaxable).reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
+	const chargeableSubtotal = $derived(rateTotal + taxableAddonTotal); // base used for % tax calc
+	const taxTotal           = $derived(taxLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
+	const grandTotal         = $derived(rateTotal + addonTotal + taxTotal);
 	const collected  = $derived(payments.filter(p => p.type !== 'refund' && (p as { status?: string }).status !== 'pending').reduce((s, p) => s + p.amount, 0));
 	const pending    = $derived(payments.filter(p => p.type === 'deposit' && (p as { status?: string }).status === 'pending').reduce((s, p) => s + p.amount, 0));
 	const refunded   = $derived(payments.filter(p => p.type === 'refund').reduce((s, p) => s + p.amount, 0));
@@ -387,7 +394,7 @@
 		showAddress = false; numAdults = 1; numChildren = 0; vehMake = ''; vehColour = ''; vehPlate = '';
 		waiverSigned = false;
 		rateLines = [{ id: crypto.randomUUID(), label: '', qty: '', unit: '', total: '' }];
-		taxLines = []; taxPresets = []; payments = []; ccInfo = null;
+		taxLines = []; taxPresets = []; addonLines = []; addonPresets = []; payments = []; ccInfo = null;
 		requestedRoomTypeId_ = ''; availRooms = []; roomPickerDismissed = false;
 		addingPay = false; payAmt = ''; payMethod = 'cash'; payType = 'final_charge'; payNotes = ''; payErr = '';
 		suggestions = []; showSuggest = false;
@@ -437,10 +444,39 @@
 			const r = await fetch(`/api/tax-presets${propId ? `?propertyId=${encodeURIComponent(propId)}` : ''}`);
 			if (r.ok) {
 				taxPresets = await r.json();
-				// Auto-apply if rates are already loaded (handles case where suggestRate ran first)
-				autoApplyTaxes(rateTotal);
+				autoApplyTaxes(chargeableSubtotal);
 			}
 		} catch { /* ignore */ }
+		// Fetch addon presets in parallel
+		fetchAddonPresets();
+	}
+
+	async function fetchAddonPresets() {
+		if (!propId) return;
+		try {
+			const r = await fetch(`/api/addon-presets?propertyId=${encodeURIComponent(propId)}`);
+			if (r.ok) addonPresets = await r.json();
+		} catch { /* ignore */ }
+	}
+
+	function pickAddonPreset(line: AddonLine, presetId: string) {
+		const p = addonPresets.find(x => x.id === presetId);
+		line.presetId = presetId;
+		if (p) {
+			line.label = p.name;
+			line.isTaxable = p.isTaxable;
+			if (p.defaultUnitCents !== null) {
+				line.unit = (p.defaultUnitCents / 100).toFixed(2);
+				if (!line.qty) line.qty = '1';
+				const q = parseFloat(line.qty) || 1;
+				line.total = ((p.defaultUnitCents / 100) * q).toFixed(2);
+			}
+		}
+	}
+
+	function calcAddonTotal(l: AddonLine) {
+		const q = parseFloat(l.qty) || 0, u = parseFloat(l.unit) || 0;
+		if (q && u) l.total = (q * u).toFixed(2);
 	}
 
 	async function fetchCard(id: string) {
@@ -488,15 +524,24 @@
 				guestRating = g.rating; guestRatingNotes = g.ratingNotes;
 				showAddress = b.status !== 'confirmed';
 			}
-			const rates = (b.lineItems ?? []).filter((l: {type:string}) => l.type === 'rate' || l.type === 'extra');
-			const taxes = (b.lineItems ?? []).filter((l: {type:string}) => l.type === 'tax');
+			const rates  = (b.lineItems ?? []).filter((l: {type:string}) => l.type === 'rate');
+			const extras = (b.lineItems ?? []).filter((l: {type:string}) => l.type === 'extra');
+			const taxes  = (b.lineItems ?? []).filter((l: {type:string}) => l.type === 'tax');
 			rateLines = rates.length ? rates.map((l: {id:string;label:string;quantity:number|null;unitAmount:number|null;totalAmount:number}) => ({
 				id: l.id, label: l.label,
 				qty: String(l.quantity ?? ''),
 				unit: l.unitAmount ? (l.unitAmount/100).toFixed(2) : '',
 				total: (l.totalAmount/100).toFixed(2)
 			})) : [{ id: crypto.randomUUID(), label: '', qty: '', unit: '', total: '' }];
+			addonLines = extras.map((l: {id:string;label:string;quantity:number|null;unitAmount:number|null;totalAmount:number}) => ({
+				id: l.id, presetId: '', label: l.label,
+				qty: String(l.quantity ?? '1'),
+				unit: l.unitAmount ? (l.unitAmount/100).toFixed(2) : '',
+				total: (l.totalAmount/100).toFixed(2),
+				isTaxable: true  // legacy extras treated as taxable; future saves will persist the flag
+			}));
 			taxLines = taxes.map((l: {id:string;label:string;totalAmount:number}) => ({ id: l.id, presetId: '', label: l.label, percent: '', total: (l.totalAmount/100).toFixed(2) }));
+			fetchAddonPresets();
 		} catch (e) {
 			saveError = (e as Error).message;
 		} finally {
@@ -532,7 +577,7 @@
 		const p = taxPresets.find(x => x.id === pid); if (!p) return;
 		line.presetId = pid; line.label = p.label;
 		line.percent = String(p.ratePercent);
-		line.total = ((Math.round(rateTotal*100) * p.ratePercent / 100) / 100).toFixed(2);
+		line.total = ((Math.round(chargeableSubtotal*100) * p.ratePercent / 100) / 100).toFixed(2);
 	}
 
 	/** Recalculate dollar amounts for any tax lines that have a percent set. */
@@ -644,19 +689,27 @@
 	async function recordPayment() {
 		if (!bookingId) return;
 		payErr = '';
-		const amt = parseFloat(payAmt);
-		if (!amt || amt <= 0) { payErr = 'Enter a valid amount'; return; }
+		const amt = typeof payAmt === 'number' ? payAmt : parseFloat(String(payAmt));
+		if (!amt || amt <= 0 || isNaN(amt)) { payErr = 'Enter a valid amount'; return; }
 		payBusy = true;
 		const fd = new FormData();
-		fd.set('bookingId', bookingId); fd.set('amount', payAmt);
+		fd.set('bookingId', bookingId);
+		fd.set('amount', amt.toFixed(2));
 		fd.set('method', payMethod); fd.set('type', payType);
 		if (payNotes) fd.set('notes', payNotes);
-		try {
-			await fetch('/booking?/addPayment', { method: 'POST', body: fd });
-			addingPay = false; payAmt = ''; payNotes = '';
-			await fetchCard(bookingId);
-		} catch { payErr = 'Network error'; }
-		payBusy = false;
+	try {
+		const res = await fetch('/booking?/addPayment', { method: 'POST', body: fd });
+		if (!res.ok) {
+			const d = await res.json().catch(() => ({}));
+			payErr = (d as { data?: { error?: string } }).data?.error ?? 'Failed to record payment — please try again.';
+			payBusy = false;
+			return;
+		}
+		addingPay = false; payAmt = ''; payNotes = '';
+		toast.success('Payment recorded.');
+		await fetchCard(bookingId);
+	} catch { payErr = 'Network error'; }
+	payBusy = false;
 	}
 
 	async function markPaymentReceived(payId: string) {
@@ -720,14 +773,14 @@
 						].join(' ')}>
 						{status === 'checked_in' || status === 'checked_out' ? '✓' : '○'} Checked In
 					</button>
-					<button type="button"
-						onclick={toggleCheckout}
-						disabled={toggleBusy || (status !== 'confirmed' && status !== 'reserved')}
-						class={['flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors',
-							status === 'checked_out'
-								? 'border-gray-400 bg-gray-100 text-gray-700'
-								: 'border-border bg-background text-muted-foreground hover:bg-muted disabled:opacity-40'
-						].join(' ')}>
+				<button type="button"
+					onclick={toggleCheckout}
+					disabled={toggleBusy || (status !== 'checked_in' && status !== 'checked_out')}
+					class={['flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors',
+						status === 'checked_out'
+							? 'border-gray-400 bg-gray-100 text-gray-700'
+							: 'border-border bg-background text-muted-foreground hover:bg-muted disabled:opacity-40'
+					].join(' ')}>
 						{status === 'checked_out' ? '✓' : '○'} Checked Out
 					</button>
 					{#if toggleMsg}
@@ -756,8 +809,9 @@
 				<input type="hidden" name="bookingType" value={bookingType} />
 				<input type="hidden" name="guestId"     value={guestId} />
 				<input type="hidden" name="clerkUserId" value={currentUserId} />
-			<input type="hidden" name="rateCount"   value={rateLines.length} />
-			<input type="hidden" name="taxCount"    value={taxLines.length} />
+		<input type="hidden" name="rateCount"   value={rateLines.length} />
+		<input type="hidden" name="addonCount"  value={addonLines.length} />
+		<input type="hidden" name="taxCount"    value={taxLines.length} />
 
 			<!-- Source — full-width chip strip above both panels -->
 			<div class="flex flex-wrap gap-1.5 px-4 pt-4">
@@ -1051,10 +1105,72 @@
 								class="text-xs text-muted-foreground hover:text-foreground">+ charge line</button>
 						</div>
 
+					<!-- Add-Ons -->
+					{#if addonLines.length > 0 || addonPresets.length > 0}
+					<div class="mt-3 space-y-1.5">
+						<p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Add-Ons</p>
+						{#each addonLines as line, i}
+							<!-- Hidden fields for save -->
+							<input type="hidden" name="addon-label-{i}"   value={line.label} />
+							<input type="hidden" name="addon-qty-{i}"     value={line.qty} />
+							<input type="hidden" name="addon-unit-{i}"    value={line.unit} />
+							<input type="hidden" name="addon-total-{i}"   value={line.total} />
+							<input type="hidden" name="addon-taxable-{i}" value={line.isTaxable ? '1' : '0'} />
+							<div class="flex items-center gap-1">
+								{#if addonPresets.length}
+									<select
+										onchange={(e) => pickAddonPreset(line, (e.target as HTMLSelectElement).value)}
+										class="rounded border border-input bg-background px-1 py-1 text-xs shrink-0 max-w-[110px]">
+										<option value="">Custom</option>
+										{#each addonPresets as p}
+											<option value={p.id} selected={line.presetId === p.id}>{p.name}</option>
+										{/each}
+									</select>
+								{/if}
+								<input placeholder="Label" bind:value={line.label}
+									class="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-xs" />
+								<input type="number" step="1" min="1" placeholder="Qty" bind:value={line.qty}
+									oninput={() => calcAddonTotal(line)}
+									class="w-12 rounded border border-input bg-background px-1 py-1 text-center text-xs" />
+								<input type="number" step="0.01" placeholder="$/ea" bind:value={line.unit}
+									oninput={() => calcAddonTotal(line)}
+									class="w-16 rounded border border-input bg-background px-2 py-1 text-xs" />
+								<div class="relative w-20">
+									<span class="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+									<input type="number" step="0.01" bind:value={line.total}
+										class="w-full rounded border border-input bg-background pl-5 pr-1 py-1 text-xs" />
+								</div>
+								<button type="button"
+									title={line.isTaxable ? 'Taxable — click to toggle' : 'No tax — click to toggle'}
+									onclick={() => { line.isTaxable = !line.isTaxable; }}
+									class={['shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold leading-none',
+										line.isTaxable
+											? 'bg-teal-100 text-teal-700 hover:bg-teal-200'
+											: 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+									].join(' ')}>
+									{line.isTaxable ? 'TAX' : 'NO TAX'}
+								</button>
+								<button type="button" onclick={() => addonLines = addonLines.filter(l => l.id !== line.id)}
+									class="shrink-0 px-1 text-xs text-muted-foreground hover:text-destructive">×</button>
+							</div>
+						{/each}
+						<button type="button" onclick={() => {
+							const newLine = { id: crypto.randomUUID(), presetId: '', label: '', qty: '1', unit: '', total: '', isTaxable: true };
+							addonLines = [...addonLines, newLine];
+						}} class="text-xs text-muted-foreground hover:text-foreground">+ add-on</button>
+					</div>
+					{:else}
+					<div class="mt-2">
+						<button type="button" onclick={() => {
+							addonLines = [{ id: crypto.randomUUID(), presetId: '', label: '', qty: '1', unit: '', total: '', isTaxable: true }];
+						}} class="text-xs text-muted-foreground hover:text-foreground">+ add-on</button>
+					</div>
+					{/if}
+
 					<!-- Tax lines -->
 					<div class="mt-3 space-y-1.5">
 						<div class="flex justify-between text-xs text-muted-foreground font-medium border-t border-border pt-2 mb-2">
-							<span>Subtotal</span><span>${rateTotal.toFixed(2)}</span>
+							<span>Subtotal</span><span>${chargeableSubtotal.toFixed(2)}</span>
 						</div>
 						<p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Taxes</p>
 						{#each taxLines as line, i}
@@ -1070,11 +1186,11 @@
 									class="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-xs" />
 								<!-- Percent field: drives the dollar amount when set -->
 								<div class="relative w-14 shrink-0">
-									<input type="number" min="0" max="100" step="0.01" placeholder="%" bind:value={line.percent}
-										oninput={() => {
-											const pct = parseFloat(line.percent);
-											if (pct >= 0) line.total = (rateTotal * pct / 100).toFixed(2);
-										}}
+								<input type="number" min="0" max="100" step="0.01" placeholder="%" bind:value={line.percent}
+									oninput={() => {
+										const pct = parseFloat(line.percent);
+										if (pct >= 0) line.total = (chargeableSubtotal * pct / 100).toFixed(2);
+									}}
 										class="w-full rounded border border-input bg-background px-2 pr-4 py-1 text-xs" />
 									<span class="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
 								</div>
@@ -1137,13 +1253,12 @@
 									</div>
 								</div>
 								{#if depositAmt && parseFloat(depositAmt) > 0}
-									<label class="mt-2 flex cursor-pointer items-center gap-2 rounded-md border border-input bg-muted/30 px-3 py-2">
-										<input type="checkbox" name="depositReceived" value="true"
-											class="h-4 w-4 rounded border-input accent-teal-600" />
-										<span class="text-xs text-foreground font-medium">Deposit received now</span>
-										<span class="text-[10px] text-muted-foreground">(leave unchecked to note it as pending)</span>
-									</label>
-									<input type="hidden" name="depositReceived" value="false" />
+								<label class="mt-2 flex cursor-pointer items-center gap-2 rounded-md border border-input bg-muted/30 px-3 py-2">
+									<input type="checkbox" name="depositReceived" value="true"
+										class="h-4 w-4 rounded border-input accent-teal-600" />
+									<span class="text-xs text-foreground font-medium">Deposit received now</span>
+									<span class="text-[10px] text-muted-foreground">(leave unchecked to note it as pending)</span>
+								</label>
 								{/if}
 							{:else}
 							<!-- Existing booking: payment history as ledger rows -->
@@ -1203,9 +1318,10 @@
 												<label class="mb-1 block text-xs text-muted-foreground">Amount</label>
 												<div class="relative">
 													<span class="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
-													<input type="number" step="0.01" min="0.01" bind:value={payAmt}
-														placeholder={balanceCents > 0 ? (balanceCents/100).toFixed(2) : ''}
-														class="w-full rounded border border-input bg-background pl-5 pr-2 py-1.5 text-sm" />
+								<input type="number" step="0.01" min="0.01" bind:value={payAmt}
+													autocomplete="off"
+													placeholder={balanceCents > 0 ? (balanceCents/100).toFixed(2) : ''}
+													class="w-full rounded border border-input bg-background pl-5 pr-2 py-1.5 text-sm" />
 												</div>
 											</div>
 											<div>
@@ -1227,7 +1343,7 @@
 												class="flex-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
 												{payBusy ? 'Saving…' : 'Record payment'}
 											</button>
-											<button type="button" onclick={() => { addingPay = false; payErr = ''; }}
+											<button type="button" onclick={() => { addingPay = false; payAmt = ''; payErr = ''; }}
 												class="rounded-md border border-input px-3 py-1.5 text-sm hover:bg-muted">Cancel</button>
 										</div>
 									</div>

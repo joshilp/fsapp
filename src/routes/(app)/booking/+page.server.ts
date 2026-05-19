@@ -499,7 +499,16 @@ export const actions: Actions = {
 				newItems.push({ id: crypto.randomUUID(), bookingId: bookingId ?? '', type: 'tax', label, quantity: null, unitAmount: null, totalAmount: Math.round(total * 100), sortOrder: rateCount + i });
 			}
 		}
-
+		const addonCount = parseInt((fd.get('addonCount') as string) ?? '0') || 0;
+		for (let i = 0; i < addonCount; i++) {
+			const label = g(`addon-label-${i}`);
+			const qty   = parseFloat((fd.get(`addon-qty-${i}`) as string) ?? '') || null;
+			const unit  = parseFloat((fd.get(`addon-unit-${i}`) as string) ?? '') || null;
+			const total = parseFloat((fd.get(`addon-total-${i}`) as string) ?? '');
+			if (label && !isNaN(total) && total !== 0) {
+				newItems.push({ id: crypto.randomUUID(), bookingId: bookingId ?? '', type: 'extra', label, quantity: qty, unitAmount: unit !== null ? Math.round(unit * 100) : null, totalAmount: Math.round(total * 100), sortOrder: rateCount + taxCount + i });
+			}
+		}
 		const now = new Date();
 		// Status: walk-in/OTA → confirmed immediately; phone/website → reserved until deposit collected
 		const isOtaBooking = ['bookingcom', 'expedia', 'airbnb', 'ota'].includes(bookingType);

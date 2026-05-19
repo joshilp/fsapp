@@ -92,9 +92,13 @@
 	const depositLineTotal = $derived(
 		existingDeposit.reduce((sum, li) => sum + li.totalAmount / 100, 0) // negative cents stored as negative
 	);
-	// Sum of all recorded payment events (deposits + charges)
+	// Net collected: received non-refund payments minus refunds; pending excluded
 	const paymentsReceived = $derived(
-		(booking.paymentEvents ?? []).reduce((sum, pe) => sum + pe.amount / 100, 0)
+		(booking.paymentEvents ?? []).reduce((sum, pe) => {
+			if ((pe as { status?: string }).status === 'pending') return sum;
+			if (pe.type === 'refund') return sum - pe.amount / 100;
+			return sum + pe.amount / 100;
+		}, 0)
 	);
 	const grandTotal = $derived(rateSubtotal + taxTotal);
 	// Balance = total charges minus all money actually received
@@ -501,18 +505,20 @@
 			<!-- Payments received -->
 			{#if (booking.paymentEvents ?? []).length > 0}
 				<div class="border-t border-border pt-1.5 space-y-1">
-					{#each booking.paymentEvents ?? [] as pe}
-						<div class="flex justify-between text-xs text-green-700">
-							<span class="flex items-center gap-1">
-								<span class="font-medium">✓ Paid</span>
-								<span class="text-muted-foreground capitalize">({pe.paymentMethod})</span>
-								{#if pe.chargedAt}
-									<span class="text-muted-foreground">{new Date(pe.chargedAt).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}</span>
-								{/if}
-							</span>
-							<span class="font-mono font-medium">${fmt(pe.amount / 100)}</span>
-						</div>
-					{/each}
+				{#each booking.paymentEvents ?? [] as pe}
+					{@const isPending = (pe as { status?: string }).status === 'pending'}
+					{@const isRefund = pe.type === 'refund'}
+					<div class={['flex justify-between text-xs', isRefund ? 'text-destructive' : isPending ? 'text-amber-700' : 'text-green-700'].join(' ')}>
+						<span class="flex items-center gap-1">
+							<span class="font-medium">{isRefund ? '↩ Refund' : isPending ? '⏳ Pending' : '✓ Paid'}</span>
+							<span class="text-muted-foreground capitalize">({pe.paymentMethod})</span>
+							{#if pe.chargedAt}
+								<span class="text-muted-foreground">{new Date(pe.chargedAt).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}</span>
+							{/if}
+						</span>
+						<span class="font-mono font-medium">{isRefund ? '+' : '−'}${fmt(pe.amount / 100)}</span>
+					</div>
+				{/each}
 				</div>
 				<div class="flex justify-between text-sm font-bold border-t border-border pt-1.5">
 					<span class={balanceDue <= 0 ? 'text-green-700' : ''}>
