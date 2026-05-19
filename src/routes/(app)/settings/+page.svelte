@@ -1,41 +1,60 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { page } from '$app/stores';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
+	import { toast } from 'svelte-sonner';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
+	const VALID_TABS = ['properties', 'taxes', 'roomtypes', 'rooms', 'channels', 'email'] as const;
+	type Tab = typeof VALID_TABS[number];
+	const activeTab = $derived.by<Tab>(() => {
+		const hash = $page.url.hash.replace('#', '');
+		return (VALID_TABS.includes(hash as Tab) ? hash : 'properties') as Tab;
+	});
+
 	// ─── Properties ──────────────────────────────────────────────────────────
 	let savingProperty = $state<string | null>(null);
 
-	// ─── Tax Presets ─────────────────────────────────────────────────────────
-	type NewPreset = { propertyId: string; label: string; ratePercent: string };
-	let newPreset = $state<NewPreset>({ propertyId: '', label: '', ratePercent: '' });
-	let savingPreset = $state(false);
+	// ─── Tax Presets — scoped per property ───────────────────────────────────
+	type NewPreset = { label: string; ratePercent: string };
+	let newPresets = $state<Record<string, NewPreset>>(
+		Object.fromEntries(data.propertiesList.map((p) => [p.id, { label: '', ratePercent: '' }]))
+	);
+	let savingPreset = $state<string | null>(null);
 	let deletingPreset = $state<string | null>(null);
 
-	// ─── Rooms ────────────────────────────────────────────────────────────────
-	type NewRoom = { propertyId: string; roomNumber: string; roomTypeId: string };
-	let newRoom = $state<NewRoom>({ propertyId: '', roomNumber: '', roomTypeId: '' });
-	let addingRoom = $state(false);
+	// ─── Rooms — scoped per property ─────────────────────────────────────────
+	type NewRoom = { roomNumber: string; roomTypeId: string };
+	let newRooms = $state<Record<string, NewRoom>>(
+		Object.fromEntries(data.propertiesList.map((p) => [p.id, { roomNumber: '', roomTypeId: '' }]))
+	);
+	let addingRoom = $state<string | null>(null);
 	let togglingRoom = $state<string | null>(null);
-	let roomError = $state('');
+	let roomErrors = $state<Record<string, string>>({});
 
 	// ─── Channels ─────────────────────────────────────────────────────────────
 	type NewChannel = { name: string; isOta: boolean; sortOrder: string };
 	let newChannel = $state<NewChannel>({ name: '', isOta: false, sortOrder: '10' });
 	let addingChannel = $state(false);
 
-	// ─── Room types ───────────────────────────────────────────────────────────
-	type NewRoomType = { propertyId: string; name: string; category: string; sortOrder: string };
-	let newRoomType = $state<NewRoomType>({ propertyId: '', name: '', category: '', sortOrder: '0' });
-	let addingRoomType = $state(false);
+	// ─── Room types — scoped per property ────────────────────────────────────
+	type NewRoomType = { name: string; category: string; sortOrder: string; defaultRateCents: string };
+	let newRoomTypes = $state<Record<string, NewRoomType>>(
+		Object.fromEntries(data.propertiesList.map((p) => [p.id, { name: '', category: '', sortOrder: '0', defaultRateCents: '' }]))
+	);
+	let addingRoomType = $state<string | null>(null);
 	let deletingRoomType = $state<string | null>(null);
 	let editingRoomType = $state<string | null>(null);
 
+	// ─── Delete confirmation ──────────────────────────────────────────────────
+	let confirmDeleteRoomTypeId = $state<string | null>(null);
+	let confirmDeleteRoomTypeName = $state('');
 </script>
 
 <svelte:head>
@@ -45,7 +64,7 @@
 <div class="mx-auto max-w-3xl px-4 py-8">
 	<h1 class="mb-6 text-2xl font-bold">Settings</h1>
 
-	<Tabs.Root value="properties">
+	<Tabs.Root value={activeTab} onValueChange={(v) => { window.location.hash = v; }}>
 		<Tabs.List class="mb-6 flex-wrap">
 			<Tabs.Trigger value="properties">Properties</Tabs.Trigger>
 			<Tabs.Trigger value="taxes">Taxes</Tabs.Trigger>
@@ -61,17 +80,19 @@
 				{#each data.propertiesList as prop}
 					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
 						<h2 class="mb-4 font-semibold">{prop.name}</h2>
-						<form
-							method="POST"
-							action="?/updateProperty"
-							use:enhance={() => {
-								savingProperty = prop.id;
-								return async ({ update }) => {
-									savingProperty = null;
-									await update({ reset: false });
-								};
-							}}
-						>
+		<form
+						method="POST"
+						action="?/updateProperty"
+						use:enhance={() => {
+							savingProperty = prop.id;
+							return async ({ result, update }) => {
+								savingProperty = null;
+								if (result.type === 'success') toast.success('Property saved');
+								else toast.error('Save failed');
+								await update({ reset: false });
+							};
+						}}
+					>
 							<input type="hidden" name="id" value={prop.id} />
 							<div class="grid grid-cols-2 gap-3">
 								<div class="col-span-2 flex flex-col gap-1.5">
@@ -272,8 +293,9 @@
 		<!-- ── Tax Presets ─────────────────────────────────────────────────── -->
 		<Tabs.Content value="taxes">
 			<div class="space-y-6">
-				{#each data.propertiesList as prop}
-					{@const presets = data.taxPresetsList.filter((p) => p.propertyId === prop.id)}
+			{#each data.propertiesList as prop}
+				{@const presets = data.taxPresetsList.filter((p) => p.propertyId === prop.id)}
+				{@const _preset = newPresets[prop.id]}
 					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
 						<h2 class="mb-3 font-semibold">{prop.name}</h2>
 
@@ -284,17 +306,19 @@
 									<div class="flex items-center gap-3 rounded-md border p-2.5 text-sm">
 										<span class="flex-1 font-medium">{preset.label}</span>
 										<span class="text-muted-foreground">{preset.ratePercent}%</span>
-										<form
-											method="POST"
-											action="?/deleteTaxPreset"
-											use:enhance={() => {
-												deletingPreset = preset.id;
-												return async ({ update }) => {
-													deletingPreset = null;
-													await update();
-												};
-											}}
-										>
+									<form
+										method="POST"
+										action="?/deleteTaxPreset"
+										use:enhance={() => {
+											deletingPreset = preset.id;
+											return async ({ result, update }) => {
+												deletingPreset = null;
+												if (result.type === 'success') toast.success('Tax preset removed');
+												else toast.error('Remove failed');
+												await update();
+											};
+										}}
+									>
 											<input type="hidden" name="id" value={preset.id} />
 											<Button
 												type="submit"
@@ -313,42 +337,45 @@
 							<p class="text-muted-foreground mb-4 text-sm">No tax presets yet.</p>
 						{/if}
 
-						<!-- Add new preset -->
-						<form
-							method="POST"
-							action="?/upsertTaxPreset"
-							use:enhance={() => {
-								savingPreset = true;
-								return async ({ update }) => {
-									savingPreset = false;
-									newPreset = { propertyId: '', label: '', ratePercent: '' };
-									await update();
-								};
-							}}
-							class="flex items-end gap-2"
-						>
-							<input type="hidden" name="propertyId" value={prop.id} />
-							<div class="flex flex-col gap-1">
-								<Label class="text-xs">Label</Label>
-								<Input name="label" placeholder="GST" bind:value={newPreset.label} class="h-8 w-24" required />
-							</div>
-							<div class="flex flex-col gap-1">
-								<Label class="text-xs">Rate %</Label>
-								<Input
-									name="ratePercent"
-									type="number"
-									step="0.001"
-									min="0"
-									placeholder="5.0"
-									bind:value={newPreset.ratePercent}
-									class="h-8 w-20"
-									required
-								/>
-							</div>
-							<Button type="submit" size="sm" class="h-8" disabled={savingPreset}>
-								{savingPreset ? '…' : '+ Add'}
-							</Button>
-						</form>
+					<!-- Add new preset -->
+					<form
+						method="POST"
+						action="?/upsertTaxPreset"
+						use:enhance={() => {
+							savingPreset = prop.id;
+							return async ({ result, update }) => {
+								savingPreset = null;
+								if (result.type === 'success') {
+									toast.success('Tax preset added');
+									newPresets[prop.id] = { label: '', ratePercent: '' };
+								} else toast.error('Save failed');
+								await update();
+							};
+						}}
+						class="flex items-end gap-2"
+					>
+						<input type="hidden" name="propertyId" value={prop.id} />
+						<div class="flex flex-col gap-1">
+							<Label class="text-xs">Label</Label>
+							<Input name="label" placeholder="GST" bind:value={_preset.label} class="h-8 w-24" required />
+						</div>
+						<div class="flex flex-col gap-1">
+							<Label class="text-xs">Rate %</Label>
+							<Input
+								name="ratePercent"
+								type="number"
+								step="0.001"
+								min="0"
+								placeholder="5.0"
+								bind:value={_preset.ratePercent}
+								class="h-8 w-20"
+								required
+							/>
+						</div>
+						<Button type="submit" size="sm" class="h-8" disabled={savingPreset === prop.id}>
+							{savingPreset === prop.id ? '…' : '+ Add'}
+						</Button>
+					</form>
 					</div>
 				{/each}
 			</div>
@@ -357,9 +384,10 @@
 		<!-- ── Rooms ───────────────────────────────────────────────────────── -->
 		<Tabs.Content value="rooms">
 			<div class="space-y-6">
-				{#each data.propertiesList as prop}
-					{@const propRooms = data.roomsList.filter((r) => r.propertyId === prop.id)}
-					{@const propRoomTypes = data.roomTypesList.filter((rt) => rt.propertyId === prop.id)}
+			{#each data.propertiesList as prop}
+				{@const propRooms = data.roomsList.filter((r) => r.propertyId === prop.id)}
+				{@const propRoomTypes = data.roomTypesList.filter((rt) => rt.propertyId === prop.id)}
+				{@const _room = newRooms[prop.id]}
 					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
 						<h2 class="mb-3 font-semibold">{prop.name}</h2>
 
@@ -392,13 +420,15 @@
 													<form
 														method="POST"
 														action="?/toggleRoom"
-														use:enhance={() => {
-															togglingRoom = room.id;
-															return async ({ update }) => {
-																togglingRoom = null;
-																await update();
-															};
-														}}
+												use:enhance={() => {
+														togglingRoom = room.id;
+														return async ({ result, update }) => {
+															togglingRoom = null;
+															if (result.type === 'success') toast.success(room.isActive ? 'Room deactivated' : 'Room activated');
+															else toast.error('Toggle failed');
+															await update();
+														};
+													}}
 													>
 														<input type="hidden" name="id" value={room.id} />
 														<input type="hidden" name="isActive" value={String(room.isActive)} />
@@ -425,84 +455,85 @@
 							<p class="text-muted-foreground mb-4 text-sm">No rooms yet.</p>
 						{/if}
 
-						<!-- Add room -->
-						{#if roomError}
-							<p class="text-destructive mb-2 text-xs">{roomError}</p>
-						{/if}
-						<form
-							method="POST"
-							action="?/addRoom"
-							use:enhance={() => {
-								addingRoom = true;
-								roomError = '';
-								return async ({ result, update }) => {
-									addingRoom = false;
-									if (result.type === 'failure') {
-										roomError = (result.data?.error as string) ?? 'Error';
-									} else {
-										newRoom = { propertyId: '', roomNumber: '', roomTypeId: '' };
-									}
-									await update({ reset: false });
-								};
-							}}
-							class="grid grid-cols-2 sm:grid-cols-3 gap-2"
-						>
-							<input type="hidden" name="propertyId" value={prop.id} />
-							<div class="flex flex-col gap-1">
-								<Label class="text-xs">Room #</Label>
-								<Input name="roomNumber" placeholder="33" bind:value={newRoom.roomNumber} class="h-8 w-20" required />
-							</div>
-							<div class="flex flex-col gap-1">
-								<Label class="text-xs">Type</Label>
-								<select
-									name="roomTypeId"
-									class="border-input bg-background h-8 rounded-md border px-2 text-sm"
-									bind:value={newRoom.roomTypeId}
-								>
-									<option value="">— none —</option>
-									{#each propRoomTypes as rt}
-										<option value={rt.id}>{rt.category} · {rt.name}</option>
-									{/each}
-								</select>
-							</div>
+					<!-- Add room -->
+					{#if roomErrors[prop.id]}
+						<p class="text-destructive mb-2 text-xs">{roomErrors[prop.id]}</p>
+					{/if}
+					<form
+						method="POST"
+						action="?/addRoom"
+						use:enhance={() => {
+							addingRoom = prop.id;
+							roomErrors[prop.id] = '';
+							return async ({ result, update }) => {
+								addingRoom = null;
+								if (result.type === 'failure') {
+									roomErrors[prop.id] = (result.data?.error as string) ?? 'Error';
+								} else {
+									toast.success('Room added');
+									newRooms[prop.id] = { roomNumber: '', roomTypeId: '' };
+								}
+								await update({ reset: false });
+							};
+						}}
+						class="grid grid-cols-2 sm:grid-cols-3 gap-2"
+					>
+						<input type="hidden" name="propertyId" value={prop.id} />
 						<div class="flex flex-col gap-1">
-							<Label class="text-xs">Bedrooms (BR)</Label>
-							<Input name="numRooms" type="number" min="1" placeholder="1" class="h-8 w-16" />
+							<Label class="text-xs">Room #</Label>
+							<Input name="roomNumber" placeholder="33" bind:value={_room.roomNumber} class="h-8 w-20" required />
 						</div>
 						<div class="flex flex-col gap-1">
-							<Label class="text-xs">King (K)</Label>
-							<Input name="kingBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+							<Label class="text-xs">Type</Label>
+							<select
+								name="roomTypeId"
+								class="border-input bg-background h-8 rounded-md border px-2 text-sm"
+								bind:value={_room.roomTypeId}
+							>
+								<option value="">— none —</option>
+								{#each propRoomTypes as rt}
+									<option value={rt.id}>{rt.category} · {rt.name}</option>
+								{/each}
+							</select>
 						</div>
-						<div class="flex flex-col gap-1">
-							<Label class="text-xs">Queen (Q)</Label>
-							<Input name="queenBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+					<div class="flex flex-col gap-1">
+						<Label class="text-xs">Bedrooms (BR)</Label>
+						<Input name="numRooms" type="number" min="1" placeholder="1" class="h-8 w-16" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<Label class="text-xs">King (K)</Label>
+						<Input name="kingBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<Label class="text-xs">Queen (Q)</Label>
+						<Input name="queenBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<Label class="text-xs">Double (D)</Label>
+						<Input name="doubleBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<Label class="text-xs">Extras</Label>
+						<div class="flex gap-2 items-center h-8">
+							<label class="flex items-center gap-1 text-xs cursor-pointer">
+								<input type="checkbox" name="hasKitchen" value="1" class="rounded" />
+								Kitchen
+							</label>
+							<label class="flex items-center gap-1 text-xs cursor-pointer">
+								<input type="checkbox" name="hasHideabed" value="1" class="rounded" />
+								Hideabed
+							</label>
 						</div>
-						<div class="flex flex-col gap-1">
-							<Label class="text-xs">Double (D)</Label>
-							<Input name="doubleBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
+					</div>
+						<div class="flex flex-col gap-1 col-span-2 sm:col-span-3">
+							<Label class="text-xs">Configs (one per line, for dual-config rooms — e.g. "1Q Sleeping")</Label>
+						<textarea name="configs" rows="2"
+							placeholder={"Leave blank for single config\n1Q Sleeping\n1Q+1D Sleeping"}
+							class="border-input bg-background rounded-md border px-2 py-1 text-xs w-full resize-none"></textarea>
 						</div>
-						<div class="flex flex-col gap-1">
-							<Label class="text-xs">Extras</Label>
-							<div class="flex gap-2 items-center h-8">
-								<label class="flex items-center gap-1 text-xs cursor-pointer">
-									<input type="checkbox" name="hasKitchen" value="1" class="rounded" />
-									Kit
-								</label>
-								<label class="flex items-center gap-1 text-xs cursor-pointer">
-									<input type="checkbox" name="hasHideabed" value="1" class="rounded" />
-									HB
-								</label>
-							</div>
-						</div>
-							<div class="flex flex-col gap-1 col-span-2 sm:col-span-3">
-								<Label class="text-xs">Configs (one per line, for dual-config rooms — e.g. "1Q Sleeping")</Label>
-								<textarea name="configs" rows="2"
-									placeholder={"Leave blank for single config\n1Q Sleeping\n1Q+1D Sleeping"}
-									class="border-input bg-background rounded-md border px-2 py-1 text-xs w-full resize-none" />
-							</div>
-							<Button type="submit" size="sm" class="h-8 col-span-2 sm:col-span-3" disabled={addingRoom}>
-								{addingRoom ? '…' : '+ Add room'}
-							</Button>
+						<Button type="submit" size="sm" class="h-8 col-span-2 sm:col-span-3" disabled={addingRoom === prop.id}>
+							{addingRoom === prop.id ? '…' : '+ Add room'}
+						</Button>
 						</form>
 					</div>
 				{/each}
@@ -512,8 +543,9 @@
 		<!-- ── Room Types ──────────────────────────────────────────────────── -->
 		<Tabs.Content value="roomtypes">
 			<div class="space-y-6">
-				{#each data.propertiesList as prop}
-					{@const propTypes = data.roomTypesList.filter((rt) => rt.propertyId === prop.id)}
+			{#each data.propertiesList as prop}
+				{@const propTypes = data.roomTypesList.filter((rt) => rt.propertyId === prop.id)}
+				{@const _rtype = newRoomTypes[prop.id]}
 					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
 						<h2 class="mb-3 font-semibold">{prop.name}</h2>
 
@@ -529,24 +561,24 @@
 										>
 											<input type="hidden" name="id" value={rt.id} />
 											<input type="hidden" name="propertyId" value={prop.id} />
-											<div class="flex flex-col gap-1">
-												<label class="text-xs text-muted-foreground">Name</label>
-												<input name="name" value={rt.name} required
-													class="border-input bg-background rounded border px-2 py-1 text-sm w-40" />
-											</div>
 										<div class="flex flex-col gap-1">
-											<label class="text-xs text-muted-foreground">Short Code</label>
-											<input name="category" value={rt.category} required maxlength="6"
-												class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono uppercase"
-												title="Internal code shown in the rate calendar grid (e.g. 1BD, 2BDK)" />
+											<span class="text-xs text-muted-foreground">Name</span>
+											<input name="name" value={rt.name} required
+												class="border-input bg-background rounded border px-2 py-1 text-sm w-40" />
 										</div>
-								<div class="flex flex-col gap-1">
-											<label class="text-xs text-muted-foreground">Sort</label>
-											<input name="sortOrder" type="number" value={rt.sortOrder}
-												class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
-										</div>
-										<div class="flex flex-col gap-1">
-											<label class="text-xs text-muted-foreground">Default rate</label>
+									<div class="flex flex-col gap-1">
+										<span class="text-xs text-muted-foreground">Short Code</span>
+										<input name="category" value={rt.category} required maxlength="6"
+											class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono uppercase"
+											title="Internal code shown in the rate calendar grid (e.g. 1BD, 2BDK)" />
+									</div>
+							<div class="flex flex-col gap-1">
+										<span class="text-xs text-muted-foreground">Sort</span>
+										<input name="sortOrder" type="number" value={rt.sortOrder}
+											class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
+									</div>
+									<div class="flex flex-col gap-1">
+										<span class="text-xs text-muted-foreground">Default rate</span>
 											<div class="flex items-center gap-1">
 												<span class="text-sm text-muted-foreground">$</span>
 												<input name="defaultRateCents" type="number" min="0" step="1"
@@ -568,57 +600,53 @@
 										{:else}
 											<span class="text-[10px] text-amber-600 font-medium">no default rate</span>
 										{/if}
-											<Button size="sm" variant="ghost" class="h-7 px-2 text-xs"
-												onclick={() => { editingRoomType = rt.id; }}>Edit</Button>
-											<form method="POST" action="?/deleteRoomType"
-												use:enhance={() => {
-													deletingRoomType = rt.id;
-													return async ({ update }) => { deletingRoomType = null; await update(); };
-												}}
-											>
-												<input type="hidden" name="id" value={rt.id} />
-												<Button type="submit" variant="ghost" size="sm"
-													class="text-destructive h-7 px-2 text-xs"
-													disabled={deletingRoomType === rt.id}>
-													{deletingRoomType === rt.id ? '…' : 'Delete'}
-												</Button>
-											</form>
+									<Button size="sm" variant="ghost" class="h-7 px-2 text-xs"
+											onclick={() => { editingRoomType = rt.id; }}>Edit</Button>
+										<Button type="button" variant="ghost" size="sm"
+											class="text-destructive h-7 px-2 text-xs"
+											disabled={deletingRoomType === rt.id}
+											onclick={() => { confirmDeleteRoomTypeId = rt.id; confirmDeleteRoomTypeName = rt.name; }}>
+											{deletingRoomType === rt.id ? '…' : 'Delete'}
+										</Button>
 										</div>
 									{/if}
 								{/each}
 							</div>
 						{/if}
 
-						<form method="POST" action="?/upsertRoomType"
-							use:enhance={() => {
-								addingRoomType = true;
-								return async ({ update }) => {
-									addingRoomType = false;
-									newRoomType = { propertyId: '', name: '', category: '', sortOrder: '0' };
-									await update();
-								};
-							}}
-							class="flex items-end gap-2 flex-wrap"
-						>
+					<form method="POST" action="?/upsertRoomType"
+						use:enhance={() => {
+							addingRoomType = prop.id;
+							return async ({ result, update }) => {
+								addingRoomType = null;
+								if (result.type === 'success') {
+									toast.success('Room type added');
+									newRoomTypes[prop.id] = { name: '', category: '', sortOrder: '0', defaultRateCents: '' };
+								} else toast.error('Save failed');
+								await update();
+							};
+						}}
+						class="flex items-end gap-2 flex-wrap"
+					>
 							<input type="hidden" name="propertyId" value={prop.id} />
-							<div class="flex flex-col gap-1">
-								<label class="text-xs text-muted-foreground">Name</label>
-								<input name="name" placeholder="2 Bed + Kitchen" required
-									class="border-input bg-background rounded border px-2 py-1 text-sm w-40" />
-							</div>
 						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">Short Code</label>
-							<input name="category" placeholder="2BDK" required maxlength="6"
-								class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono uppercase"
-								title="Internal code shown in the rate calendar grid (e.g. 1BD, 2BDK)" />
+							<span class="text-xs text-muted-foreground">Name</span>
+							<input name="name" placeholder="2 Bed + Kitchen" required
+								class="border-input bg-background rounded border px-2 py-1 text-sm w-40" />
 						</div>
-							<div class="flex flex-col gap-1">
-								<label class="text-xs text-muted-foreground">Sort</label>
-							<input name="sortOrder" type="number" value="0"
-								class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
-						</div>
+					<div class="flex flex-col gap-1">
+						<span class="text-xs text-muted-foreground">Short Code</span>
+						<input name="category" placeholder="2BDK" required maxlength="6"
+							class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono uppercase"
+							title="Internal code shown in the rate calendar grid (e.g. 1BD, 2BDK)" />
+					</div>
 						<div class="flex flex-col gap-1">
-							<label class="text-xs text-muted-foreground">Default rate</label>
+							<span class="text-xs text-muted-foreground">Sort</span>
+						<input name="sortOrder" type="number" value="0"
+							class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<span class="text-xs text-muted-foreground">Default rate</span>
 							<div class="flex items-center gap-1">
 								<span class="text-sm text-muted-foreground">$</span>
 								<input name="defaultRateCents" type="number" min="0" step="1"
@@ -626,9 +654,9 @@
 									class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono" />
 							</div>
 						</div>
-							<Button type="submit" size="sm" class="h-8" disabled={addingRoomType}>
-								{addingRoomType ? '…' : '+ Add type'}
-							</Button>
+						<Button type="submit" size="sm" class="h-8" disabled={addingRoomType === prop.id}>
+							{addingRoomType === prop.id ? '…' : '+ Add type'}
+						</Button>
 						</form>
 					</div>
 				{/each}
@@ -666,33 +694,31 @@
 
 			<!-- Per-property Channex IDs -->
 			{#each data.propertiesList as prop}
-				<div class="mb-4 rounded-md border p-4">
-					<h3 class="font-medium text-sm mb-3">{prop.name}</h3>
-					<form method="POST" action="?/updateProperty"
-						use:enhance={() => {
-							savingProperty = prop.id;
-							return async ({ update }) => { savingProperty = null; await update({ reset: false }); };
-						}}
-					>
-						<input type="hidden" name="id" value={prop.id} />
-						<!-- Pass through required fields as hidden so the action doesn't blank them -->
-						<input type="hidden" name="name" value={prop.name} />
-						<input type="hidden" name="address" value={prop.address ?? ''} />
-						<input type="hidden" name="city" value={prop.city ?? ''} />
-						<input type="hidden" name="province" value={prop.province ?? ''} />
-						<input type="hidden" name="checkinTime" value={prop.checkinTime} />
-						<input type="hidden" name="checkoutTime" value={prop.checkoutTime} />
-						<div class="flex flex-col gap-1.5 mb-3">
-							<Label for="cx-prop-{prop.id}">Channex Property ID</Label>
-							<Input id="cx-prop-{prop.id}" name="channexPropertyId"
-								placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-								value={prop.channexPropertyId ?? ''}
-								class="font-mono text-xs" />
-						</div>
-						<Button type="submit" size="sm" disabled={savingProperty === prop.id}>
-							{savingProperty === prop.id ? 'Saving…' : 'Save'}
-						</Button>
-					</form>
+			<div class="mb-4 rounded-md border p-4">
+				<h3 class="font-medium text-sm mb-3">{prop.name}</h3>
+				<form method="POST" action="?/updateChannexProperty"
+					use:enhance={() => {
+						savingProperty = prop.id;
+						return async ({ result, update }) => {
+							savingProperty = null;
+							if (result.type === 'success') toast.success('Channex ID saved');
+							else toast.error('Save failed');
+							await update({ reset: false });
+						};
+					}}
+				>
+					<input type="hidden" name="id" value={prop.id} />
+					<div class="flex flex-col gap-1.5 mb-3">
+						<Label for="cx-prop-{prop.id}">Channex Property ID</Label>
+						<Input id="cx-prop-{prop.id}" name="channexPropertyId"
+							placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+							value={prop.channexPropertyId ?? ''}
+							class="font-mono text-xs" />
+					</div>
+					<Button type="submit" size="sm" disabled={savingProperty === prop.id}>
+						{savingProperty === prop.id ? 'Saving…' : 'Save'}
+					</Button>
+				</form>
 
 					<!-- Room type Channex IDs -->
 					<div class="mt-4 border-t pt-4">
@@ -705,16 +731,16 @@
 								class="flex items-end gap-2 flex-wrap mb-2"
 							>
 								<input type="hidden" name="id" value={rt.id} />
-								<div class="flex flex-col gap-1 flex-1 min-w-0">
-									<label class="text-xs text-muted-foreground">{rt.category}: {rt.name} — Room Type ID</label>
-									<Input name="channexRoomTypeId"
-										placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-										value={rt.channexRoomTypeId ?? ''}
-										class="font-mono text-xs h-8" />
-								</div>
-								<div class="flex flex-col gap-1 flex-1 min-w-0">
-									<label class="text-xs text-muted-foreground">Rate Plan ID</label>
-									<Input name="channexRatePlanId"
+							<div class="flex flex-col gap-1 flex-1 min-w-0">
+								<span class="text-xs text-muted-foreground">{rt.category}: {rt.name} — Room Type ID</span>
+								<Input name="channexRoomTypeId"
+									placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+									value={rt.channexRoomTypeId ?? ''}
+									class="font-mono text-xs h-8" />
+							</div>
+							<div class="flex flex-col gap-1 flex-1 min-w-0">
+								<span class="text-xs text-muted-foreground">Rate Plan ID</span>
+								<Input name="channexRatePlanId"
 										placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 										value={rt.channexRatePlanId ?? ''}
 										class="font-mono text-xs h-8" />
@@ -753,12 +779,15 @@
 			<form
 				method="POST"
 				action="?/upsertChannel"
-				use:enhance={() => {
-					addingChannel = true;
-					return async ({ update }) => {
-						addingChannel = false;
+		use:enhance={() => {
+				addingChannel = true;
+				return async ({ result, update }) => {
+					addingChannel = false;
+					if (result.type === 'success') {
+						toast.success('Channel added');
 						newChannel = { name: '', isOta: false, sortOrder: '10' };
-						await update();
+					} else toast.error('Save failed');
+					await update();
 					};
 				}}
 				class="flex items-end gap-2 flex-wrap"
@@ -827,3 +856,33 @@
 	</Tabs.Content>
 	</Tabs.Root>
 </div>
+
+<!-- ── Delete Room Type confirmation ───────────────────────────────────── -->
+<AlertDialog.Root open={!!confirmDeleteRoomTypeId} onOpenChange={(o) => { if (!o) confirmDeleteRoomTypeId = null; }}>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>Delete room type?</AlertDialog.Title>
+			<AlertDialog.Description>
+				<strong>{confirmDeleteRoomTypeName}</strong> will be permanently deleted. Any rooms assigned to this type will have their type cleared. This cannot be undone.
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel onclick={() => confirmDeleteRoomTypeId = null}>Cancel</AlertDialog.Cancel>
+			<form method="POST" action="?/deleteRoomType"
+				use:enhance={() => {
+					deletingRoomType = confirmDeleteRoomTypeId;
+					confirmDeleteRoomTypeId = null;
+					return async ({ result, update }) => {
+						deletingRoomType = null;
+						if (result.type === 'success') toast.success('Room type deleted');
+						else toast.error('Delete failed');
+						await update();
+					};
+				}}
+			>
+				<input type="hidden" name="id" value={confirmDeleteRoomTypeId ?? ''} />
+				<AlertDialog.Action type="submit">Delete</AlertDialog.Action>
+			</form>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>

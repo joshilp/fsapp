@@ -1,12 +1,10 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { and, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import {
 	bookingChannels,
 	properties,
-	rateSeasons,
-	rateTiers,
 	rooms,
 	roomTypes,
 	taxPresets
@@ -15,11 +13,12 @@ import {
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) redirect(303, '/auth/login');
 
-	const [propertiesList, taxPresetsList, roomsList, roomTypesList, channelsList, rateSeasonsList] =
+	const [propertiesList, taxPresetsList, roomsList, roomTypesList, channelsList] =
 		await Promise.all([
 			db.query.properties.findMany({ orderBy: (t, { asc }) => [asc(t.name)] }),
 			db.query.taxPresets.findMany({
 				with: { property: { columns: { name: true } } },
+				where: (t, { eq }) => eq(t.isActive, true),
 				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.sortOrder)]
 			}),
 			db.query.rooms.findMany({
@@ -34,10 +33,6 @@ export const load: PageServerLoad = async ({ locals }) => {
 				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.sortOrder)]
 			}),
 			db.query.bookingChannels.findMany({ orderBy: (t, { asc }) => [asc(t.sortOrder)] }),
-			db.query.rateSeasons.findMany({
-				with: { tiers: { with: { roomType: { columns: { name: true, category: true } } } } },
-				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.sortOrder)]
-			})
 		]);
 
 	return {
@@ -45,8 +40,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		taxPresetsList,
 		roomsList,
 		roomTypesList,
-		channelsList,
-		rateSeasonsList
+		channelsList
 	};
 };
 
@@ -88,6 +82,17 @@ export const actions: Actions = {
 		})
 		.where(eq(properties.id, id));
 
+		return { success: true };
+	},
+
+	// Update Channex IDs for a property (safe — only touches Channex fields)
+	updateChannexProperty: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const id = (fd.get('id') as string)?.trim();
+		const channexPropertyId = (fd.get('channexPropertyId') as string)?.trim() || null;
+		if (!id) return fail(400, { error: 'Missing property ID' });
+		await db.update(properties).set({ channexPropertyId }).where(eq(properties.id, id));
 		return { success: true };
 	},
 
@@ -238,142 +243,6 @@ export const actions: Actions = {
 		const id = ((await request.formData()).get('id') as string)?.trim();
 		if (!id) return fail(400, { error: 'Missing ID' });
 		await db.delete(roomTypes).where(eq(roomTypes.id, id));
-		return { success: true };
-	},
-
-	// ── Rate seasons (pricing calendar) ─────────────────────────────────────────
-
-	upsertSeason: async ({ request, locals }) => {
-		if (!locals.user) return fail(401, { error: 'Unauthorized' });
-		const fd = await request.formData();
-		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
-		const id = g('id');
-		const propertyId = g('propertyId');
-		const name = g('name');
-		const colour = g('colour') ?? '#cccccc';
-		const startDate = g('startDate');
-		const endDate = g('endDate');
-		const minNights = parseInt(g('minNights') ?? '1') || 1;
-		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
-		const baseRateCentsRaw = g('baseRateCents');
-		const baseRateCents = baseRateCentsRaw ? Math.round(parseFloat(baseRateCentsRaw) * 100) || null : null;
-		if (!propertyId || !name || !startDate || !endDate) return fail(400, { error: 'Missing fields' });
-		if (startDate > endDate) return fail(400, { error: 'Start must be before end' });
-		if (id) {
-			await db.update(rateSeasons)
-				.set({ name, colour, startDate, endDate, minNights, sortOrder, baseRateCents })
-				.where(eq(rateSeasons.id, id));
-		} else {
-			const newId = crypto.randomUUID();
-			await db.insert(rateSeasons).values({
-				id: newId, propertyId, name, colour, startDate, endDate, minNights, sortOrder, baseRateCents
-			});
-			// Auto-create tiers for all room types at the base rate when a base is provided
-			if (baseRateCents) {
-				const rts = await db.query.roomTypes.findMany({
-					where: eq(roomTypes.propertyId, propertyId),
-					columns: { id: true }
-				});
-				for (const rt of rts) {
-					await db.insert(rateTiers).values({
-						id: crypto.randomUUID(), seasonId: newId, roomTypeId: rt.id, nightlyRate: baseRateCents
-					});
-				}
-			}
-		}
-		return { success: true };
-	},
-
-	deleteSeason: async ({ request, locals }) => {
-		if (!locals.user) return fail(401, { error: 'Unauthorized' });
-		const id = ((await request.formData()).get('id') as string)?.trim();
-		if (!id) return fail(400, { error: 'Missing ID' });
-		await db.delete(rateSeasons).where(eq(rateSeasons.id, id));
-		return { success: true };
-	},
-
-	deleteYear: async ({ request, locals }) => {
-		if (!locals.user) return fail(401, { error: 'Unauthorized' });
-		const fd = await request.formData();
-		const propertyId = (fd.get('propertyId') as string)?.trim();
-		const year = parseInt((fd.get('year') as string)?.trim() ?? '') || 0;
-		if (!propertyId || !year) return fail(400, { error: 'Missing fields' });
-		const yearStart = `${year}-01-01`;
-		const yearEnd = `${year}-12-31`;
-		const toDelete = await db.query.rateSeasons.findMany({
-			where: and(
-				eq(rateSeasons.propertyId, propertyId),
-				lte(rateSeasons.startDate, yearEnd),
-				gte(rateSeasons.endDate, yearStart)
-			),
-			columns: { id: true }
-		});
-		for (const s of toDelete) {
-			await db.delete(rateSeasons).where(eq(rateSeasons.id, s.id));
-		}
-		return { success: true, deleted: toDelete.length };
-	},
-
-	upsertRateTier: async ({ request, locals }) => {
-		if (!locals.user) return fail(401, { error: 'Unauthorized' });
-		const fd = await request.formData();
-		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
-		const seasonId = g('seasonId');
-		const roomTypeId = g('roomTypeId');
-		// Support two modes: direct rate OR base + upcharge
-		const rateStr = g('nightlyRate');
-		const upchargeStr = g('upcharge');
-		const baseCentsStr = g('baseRateCents');
-		if (!seasonId || !roomTypeId) return fail(400, { error: 'Missing fields' });
-		let nightlyRate: number;
-		if (upchargeStr !== null && baseCentsStr !== null) {
-			// Upcharge mode: effective = base + upcharge (upcharge may be negative for cheaper types)
-			const baseCents = parseInt(baseCentsStr) || 0;
-			const upchargeCents = Math.round(parseFloat(upchargeStr) * 100);
-			nightlyRate = Math.max(0, baseCents + upchargeCents);
-		} else if (rateStr) {
-			nightlyRate = Math.round(parseFloat(rateStr) * 100);
-		} else {
-			return fail(400, { error: 'Missing rate' });
-		}
-		if (isNaN(nightlyRate) || nightlyRate < 0) return fail(400, { error: 'Invalid rate' });
-		const existing = await db.query.rateTiers.findFirst({
-			where: and(eq(rateTiers.seasonId, seasonId), eq(rateTiers.roomTypeId, roomTypeId))
-		});
-		if (existing) {
-			await db.update(rateTiers).set({ nightlyRate }).where(eq(rateTiers.id, existing.id));
-		} else {
-			await db.insert(rateTiers).values({ id: crypto.randomUUID(), seasonId, roomTypeId, nightlyRate });
-		}
-		return { success: true };
-	},
-
-	// Set all room types in a season to the season's base rate (upcharge = 0)
-	upsertAllTiersAtBase: async ({ request, locals }) => {
-		if (!locals.user) return fail(401, { error: 'Unauthorized' });
-		const fd = await request.formData();
-		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
-		const seasonId = g('seasonId');
-		const propertyId = g('propertyId');
-		if (!seasonId || !propertyId) return fail(400, { error: 'Missing fields' });
-		const season = await db.query.rateSeasons.findFirst({ where: eq(rateSeasons.id, seasonId) });
-		if (!season?.baseRateCents) return fail(400, { error: 'Season has no base rate' });
-		const rts = await db.query.roomTypes.findMany({
-			where: eq(roomTypes.propertyId, propertyId),
-			columns: { id: true }
-		});
-		for (const rt of rts) {
-			const existing = await db.query.rateTiers.findFirst({
-				where: and(eq(rateTiers.seasonId, seasonId), eq(rateTiers.roomTypeId, rt.id))
-			});
-			if (existing) {
-				await db.update(rateTiers).set({ nightlyRate: season.baseRateCents }).where(eq(rateTiers.id, existing.id));
-			} else {
-				await db.insert(rateTiers).values({
-					id: crypto.randomUUID(), seasonId, roomTypeId: rt.id, nightlyRate: season.baseRateCents
-				});
-			}
-		}
 		return { success: true };
 	},
 
