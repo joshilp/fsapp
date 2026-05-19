@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { invalidateAll } from '$app/navigation';
+	import { invalidateAll, goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import type { PageData } from './$types';
 	import type { ARICell } from './+page.server';
@@ -17,14 +17,12 @@
 
 	// ─── Layout mode ──────────────────────────────────────────────────────────
 	const INV_LAYOUT_KEY = 'inventory-layout';
-	function loadInvLayout(): 'single' | 'stacked' {
-		if (typeof localStorage === 'undefined') return 'single';
-		return (localStorage.getItem(INV_LAYOUT_KEY) as 'single' | 'stacked') || 'single';
-	}
-	let layoutMode = $state<'single' | 'stacked'>(loadInvLayout());
+	let layoutMode = $state<'single' | 'stacked'>(
+		(localStorage.getItem(INV_LAYOUT_KEY) as 'single' | 'stacked') || 'single'
+	);
 	function toggleLayout() {
 		layoutMode = layoutMode === 'single' ? 'stacked' : 'single';
-		if (typeof localStorage !== 'undefined') localStorage.setItem(INV_LAYOUT_KEY, layoutMode);
+		localStorage.setItem(INV_LAYOUT_KEY, layoutMode);
 	}
 
 	// ─── Row visibility ────────────────────────────────────────────────────────
@@ -32,14 +30,13 @@
 	type RowVisibility = { sellable: boolean; booked: boolean; minStay: boolean; cta: boolean; ctd: boolean };
 	const ROW_DEFAULTS: RowVisibility = { sellable: true, booked: false, minStay: true, cta: false, ctd: false };
 	function loadInvRows(): RowVisibility {
-		if (typeof localStorage === 'undefined') return { ...ROW_DEFAULTS };
 		try { return { ...ROW_DEFAULTS, ...JSON.parse(localStorage.getItem(INV_ROWS_KEY) ?? '{}') }; }
 		catch { return { ...ROW_DEFAULTS }; }
 	}
 	let visibleRows = $state<RowVisibility>(loadInvRows());
 	function toggleRow(key: keyof RowVisibility) {
 		visibleRows[key] = !visibleRows[key];
-		if (typeof localStorage !== 'undefined') localStorage.setItem(INV_ROWS_KEY, JSON.stringify(visibleRows));
+		localStorage.setItem(INV_ROWS_KEY, JSON.stringify(visibleRows));
 	}
 
 	let displayPopoverOpen = $state(false);
@@ -52,17 +49,6 @@
 	// ─── Navigation ────────────────────────────────────────────────────────────
 	function navUrl(fromDate: string, prop?: string) {
 		return `/inventory?from=${fromDate}&prop=${prop ?? activeProp}`;
-	}
-	function prevWindow() {
-		const d = new Date(data.from + 'T12:00:00');
-		d.setDate(d.getDate() - data.window);
-		const f = d.toISOString().slice(0, 10);
-		window.location.href = navUrl(f < today ? today : f);
-	}
-	function nextWindow() {
-		const d = new Date(data.from + 'T12:00:00');
-		d.setDate(d.getDate() + data.window);
-		window.location.href = navUrl(d.toISOString().slice(0, 10));
 	}
 
 	// ─── Drag-to-book / mode ─────────────────────────────────────────────────
@@ -92,7 +78,7 @@
 	let bulkSaving        = $state(false);
 
 	const bulkCount = $derived.by(() => {
-		if (!editRange) return 0;
+		if (!editRange || editRange.minCol < 0) return 0;
 		let c = 0;
 		for (let i = editRange.minCol; i <= editRange.maxCol; i++) {
 			const d = data.dates[i];
@@ -103,12 +89,12 @@
 	});
 
 	function cellEditState(roomTypeId: string, colIdx: number): boolean {
-		if (!editRange) return false;
+		if (!editRange || editRange.minCol < 0) return false;
 		return editRange.roomTypeId === roomTypeId && colIdx >= editRange.minCol && colIdx <= editRange.maxCol;
 	}
 
 	async function applyBulkEdit() {
-		if (!editRange || bulkSaving) return;
+		if (!editRange || editRange.minCol < 0 || bulkSaving) return;
 		bulkSaving = true;
 		try {
 			const dates: string[] = [];
@@ -478,12 +464,7 @@
 		if (!prop) return;
 		const rt = prop.roomTypesList[0];
 		if (!rt) return;
-		// Start from today or the first visible date, whichever is later
-		const startDate = today > data.dates[0] ? today : data.dates[0];
-		const col = data.dates.indexOf(startDate);
-		const startCol = col >= 0 ? col : 0;
-		const endCol = Math.min(startCol + 6, data.dates.length - 1);
-		editRange = { roomTypeId: rt.id, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name, minCol: startCol, maxCol: endCol };
+		editRange = { roomTypeId: rt.id, roomTypeName: rt.name, propertyId: prop.id, propertyName: prop.name, minCol: -1, maxCol: -1 };
 		editRangeFocus = 'rate';
 		bulkRateMode = 'none'; bulkRateValue = ''; bulkMinNights = '';
 		bulkStopSell = 'no_change'; bulkCTA = 'no_change'; bulkCTD = 'no_change';
@@ -683,7 +664,7 @@
 				{#if data.propertiesList.length > 1}
 					<select
 						class="rounded border border-input bg-background px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-ring"
-						onchange={(e) => { window.location.href = navUrl(data.from, (e.target as HTMLSelectElement).value); }}>
+						onchange={(e) => { goto(navUrl(data.from, (e.target as HTMLSelectElement).value)); }}>
 						{#each data.propertiesList as prop}
 							<option value={prop.id} selected={activeProp === prop.id}>{prop.name}</option>
 						{/each}
@@ -694,15 +675,27 @@
 			{/if}
 
 		<!-- Date navigation -->
-		<div class="flex items-center gap-1 rounded-lg border px-1 text-xs">
-			<button onclick={prevWindow} class="px-2 py-1 hover:bg-muted rounded disabled:opacity-40" disabled={data.from <= today}>← {data.window}d</button>
+		<div class="flex items-center">
+			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setMonth(d.getMonth() - 1); d.setDate(1); goto(navUrl(d.toISOString().slice(0, 10))); }}
+				class="px-1.5 py-1 hover:bg-muted rounded text-muted-foreground text-sm" title="Previous month">‹‹</button>
+			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setDate(d.getDate() - 7); goto(navUrl(d.toISOString().slice(0, 10))); }}
+				class="px-1.5 py-1 hover:bg-muted rounded text-sm" title="Previous week">‹</button>
+
 			<input type="month"
 				value={data.from.slice(0, 7)}
-				onchange={(e) => { const v = (e.target as HTMLInputElement).value; if (v) window.location.href = navUrl(v + '-01', activeProp); }}
-				class="border-0 bg-transparent text-xs text-muted-foreground font-mono cursor-pointer focus:outline-none hover:text-foreground px-2 py-1"
+				onchange={(e) => { const v = (e.target as HTMLInputElement).value; if (v) goto(navUrl(v + '-01', activeProp)); }}
+				class="border-0 bg-transparent text-xs text-foreground font-medium font-mono cursor-pointer focus:outline-none hover:text-foreground px-2 py-1 min-w-28 text-center"
 				title="Jump to month" />
-			<button onclick={nextWindow} class="px-2 py-1 hover:bg-muted rounded">{data.window}d →</button>
+
+			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setDate(d.getDate() + 7); goto(navUrl(d.toISOString().slice(0, 10))); }}
+				class="px-1.5 py-1 hover:bg-muted rounded text-sm" title="Next week">›</button>
+			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(1); goto(navUrl(d.toISOString().slice(0, 10))); }}
+				class="px-1.5 py-1 hover:bg-muted rounded text-muted-foreground text-sm" title="Next month">››</button>
 		</div>
+		{#if data.from > today.slice(0, 7) + '-01' || data.from < today.slice(0, 7) + '-01'}
+			<button onclick={() => { const d = new Date(); goto(navUrl(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`)); }}
+				class="rounded border border-input px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors">Today</button>
+		{/if}
 
 			<!-- Mode segmented control -->
 			<div class="flex rounded-md border border-input overflow-hidden text-xs font-medium">
@@ -1340,13 +1333,17 @@
 
 		<!-- Date range summary -->
 		<div class="px-4 py-2.5 bg-blue-50 border-b border-border text-sm">
-			<span class="text-muted-foreground text-xs">Range:</span>
-			<span class="font-medium ml-1">{data.dates[editRange.minCol]}</span>
-			{#if editRange.minCol !== editRange.maxCol}
-				<span class="text-muted-foreground"> → </span>
-				<span class="font-medium">{data.dates[editRange.maxCol]}</span>
+			{#if editRange.minCol < 0}
+				<span class="text-muted-foreground text-xs italic">Drag on the grid to select a date range</span>
+			{:else}
+				<span class="text-muted-foreground text-xs">Range:</span>
+				<span class="font-medium ml-1">{data.dates[editRange.minCol]}</span>
+				{#if editRange.minCol !== editRange.maxCol}
+					<span class="text-muted-foreground"> → </span>
+					<span class="font-medium">{data.dates[editRange.maxCol]}</span>
+				{/if}
+				<span class="text-xs text-muted-foreground ml-1">({editRange.maxCol - editRange.minCol + 1}d)</span>
 			{/if}
-			<span class="text-xs text-muted-foreground ml-1">({editRange.maxCol - editRange.minCol + 1}d)</span>
 		</div>
 
 		<!-- Form body -->
