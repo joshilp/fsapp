@@ -538,6 +538,7 @@ export const actions: Actions = {
 				clerkId: clerkUserId || locals.user.id,
 				clerkName: clerkUserId ? null : (clerkName || null),
 				status, checkInDate: checkIn!, checkOutDate: checkOut!, roomConfig,
+				requestedRoomTypeId: requestedRoomTypeId || null,
 				otaConfirmationNumber: otaConfirmationNumber ?? (requestedRoomTypeId ? `INV-${requestedRoomTypeId.slice(0, 8)}` : null),
 				notes, numAdults, numChildren,
 				vehicleMake, vehicleColour, vehiclePlate, waiverSigned,

@@ -144,6 +144,12 @@
 	// ── Payments ──────────────────────────────────────────────────────────────
 	let payments     = $state<Payment[]>([]);
 	let ccInfo       = $state<{ lastFour: string | null; cardType: string | null } | null>(null);
+	let ccCapturing  = $state(false);
+	let ccCardType   = $state('Visa');
+	let ccLastFour   = $state('');
+	let ccExpiry     = $state('');  // MM/YY
+	let ccName       = $state('');
+	let ccBusy       = $state(false);
 	let addingPay    = $state(false);
 	let payAmt       = $state<number | ''>('');
 	let payMethod    = $state('cash');
@@ -159,6 +165,7 @@
 	// ── Toggle check-in / check-out ────────────────────────────────────────────
 	let toggleBusy = $state(false);
 	let toggleMsg  = $state('');
+	let legendOpen = $state(false);
 
 	// ── Left-panel tab ─────────────────────────────────────────────────────────
 	let leftTab = $state<'guest' | 'stay' | 'notes' | 'history'>('guest');
@@ -304,8 +311,51 @@
 	// the depositAmount input if it's empty.
 	let depositAmt = $state('');
 
-	async function toggleCheckin() {
+	async function confirmBooking(undo = false) {
 		if (!bookingId || toggleBusy) return;
+		toggleBusy = true; toggleMsg = '';
+		try {
+			const r = await fetch(`/api/booking/${bookingId}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ undo }) });
+			const d = await r.json();
+			if (!r.ok) { toggleMsg = d.error ?? 'Error'; return; }
+			status = d.status;
+		} catch { toggleMsg = 'Network error.'; }
+		finally { toggleBusy = false; await invalidateAll(); }
+	}
+
+	async function saveCC() {
+		if (!bookingId || ccBusy) return;
+		const [expM, expY] = ccExpiry.split('/').map(s => s.trim());
+		const lastFour = ccLastFour.replace(/\D/g, '').slice(-4);
+		if (lastFour.length !== 4) { toast.error('Enter 4-digit last four.'); return; }
+		ccBusy = true;
+		try {
+			const r = await fetch(`/api/booking/${bookingId}/save-cc`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ cardType: ccCardType, lastFour, expiryMonth: expM, expiryYear: expY ? (expY.length === 2 ? '20'+expY : expY) : '', cardholderName: ccName })
+			});
+			const d = await r.json();
+			if (!r.ok) { toast.error(d.error ?? 'Save failed'); return; }
+			ccInfo = { lastFour: d.lastFour, cardType: d.cardType };
+			ccCapturing = false; ccLastFour = ''; ccExpiry = ''; ccName = '';
+			toast.success('Card on file saved.');
+		} catch { toast.error('Network error.'); }
+		finally { ccBusy = false; }
+	}
+
+	async function deleteCC() {
+		if (!bookingId || ccBusy) return;
+		ccBusy = true;
+		try {
+			await fetch(`/api/booking/${bookingId}/save-cc`, { method: 'DELETE' });
+			ccInfo = null;
+			toast.success('Card removed.');
+		} catch { toast.error('Network error.'); }
+		finally { ccBusy = false; }
+	}
+
+	async function toggleCheckin() {
 		toggleBusy = true; toggleMsg = '';
 		try {
 			const r = await fetch(`/api/booking/${bookingId}/toggle-checkin`, { method: 'POST' });
@@ -361,7 +411,7 @@
 	// Only show date summary in header for existing bookings — new bookings have dates right in the Stay section
 	const cardDesc  = $derived(!isNew && checkIn && checkOut ? `${fmt(checkIn)} → ${fmt(checkOut)} · ${nights} night${nights===1?'':'s'}` : '');
 
-	const statusLabel = $derived(({ reserved:'Reserved', confirmed:'Confirmed', checked_in:'Checked In', checked_out:'Checked Out', cancelled:'Cancelled', blocked:'Blocked' } as Record<string,string>)[status] ?? status);
+	const statusLabel = $derived(({ reserved:'Pending', confirmed:'Confirmed', checked_in:'Checked In', checked_out:'Checked Out', cancelled:'Cancelled', blocked:'Blocked' } as Record<string,string>)[status] ?? status);
 	const statusCls   = $derived(({ reserved:'bg-amber-100 text-amber-700 border-amber-200', confirmed:'bg-blue-100 text-blue-700 border-blue-200', checked_in:'bg-green-100 text-green-700 border-green-200', checked_out:'bg-gray-100 text-gray-600 border-gray-200', cancelled:'bg-red-100 text-red-600 border-red-200' } as Record<string,string>)[status] ?? 'bg-muted text-muted-foreground border-border');
 
 	const RATING: Record<number,{label:string;cls:string}> = {
@@ -395,6 +445,7 @@
 		waiverSigned = false;
 		rateLines = [{ id: crypto.randomUUID(), label: '', qty: '', unit: '', total: '' }];
 		taxLines = []; taxPresets = []; addonLines = []; addonPresets = []; payments = []; ccInfo = null;
+		ccCapturing = false; ccCardType = 'Visa'; ccLastFour = ''; ccExpiry = ''; ccName = ''; ccBusy = false;
 		requestedRoomTypeId_ = ''; availRooms = []; roomPickerDismissed = false;
 		addingPay = false; payAmt = ''; payMethod = 'cash'; payType = 'final_charge'; payNotes = ''; payErr = '';
 		suggestions = []; showSuggest = false;
@@ -403,6 +454,7 @@
 		confirmBusy = false; confirmSentAt = null;
 		propLogoUrl = null; propAddress = null; propPhone = null;
 		leftTab = 'guest'; openPayMenu = null;
+		legendOpen = false;
 		bookingCreatedAt = null; bookingClerkName = ''; bookingCheckedInAt = null;
 		bookingCheckedOutAt = null; bookingCancelledAt = null; priorStay_ = null;
 	}
@@ -759,35 +811,75 @@
 				</div>
 			{/if}
 
-			<!-- Check-in / Check-out toggles (existing bookings only) -->
-			{#if bookingId && status !== 'cancelled'}
-				<div class="mx-4 mt-3 flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
-					<span class="text-xs text-muted-foreground font-medium">Status:</span>
-					<button type="button"
-						onclick={toggleCheckin}
-						disabled={toggleBusy || status === 'checked_out'}
-						class={['flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors',
-							status === 'checked_in' || status === 'checked_out'
-								? 'border-green-300 bg-green-100 text-green-800'
-								: 'border-border bg-background text-muted-foreground hover:bg-muted'
-						].join(' ')}>
-						{status === 'checked_in' || status === 'checked_out' ? '✓' : '○'} Checked In
-					</button>
-				<button type="button"
-					onclick={toggleCheckout}
-					disabled={toggleBusy || (status !== 'checked_in' && status !== 'checked_out')}
-					class={['flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors',
-						status === 'checked_out'
-							? 'border-gray-400 bg-gray-100 text-gray-700'
-							: 'border-border bg-background text-muted-foreground hover:bg-muted disabled:opacity-40'
-					].join(' ')}>
-						{status === 'checked_out' ? '✓' : '○'} Checked Out
-					</button>
-					{#if toggleMsg}
-						<span class={['text-xs ml-1', toggleMsg.startsWith('⚠') ? 'text-amber-700' : 'text-destructive'].join(' ')}>{toggleMsg}</span>
-					{/if}
+		<!-- Status flow bar (existing bookings only) -->
+		{#if bookingId && status !== 'cancelled'}
+			{@const LEGEND = [
+				{ key: 'reserved',    label: 'Pending',     desc: 'New booking — deposit not yet received.' },
+				{ key: 'confirmed',   label: 'Confirmed',   desc: 'Deposit received or manually confirmed.' },
+				{ key: 'checked_in',  label: 'Checked In',  desc: 'Guest has arrived and is on property.' },
+				{ key: 'checked_out', label: 'Checked Out', desc: 'Stay complete — room returned to housekeeping.' },
+			]}
+			<div class="mx-4 mt-3 rounded-md border border-border bg-muted/20 px-3 py-2.5">
+				<div class="flex items-center justify-between gap-3">
+					<!-- Primary action -->
+					<div class="flex items-center gap-2">
+						{#if status === 'reserved'}
+							<button type="button" onclick={() => confirmBooking()} disabled={toggleBusy}
+								class="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50">
+								Confirm booking →
+							</button>
+						{:else if status === 'confirmed'}
+							<button type="button" onclick={toggleCheckin} disabled={toggleBusy}
+								class="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-green-700 disabled:opacity-50">
+								Check in →
+							</button>
+						{:else if status === 'checked_in'}
+							<button type="button" onclick={toggleCheckout} disabled={toggleBusy}
+								class="rounded-md bg-gray-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-gray-700 disabled:opacity-50">
+								Check out →
+							</button>
+						{:else if status === 'checked_out'}
+							<span class="text-xs font-medium text-muted-foreground">Stay complete</span>
+						{/if}
+						{#if toggleMsg}
+							<span class={['text-xs', toggleMsg.startsWith('⚠') ? 'text-amber-700' : 'text-destructive'].join(' ')}>{toggleMsg}</span>
+						{/if}
+					</div>
+					<!-- Undo link + legend toggle -->
+					<div class="flex items-center gap-3">
+						{#if status === 'confirmed'}
+							<button type="button" onclick={() => confirmBooking(true)} disabled={toggleBusy}
+								class="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">↩ revert to pending</button>
+						{:else if status === 'checked_in'}
+							<button type="button" onclick={toggleCheckin} disabled={toggleBusy}
+								class="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">↩ undo check-in</button>
+						{:else if status === 'checked_out'}
+							<button type="button" onclick={toggleCheckout} disabled={toggleBusy}
+								class="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">↩ undo checkout</button>
+						{/if}
+						<!-- Legend popover trigger -->
+						<button type="button" title="Status legend"
+							onclick={() => legendOpen = !legendOpen}
+							class="text-muted-foreground/60 hover:text-muted-foreground text-xs leading-none">ⓘ</button>
+					</div>
 				</div>
-			{/if}
+				<!-- Inline legend (collapsible) -->
+				{#if legendOpen}
+					<div class="mt-2 border-t border-border pt-2 grid grid-cols-2 gap-x-4 gap-y-1">
+						{#each LEGEND as l}
+							<div class="flex items-start gap-1.5 text-[11px]">
+								<span class={['mt-0.5 shrink-0 rounded-full border px-1.5 py-0.5 font-semibold leading-none',
+									l.key === status
+										? statusCls
+										: 'bg-muted text-muted-foreground border-border'
+								].join(' ')}>{l.label}</span>
+								<span class="text-muted-foreground">{l.desc}</span>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 			<!-- Guest rating warning -->
 			{#if guestRating && guestRating >= 4}
@@ -1333,11 +1425,13 @@
 												</select>
 											</div>
 										</div>
-										<select bind:value={payMethod} class="w-full rounded border border-input bg-background px-2 py-1.5 text-sm">
-											<option value="cash">Cash</option><option value="card">Card</option>
-											<option value="etransfer">e-Transfer</option><option value="check">Cheque</option><option value="other">Other</option>
-										</select>
-										{#if payErr}<p class="text-xs text-destructive">{payErr}</p>{/if}
+									<select bind:value={payMethod} class="w-full rounded border border-input bg-background px-2 py-1.5 text-sm">
+										<option value="cash">Cash</option><option value="card">Card</option>
+										<option value="etransfer">e-Transfer</option><option value="check">Cheque</option><option value="other">Other</option>
+									</select>
+									<input type="text" bind:value={payNotes} placeholder="Notes (optional)"
+										class="w-full rounded border border-input bg-background px-2 py-1.5 text-sm" />
+									{#if payErr}<p class="text-xs text-destructive">{payErr}</p>{/if}
 										<div class="flex gap-2">
 											<button type="button" onclick={recordPayment} disabled={payBusy}
 												class="flex-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
@@ -1349,27 +1443,80 @@
 									</div>
 								{/if}
 
+							<!-- CC on file -->
+							<div class="mt-2">
 								{#if ccInfo}
-									<p class="mt-1.5 text-xs text-muted-foreground">CC on file: {ccInfo.cardType ?? ''} ••••{ccInfo.lastFour ?? ''}</p>
+									<div class="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs">
+										<span class="font-medium">💳 {ccInfo.cardType ?? 'Card'} ••••{ccInfo.lastFour}</span>
+										<button type="button" onclick={() => ccCapturing = true}
+											class="ml-auto text-muted-foreground underline underline-offset-2 hover:text-foreground">update</button>
+										<button type="button" onclick={deleteCC} disabled={ccBusy}
+											class="text-destructive/70 hover:text-destructive">remove</button>
+									</div>
+								{:else if !ccCapturing}
+									<button type="button" onclick={() => ccCapturing = true}
+										class="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">+ capture card on file</button>
 								{/if}
-							{/if}
-						</div>
+								{#if ccCapturing}
+									<div class="mt-1.5 space-y-2 rounded-md border border-border bg-muted/30 p-3">
+										<p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Card on file</p>
+										<div class="grid grid-cols-2 gap-2">
+											<div>
+												<label class="mb-0.5 block text-xs text-muted-foreground">Type</label>
+												<select bind:value={ccCardType} class="w-full rounded border border-input bg-background px-2 py-1 text-xs">
+													<option>Visa</option><option>Mastercard</option><option>Amex</option>
+													<option>Discover</option><option>Debit</option><option>Other</option>
+												</select>
+											</div>
+											<div>
+												<label class="mb-0.5 block text-xs text-muted-foreground">Last 4 digits</label>
+												<input type="text" maxlength="4" inputmode="numeric" bind:value={ccLastFour}
+													placeholder="1234" class="w-full rounded border border-input bg-background px-2 py-1 text-xs" />
+											</div>
+											<div>
+												<label class="mb-0.5 block text-xs text-muted-foreground">Expiry (MM/YY)</label>
+												<input type="text" maxlength="5" bind:value={ccExpiry}
+													placeholder="09/27" class="w-full rounded border border-input bg-background px-2 py-1 text-xs" />
+											</div>
+											<div>
+												<label class="mb-0.5 block text-xs text-muted-foreground">Cardholder name</label>
+												<input type="text" bind:value={ccName}
+													placeholder="J. Smith" class="w-full rounded border border-input bg-background px-2 py-1 text-xs" />
+											</div>
+										</div>
+										<div class="flex gap-2">
+											<button type="button" onclick={saveCC} disabled={ccBusy}
+												class="flex-1 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50">
+												{ccBusy ? 'Saving…' : 'Save card'}
+											</button>
+											<button type="button" onclick={() => { ccCapturing = false; ccLastFour = ''; ccExpiry = ''; ccName = ''; }}
+												class="rounded-md border border-input px-3 py-1 text-xs hover:bg-muted">Cancel</button>
+										</div>
+									</div>
+								{/if}
+							</div>
 
-						<!-- Balance row (always visible for existing bookings) -->
-						{#if !isNew}
-							<div class={['mt-3 flex items-center justify-between rounded-md border px-3 py-2.5 text-sm font-semibold', balanceCents > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-green-200 bg-green-50 text-green-800'].join(' ')}>
-								<div>
-									<span>{balanceCents > 0 ? 'Balance due' : 'Paid in full'}</span>
-									{#if balanceCents > 0}
-										<span class="ml-2 text-xs font-normal opacity-70">(${(collected/100).toFixed(2)} of ${grandTotal.toFixed(2)} received)</span>
-									{/if}
-									{#if pending > 0}
-										<div class="mt-0.5 text-[10px] font-normal text-amber-600">⏳ Deposit pending: ${(pending/100).toFixed(2)} not yet collected</div>
-									{/if}
-								</div>
+					<!-- Balance row (always visible for existing bookings) -->
+					{#if !isNew}
+						<div class={['mt-3 flex items-center justify-between rounded-md border px-3 py-2.5 text-sm font-semibold', balanceCents > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-green-200 bg-green-50 text-green-800'].join(' ')}>
+							<div>
+								<span>{balanceCents > 0 ? 'Balance due' : 'Paid in full'}</span>
+								{#if balanceCents > 0}
+									<span class="ml-2 text-xs font-normal opacity-70">(${(collected/100).toFixed(2)} of ${grandTotal.toFixed(2)} received)</span>
+								{/if}
+								{#if pending > 0}
+									<div class="mt-0.5 text-[10px] font-normal text-amber-600">⏳ Deposit pending: ${(pending/100).toFixed(2)} not yet collected</div>
+								{/if}
+							</div>
+							<div class="flex items-center gap-3">
+								<a href="/booking/{bookingId}/receipt" target="_blank"
+									class="text-[11px] font-normal underline underline-offset-2 opacity-60 hover:opacity-100">
+									receipt ↗
+								</a>
 								<span class="text-base">{balanceCents > 0 ? fmtMoney(balanceCents) : '✓'}</span>
 							</div>
-						{/if}
+						</div>
+					{/if}
 				</section>
 
 			{/if}<!-- end room picker / folio swap -->
