@@ -1,888 +1,145 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
-	import { page } from '$app/stores';
-	import { Button } from '$lib/components/ui/button/index.js';
-	import { Input } from '$lib/components/ui/input/index.js';
-	import { Label } from '$lib/components/ui/label/index.js';
-	import * as Tabs from '$lib/components/ui/tabs/index.js';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
-	import { toast } from 'svelte-sonner';
 	import type { PageData } from './$types';
+	import PropertyGeneral from '$lib/components/settings/PropertyGeneral.svelte';
+	import PropertyPolicy from '$lib/components/settings/PropertyPolicy.svelte';
+	import PropertyBooking from '$lib/components/settings/PropertyBooking.svelte';
+	import PropertyTaxes from '$lib/components/settings/PropertyTaxes.svelte';
+	import PropertyRooms from '$lib/components/settings/PropertyRooms.svelte';
+	import PropertyChannex from '$lib/components/settings/PropertyChannex.svelte';
+	import Channels from '$lib/components/settings/Channels.svelte';
 
 	let { data }: { data: PageData } = $props();
 
-	const VALID_TABS = ['properties', 'taxes', 'roomtypes', 'rooms', 'channels', 'email'] as const;
-	type Tab = typeof VALID_TABS[number];
-	const activeTab = $derived.by<Tab>(() => {
-		const hash = $page.url.hash.replace('#', '');
-		return (VALID_TABS.includes(hash as Tab) ? hash : 'properties') as Tab;
-	});
+	const PROP_SECTIONS = ['general', 'policy', 'booking', 'rooms', 'taxes', 'channex'] as const;
+	const GLOBAL_SECTIONS = ['channels', 'email'] as const;
+	type Section = typeof PROP_SECTIONS[number] | typeof GLOBAL_SECTIONS[number];
 
-	// ─── Properties ──────────────────────────────────────────────────────────
-	let savingProperty = $state<string | null>(null);
+	let selectedPropId = $state(data.propertiesList[0]?.id ?? '');
+	let activeSection = $state<Section>('general');
 
-	// ─── Tax Presets — scoped per property ───────────────────────────────────
-	type NewPreset = { label: string; ratePercent: string };
-	let newPresets = $state<Record<string, NewPreset>>(
-		Object.fromEntries(data.propertiesList.map((p) => [p.id, { label: '', ratePercent: '' }]))
-	);
-	let savingPreset = $state<string | null>(null);
-	let deletingPreset = $state<string | null>(null);
+	const prop = $derived(data.propertiesList.find((p) => p.id === selectedPropId) ?? data.propertiesList[0]);
+	const propRoomTypes = $derived(data.roomTypesList.filter((rt) => rt.propertyId === selectedPropId));
+	const propRooms = $derived(data.roomsList.filter((r) => r.propertyId === selectedPropId));
+	const propTaxes = $derived(data.taxPresetsList.filter((t) => t.propertyId === selectedPropId));
 
-	// ─── Rooms — scoped per property ─────────────────────────────────────────
-	type NewRoom = { roomNumber: string; roomTypeId: string };
-	let newRooms = $state<Record<string, NewRoom>>(
-		Object.fromEntries(data.propertiesList.map((p) => [p.id, { roomNumber: '', roomTypeId: '' }]))
-	);
-	let addingRoom = $state<string | null>(null);
-	let togglingRoom = $state<string | null>(null);
-	let roomErrors = $state<Record<string, string>>({});
+	const SECTION_LABELS: Record<Section, string> = {
+		general: 'General',
+		policy: 'Policy',
+		booking: 'Booking',
+		rooms: 'Rooms & Types',
+		taxes: 'Taxes',
+		channex: 'Channex',
+		channels: 'Channels',
+		email: 'Email',
+	};
 
-	// ─── Channels ─────────────────────────────────────────────────────────────
-	type NewChannel = { name: string; isOta: boolean; sortOrder: string };
-	let newChannel = $state<NewChannel>({ name: '', isOta: false, sortOrder: '10' });
-	let addingChannel = $state(false);
-
-	// ─── Room types — scoped per property ────────────────────────────────────
-	type NewRoomType = { name: string; category: string; sortOrder: string; defaultRateCents: string };
-	let newRoomTypes = $state<Record<string, NewRoomType>>(
-		Object.fromEntries(data.propertiesList.map((p) => [p.id, { name: '', category: '', sortOrder: '0', defaultRateCents: '' }]))
-	);
-	let addingRoomType = $state<string | null>(null);
-	let deletingRoomType = $state<string | null>(null);
-	let editingRoomType = $state<string | null>(null);
-
-	// ─── Delete confirmation ──────────────────────────────────────────────────
-	let confirmDeleteRoomTypeId = $state<string | null>(null);
-	let confirmDeleteRoomTypeName = $state('');
+	function navClass(section: Section) {
+		return [
+			'flex w-full items-center rounded-md px-3 py-1.5 text-sm transition-colors text-left',
+			activeSection === section
+				? 'bg-primary/10 text-primary font-medium'
+				: 'text-muted-foreground hover:bg-accent hover:text-foreground',
+		].join(' ');
+	}
 </script>
 
-<svelte:head>
-	<title>Settings</title>
-</svelte:head>
+<svelte:head><title>Settings</title></svelte:head>
 
-<div class="mx-auto max-w-3xl px-4 py-8">
-	<h1 class="mb-6 text-2xl font-bold">Settings</h1>
+<div class="flex flex-1 overflow-hidden">
+	<!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+	<aside class="w-52 shrink-0 border-r border-border bg-card overflow-y-auto flex flex-col py-4 px-2 gap-0.5">
+		<p class="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+			Properties
+		</p>
+		{#each data.propertiesList as p}
+			<button
+				class={[
+					'flex w-full items-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors text-left',
+					selectedPropId === p.id
+						? 'bg-primary/10 text-primary'
+						: 'text-foreground hover:bg-accent',
+				].join(' ')}
+				onclick={() => { selectedPropId = p.id; }}
+			>{p.name}</button>
+		{/each}
 
-	<Tabs.Root value={activeTab} onValueChange={(v) => { window.location.hash = v; }}>
-		<Tabs.List class="mb-6 flex-wrap">
-			<Tabs.Trigger value="properties">Properties</Tabs.Trigger>
-			<Tabs.Trigger value="taxes">Taxes</Tabs.Trigger>
-			<Tabs.Trigger value="roomtypes">Room Types</Tabs.Trigger>
-			<Tabs.Trigger value="rooms">Rooms</Tabs.Trigger>
-			<Tabs.Trigger value="channels">Channels</Tabs.Trigger>
-			<Tabs.Trigger value="email">Email</Tabs.Trigger>
-		</Tabs.List>
+		<div class="my-2 mx-3 border-t border-border"></div>
 
-		<!-- ── Properties ─────────────────────────────────────────────────── -->
-		<Tabs.Content value="properties">
-			<div class="space-y-6">
-				{#each data.propertiesList as prop}
-					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
-						<h2 class="mb-4 font-semibold">{prop.name}</h2>
-		<form
-						method="POST"
-						action="?/updateProperty"
-						use:enhance={() => {
-							savingProperty = prop.id;
-							return async ({ result, update }) => {
-								savingProperty = null;
-								if (result.type === 'success') toast.success('Property saved');
-								else toast.error('Save failed');
-								await update({ reset: false });
-							};
-						}}
-					>
-							<input type="hidden" name="id" value={prop.id} />
-							<div class="grid grid-cols-2 gap-3">
-								<div class="col-span-2 flex flex-col gap-1.5">
-									<Label for="name-{prop.id}">Property name</Label>
-									<Input id="name-{prop.id}" name="name" value={prop.name} required />
-								</div>
-								<div class="col-span-2 flex flex-col gap-1.5">
-									<Label for="address-{prop.id}">Street address</Label>
-									<Input id="address-{prop.id}" name="address" value={prop.address} />
-								</div>
-								<div class="flex flex-col gap-1.5">
-									<Label for="city-{prop.id}">City</Label>
-									<Input id="city-{prop.id}" name="city" value={prop.city} />
-								</div>
-								<div class="flex flex-col gap-1.5">
-									<Label for="province-{prop.id}">Province</Label>
-									<Input id="province-{prop.id}" name="province" value={prop.province} />
-								</div>
-								<div class="flex flex-col gap-1.5">
-									<Label for="postal-{prop.id}">Postal code</Label>
-									<Input id="postal-{prop.id}" name="postalCode" value={prop.postalCode ?? ''} />
-								</div>
-							<div class="flex flex-col gap-1.5">
-								<Label for="phone-{prop.id}">Phone</Label>
-								<Input id="phone-{prop.id}" name="phone" type="tel" value={prop.phone ?? ''} />
-							</div>
-							<div class="flex flex-col gap-1.5">
-								<Label for="gst-{prop.id}">GST number</Label>
-								<Input id="gst-{prop.id}" name="gstNumber" value={prop.gstNumber ?? ''} />
-							</div>
-							<div class="col-span-2 flex flex-col gap-1.5">
-								<Label for="logo-{prop.id}">Logo URL</Label>
-								<Input id="logo-{prop.id}" name="logoUrl" type="url" placeholder="https://…/logo.png" value={prop.logoUrl ?? ''} />
-								<p class="text-xs text-muted-foreground">Appears on confirmation emails and the print slip. Paste any public image URL.</p>
-							</div>
-								<div class="flex flex-col gap-1.5">
-									<Label>Check-in / Check-out times</Label>
-									<div class="flex items-center gap-2">
-										<Input name="checkinTime" value={prop.checkinTime} class="w-24 text-center" placeholder="14:00" />
-										<span class="text-muted-foreground text-sm">→</span>
-										<Input name="checkoutTime" value={prop.checkoutTime} class="w-24 text-center" placeholder="10:30" />
-									</div>
-								</div>
-							<div class="col-span-2 flex flex-col gap-1.5">
-								<Label for="policy-{prop.id}">Policy text (printed on card)</Label>
-								<textarea
-									id="policy-{prop.id}"
-									name="policyText"
-									rows="3"
-									class="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
-								>{prop.policyText ?? ''}</textarea>
-							</div>
-							<!-- Cancellation policy numbers -->
-							<div class="col-span-2">
-								<Label class="mb-2 block">Cancellation &amp; Deposit Policy</Label>
-								<div class="grid grid-cols-3 gap-3">
-									<div class="flex flex-col gap-1">
-										<Label for="cancelFee-{prop.id}" class="text-xs text-muted-foreground">Cancellation fee ($)</Label>
-										<Input id="cancelFee-{prop.id}" name="cancellationFeeDollars" type="number" min="0" step="0.01"
-											value={((prop.cancellationFeeCents ?? 2500) / 100).toFixed(2)}
-											class="w-full" />
-										<p class="text-[11px] text-muted-foreground">Flat fee on any cancellation</p>
-									</div>
-									<div class="flex flex-col gap-1">
-										<Label for="noRefund-{prop.id}" class="text-xs text-muted-foreground">No-refund window (days)</Label>
-										<Input id="noRefund-{prop.id}" name="noRefundDays" type="number" min="0" step="1"
-											value={prop.noRefundDays ?? 30}
-											class="w-full" />
-										<p class="text-[11px] text-muted-foreground">Days before check-in with no refund</p>
-									</div>
-								</div>
-								<!-- Deposit calculation -->
-								<div class="mt-3 grid grid-cols-3 gap-3">
-									<div class="flex flex-col gap-1">
-										<Label for="depCalc-{prop.id}" class="text-xs text-muted-foreground">Deposit method</Label>
-										<select
-											id="depCalc-{prop.id}"
-											name="depositCalcMethod"
-											class="border-input bg-background focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
-										>
-											{#each [
-												{ value: 'first_night', label: 'First N nights rate' },
-												{ value: 'average', label: 'Average N nights rate' },
-												{ value: 'percentage', label: 'Percentage of total' },
-												{ value: 'flat', label: 'Flat amount' }
-											] as opt}
-												<option value={opt.value} selected={opt.value === (prop.depositCalcMethod ?? 'first_night')}>
-													{opt.label}
-												</option>
-											{/each}
-										</select>
-									</div>
-									<div class="flex flex-col gap-1">
-										<Label for="depNights-{prop.id}" class="text-xs text-muted-foreground">Deposit nights <span class="text-[10px]">(first/avg methods)</span></Label>
-										<Input id="depNights-{prop.id}" name="depositNights" type="number" min="0" step="1"
-											value={prop.depositNights ?? 1}
-											class="w-full" />
-										<p class="text-[11px] text-muted-foreground">Nights charged as deposit</p>
-									</div>
-									<div class="flex flex-col gap-1">
-										<Label for="depPct-{prop.id}" class="text-xs text-muted-foreground">Deposit % <span class="text-[10px]">(pct method)</span></Label>
-										<Input id="depPct-{prop.id}" name="depositPercent" type="number" min="0" max="100" step="1"
-											value={prop.depositPercent ?? 20}
-											class="w-full" />
-										<p class="text-[11px] text-muted-foreground">% of total stay</p>
-									</div>
-									<div class="flex flex-col gap-1">
-										<Label for="depFlat-{prop.id}" class="text-xs text-muted-foreground">Flat deposit ($) <span class="text-[10px]">(flat method)</span></Label>
-										<Input id="depFlat-{prop.id}" name="depositFlatDollars" type="number" min="0" step="0.01"
-											value={((prop.depositFlatCents ?? 0) / 100).toFixed(2)}
-											class="w-full" />
-										<p class="text-[11px] text-muted-foreground">Fixed deposit amount</p>
-									</div>
-								</div>
-							</div>
-						</div>
-						<!-- Online Booking Settings -->
-						<div class="mt-5 pt-5 border-t border-border">
-							<Label class="block font-semibold mb-3">Online Booking Page</Label>
-							<!-- Property IDs — useful for .env / API testing config -->
-							<div class="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-								<div class="flex flex-col gap-1">
-									<Label class="text-xs text-muted-foreground">Property ID <span class="text-[10px]">(internal — for TEST_PROPERTY_ID)</span></Label>
-									<div class="flex items-center gap-2">
-										<code class="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono break-all select-all">{prop.id}</code>
-									</div>
-								</div>
-								{#each data.roomTypesList.filter(rt => rt.propertyId === prop.id) as rt}
-									<div class="flex flex-col gap-1">
-										<Label class="text-xs text-muted-foreground">Room type ID — {rt.name} <span class="text-[10px]">(for TEST_ROOM_TYPE_ID)</span></Label>
-										<div class="flex items-center gap-2">
-											<code class="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono break-all select-all">{rt.id}</code>
-										</div>
-									</div>
-								{/each}
-							</div>
-							{#if prop.publicId}
-								<div class="mb-3 flex flex-col gap-1">
-									<Label class="text-xs text-muted-foreground">Booking URL</Label>
-									<div class="flex items-center gap-2">
-										<code class="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono break-all">/book/{prop.publicId}</code>
-										<a href="/book/{prop.publicId}" target="_blank"
-											class="text-xs text-primary hover:underline shrink-0">Preview ↗</a>
-									</div>
-									<p class="text-[11px] text-muted-foreground">Share this URL with guests. Add it as a "Book Now" button on your website.</p>
-								</div>
-							{/if}
-							<div class="grid grid-cols-2 gap-3">
-								<div class="col-span-2 flex items-center gap-3">
-									<input type="checkbox" id="bookingEnabled-{prop.id}" name="bookingEnabled" value="1"
-										checked={prop.bookingEnabled ?? true}
-										class="h-4 w-4 rounded border-border" />
-									<Label for="bookingEnabled-{prop.id}" class="font-normal cursor-pointer">
-										Online bookings enabled
-									</Label>
-								</div>
-								<div class="col-span-2 flex flex-col gap-1.5">
-									<Label for="bookingDesc-{prop.id}">Booking page description</Label>
-									<textarea
-										id="bookingDesc-{prop.id}"
-										name="bookingDescription"
-										rows="2"
-										placeholder="A short welcome message shown on your booking page…"
-										class="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
-									>{prop.bookingDescription ?? ''}</textarea>
-								</div>
-								<div class="col-span-2 flex flex-col gap-1.5">
-									<Label for="heroImg-{prop.id}">Hero image URL</Label>
-									<Input id="heroImg-{prop.id}" name="heroImageUrl" type="url"
-										placeholder="https://…/banner.jpg"
-										value={prop.heroImageUrl ?? ''} />
-									<p class="text-[11px] text-muted-foreground">Background image shown in the booking page header.</p>
-								</div>
-								<div class="flex flex-col gap-1.5">
-									<Label for="accent-{prop.id}">Accent colour</Label>
-									<div class="flex items-center gap-2">
-										<input type="color" id="accent-{prop.id}" name="accentColour"
-											value={prop.accentColour ?? '#d97706'}
-											class="h-10 w-14 rounded border border-border cursor-pointer p-0.5" />
-										<Input name="accentColourText" value={prop.accentColour ?? '#d97706'}
-											placeholder="#d97706" class="w-28 font-mono text-xs" />
-									</div>
-									<p class="text-[11px] text-muted-foreground">Used for buttons and highlights on the booking page.</p>
-								</div>
-							</div>
-						</div>
-						<div class="mt-4 flex justify-end">
-							<Button type="submit" size="sm" disabled={savingProperty === prop.id}>
-								{savingProperty === prop.id ? 'Saving…' : 'Save'}
-							</Button>
-						</div>
-						</form>
-					</div>
-				{/each}
-			</div>
-		</Tabs.Content>
+		<p class="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+			Property
+		</p>
+		{#each PROP_SECTIONS as s}
+			<button class={navClass(s)} onclick={() => { activeSection = s; }}>
+				{SECTION_LABELS[s]}
+			</button>
+		{/each}
 
-		<!-- ── Tax Presets ─────────────────────────────────────────────────── -->
-		<Tabs.Content value="taxes">
-			<div class="space-y-6">
-			{#each data.propertiesList as prop}
-				{@const presets = data.taxPresetsList.filter((p) => p.propertyId === prop.id)}
-				{@const _preset = newPresets[prop.id]}
-					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
-						<h2 class="mb-3 font-semibold">{prop.name}</h2>
+		<div class="my-2 mx-3 border-t border-border"></div>
 
-						<!-- Existing presets -->
-						{#if presets.length > 0}
-							<div class="mb-4 space-y-2">
-								{#each presets as preset}
-									<div class="flex items-center gap-3 rounded-md border p-2.5 text-sm">
-										<span class="flex-1 font-medium">{preset.label}</span>
-										<span class="text-muted-foreground">{preset.ratePercent}%</span>
-									<form
-										method="POST"
-										action="?/deleteTaxPreset"
-										use:enhance={() => {
-											deletingPreset = preset.id;
-											return async ({ result, update }) => {
-												deletingPreset = null;
-												if (result.type === 'success') toast.success('Tax preset removed');
-												else toast.error('Remove failed');
-												await update();
-											};
-										}}
-									>
-											<input type="hidden" name="id" value={preset.id} />
-											<Button
-												type="submit"
-												variant="ghost"
-												size="sm"
-												class="text-destructive h-7 px-2 text-xs"
-												disabled={deletingPreset === preset.id}
-											>
-												{deletingPreset === preset.id ? '…' : 'Remove'}
-											</Button>
-										</form>
-									</div>
-								{/each}
-							</div>
-						{:else}
-							<p class="text-muted-foreground mb-4 text-sm">No tax presets yet.</p>
-						{/if}
+		<p class="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+			Global
+		</p>
+		{#each GLOBAL_SECTIONS as s}
+			<button class={navClass(s)} onclick={() => { activeSection = s; }}>
+				{SECTION_LABELS[s]}
+			</button>
+		{/each}
+	</aside>
 
-					<!-- Add new preset -->
-					<form
-						method="POST"
-						action="?/upsertTaxPreset"
-						use:enhance={() => {
-							savingPreset = prop.id;
-							return async ({ result, update }) => {
-								savingPreset = null;
-								if (result.type === 'success') {
-									toast.success('Tax preset added');
-									newPresets[prop.id] = { label: '', ratePercent: '' };
-								} else toast.error('Save failed');
-								await update();
-							};
-						}}
-						class="flex items-end gap-2"
-					>
-						<input type="hidden" name="propertyId" value={prop.id} />
-						<div class="flex flex-col gap-1">
-							<Label class="text-xs">Label</Label>
-							<Input name="label" placeholder="GST" bind:value={_preset.label} class="h-8 w-24" required />
-						</div>
-						<div class="flex flex-col gap-1">
-							<Label class="text-xs">Rate %</Label>
-							<Input
-								name="ratePercent"
-								type="number"
-								step="0.001"
-								min="0"
-								placeholder="5.0"
-								bind:value={_preset.ratePercent}
-								class="h-8 w-20"
-								required
-							/>
-						</div>
-						<Button type="submit" size="sm" class="h-8" disabled={savingPreset === prop.id}>
-							{savingPreset === prop.id ? '…' : '+ Add'}
-						</Button>
-					</form>
-					</div>
-				{/each}
-			</div>
-		</Tabs.Content>
-
-		<!-- ── Rooms ───────────────────────────────────────────────────────── -->
-		<Tabs.Content value="rooms">
-			<div class="space-y-6">
-			{#each data.propertiesList as prop}
-				{@const propRooms = data.roomsList.filter((r) => r.propertyId === prop.id)}
-				{@const propRoomTypes = data.roomTypesList.filter((rt) => rt.propertyId === prop.id)}
-				{@const _room = newRooms[prop.id]}
-					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
-						<h2 class="mb-3 font-semibold">{prop.name}</h2>
-
-						<!-- Room list -->
-						{#if propRooms.length > 0}
-							<div class="mb-4 overflow-x-auto">
-								<table class="w-full text-sm">
-									<thead>
-										<tr class="text-muted-foreground border-border border-b text-xs">
-											<th class="pb-1 pr-4 text-left font-medium">Room #</th>
-											<th class="pb-1 pr-4 text-left font-medium">Type</th>
-											<th class="pb-1 pr-4 text-left font-medium">Kitchen</th>
-											<th class="pb-1 text-right font-medium">Active</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each propRooms as room}
-											<tr class="border-border border-b text-sm last:border-0">
-												<td class="py-2 pr-4 font-mono font-medium">{room.roomNumber}</td>
-												<td class="py-2 pr-4 text-gray-600">
-													{room.roomType?.category ?? '—'}
-													{#if room.roomType?.name}
-														<span class="text-muted-foreground text-xs">· {room.roomType.name}</span>
-													{/if}
-												</td>
-												<td class="py-2 pr-4 text-xs">
-													{room.hasKitchen ? '✓' : '—'}
-												</td>
-												<td class="py-2 text-right">
-													<form
-														method="POST"
-														action="?/toggleRoom"
-												use:enhance={() => {
-														togglingRoom = room.id;
-														return async ({ result, update }) => {
-															togglingRoom = null;
-															if (result.type === 'success') toast.success(room.isActive ? 'Room deactivated' : 'Room activated');
-															else toast.error('Toggle failed');
-															await update();
-														};
-													}}
-													>
-														<input type="hidden" name="id" value={room.id} />
-														<input type="hidden" name="isActive" value={String(room.isActive)} />
-														<button
-															type="submit"
-															class={[
-																'rounded px-2 py-0.5 text-xs font-medium transition-colors',
-																room.isActive
-																	? 'bg-green-100 text-green-700 hover:bg-red-100 hover:text-red-700'
-																	: 'bg-gray-100 text-gray-500 hover:bg-green-100 hover:text-green-700'
-															].join(' ')}
-															disabled={togglingRoom === room.id}
-														>
-															{togglingRoom === room.id ? '…' : room.isActive ? 'Active' : 'Inactive'}
-														</button>
-													</form>
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						{:else}
-							<p class="text-muted-foreground mb-4 text-sm">No rooms yet.</p>
-						{/if}
-
-					<!-- Add room -->
-					{#if roomErrors[prop.id]}
-						<p class="text-destructive mb-2 text-xs">{roomErrors[prop.id]}</p>
-					{/if}
-					<form
-						method="POST"
-						action="?/addRoom"
-						use:enhance={() => {
-							addingRoom = prop.id;
-							roomErrors[prop.id] = '';
-							return async ({ result, update }) => {
-								addingRoom = null;
-								if (result.type === 'failure') {
-									roomErrors[prop.id] = (result.data?.error as string) ?? 'Error';
-								} else {
-									toast.success('Room added');
-									newRooms[prop.id] = { roomNumber: '', roomTypeId: '' };
-								}
-								await update({ reset: false });
-							};
-						}}
-						class="grid grid-cols-2 sm:grid-cols-3 gap-2"
-					>
-						<input type="hidden" name="propertyId" value={prop.id} />
-						<div class="flex flex-col gap-1">
-							<Label class="text-xs">Room #</Label>
-							<Input name="roomNumber" placeholder="33" bind:value={_room.roomNumber} class="h-8 w-20" required />
-						</div>
-						<div class="flex flex-col gap-1">
-							<Label class="text-xs">Type</Label>
-							<select
-								name="roomTypeId"
-								class="border-input bg-background h-8 rounded-md border px-2 text-sm"
-								bind:value={_room.roomTypeId}
-							>
-								<option value="">— none —</option>
-								{#each propRoomTypes as rt}
-									<option value={rt.id}>{rt.category} · {rt.name}</option>
-								{/each}
-							</select>
-						</div>
-					<div class="flex flex-col gap-1">
-						<Label class="text-xs">Bedrooms (BR)</Label>
-						<Input name="numRooms" type="number" min="1" placeholder="1" class="h-8 w-16" />
-					</div>
-					<div class="flex flex-col gap-1">
-						<Label class="text-xs">King (K)</Label>
-						<Input name="kingBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
-					</div>
-					<div class="flex flex-col gap-1">
-						<Label class="text-xs">Queen (Q)</Label>
-						<Input name="queenBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
-					</div>
-					<div class="flex flex-col gap-1">
-						<Label class="text-xs">Double (D)</Label>
-						<Input name="doubleBeds" type="number" min="0" placeholder="0" class="h-8 w-16" />
-					</div>
-					<div class="flex flex-col gap-1">
-						<Label class="text-xs">Extras</Label>
-						<div class="flex gap-2 items-center h-8">
-							<label class="flex items-center gap-1 text-xs cursor-pointer">
-								<input type="checkbox" name="hasKitchen" value="1" class="rounded" />
-								Kitchen
-							</label>
-							<label class="flex items-center gap-1 text-xs cursor-pointer">
-								<input type="checkbox" name="hasHideabed" value="1" class="rounded" />
-								Hideabed
-							</label>
-						</div>
-					</div>
-						<div class="flex flex-col gap-1 col-span-2 sm:col-span-3">
-							<Label class="text-xs">Configs (one per line, for dual-config rooms — e.g. "1Q Sleeping")</Label>
-						<textarea name="configs" rows="2"
-							placeholder={"Leave blank for single config\n1Q Sleeping\n1Q+1D Sleeping"}
-							class="border-input bg-background rounded-md border px-2 py-1 text-xs w-full resize-none"></textarea>
-						</div>
-						<Button type="submit" size="sm" class="h-8 col-span-2 sm:col-span-3" disabled={addingRoom === prop.id}>
-							{addingRoom === prop.id ? '…' : '+ Add room'}
-						</Button>
-						</form>
-					</div>
-				{/each}
-			</div>
-		</Tabs.Content>
-
-		<!-- ── Room Types ──────────────────────────────────────────────────── -->
-		<Tabs.Content value="roomtypes">
-			<div class="space-y-6">
-			{#each data.propertiesList as prop}
-				{@const propTypes = data.roomTypesList.filter((rt) => rt.propertyId === prop.id)}
-				{@const _rtype = newRoomTypes[prop.id]}
-					<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
-						<h2 class="mb-3 font-semibold">{prop.name}</h2>
-
-						{#if propTypes.length > 0}
-							<div class="mb-4 space-y-2">
-								{#each propTypes as rt}
-									{#if editingRoomType === rt.id}
-										<form method="POST" action="?/upsertRoomType"
-											use:enhance={() => {
-												return async ({ update }) => { editingRoomType = null; await update(); };
-											}}
-											class="flex items-end gap-2 flex-wrap rounded-md border p-2.5 bg-muted/20"
-										>
-											<input type="hidden" name="id" value={rt.id} />
-											<input type="hidden" name="propertyId" value={prop.id} />
-										<div class="flex flex-col gap-1">
-											<span class="text-xs text-muted-foreground">Name</span>
-											<input name="name" value={rt.name} required
-												class="border-input bg-background rounded border px-2 py-1 text-sm w-40" />
-										</div>
-									<div class="flex flex-col gap-1">
-										<span class="text-xs text-muted-foreground">Short Code</span>
-										<input name="category" value={rt.category} required maxlength="6"
-											class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono uppercase"
-											title="Internal code shown in the rate calendar grid (e.g. 1BD, 2BDK)" />
-									</div>
-							<div class="flex flex-col gap-1">
-										<span class="text-xs text-muted-foreground">Sort</span>
-										<input name="sortOrder" type="number" value={rt.sortOrder}
-											class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
-									</div>
-									<div class="flex flex-col gap-1">
-										<span class="text-xs text-muted-foreground">Default rate</span>
-											<div class="flex items-center gap-1">
-												<span class="text-sm text-muted-foreground">$</span>
-												<input name="defaultRateCents" type="number" min="0" step="1"
-													value={rt.defaultRateCents ? (rt.defaultRateCents / 100).toFixed(0) : ''}
-													placeholder="100"
-													class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono" />
-											</div>
-										</div>
-											<Button type="submit" size="sm" class="h-8">Save</Button>
-											<Button type="button" variant="ghost" size="sm" class="h-8"
-												onclick={() => { editingRoomType = null; }}>Cancel</Button>
-										</form>
-									{:else}
-									<div class="flex items-center gap-3 rounded-md border p-2.5 text-sm">
-										<span class="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{rt.category}</span>
-										<span class="flex-1 font-medium">{rt.name}</span>
-										{#if rt.defaultRateCents}
-											<span class="font-mono text-xs text-muted-foreground">${(rt.defaultRateCents / 100).toFixed(0)}/night</span>
-										{:else}
-											<span class="text-[10px] text-amber-600 font-medium">no default rate</span>
-										{/if}
-									<Button size="sm" variant="ghost" class="h-7 px-2 text-xs"
-											onclick={() => { editingRoomType = rt.id; }}>Edit</Button>
-										<Button type="button" variant="ghost" size="sm"
-											class="text-destructive h-7 px-2 text-xs"
-											disabled={deletingRoomType === rt.id}
-											onclick={() => { confirmDeleteRoomTypeId = rt.id; confirmDeleteRoomTypeName = rt.name; }}>
-											{deletingRoomType === rt.id ? '…' : 'Delete'}
-										</Button>
-										</div>
-									{/if}
-								{/each}
-							</div>
-						{/if}
-
-					<form method="POST" action="?/upsertRoomType"
-						use:enhance={() => {
-							addingRoomType = prop.id;
-							return async ({ result, update }) => {
-								addingRoomType = null;
-								if (result.type === 'success') {
-									toast.success('Room type added');
-									newRoomTypes[prop.id] = { name: '', category: '', sortOrder: '0', defaultRateCents: '' };
-								} else toast.error('Save failed');
-								await update();
-							};
-						}}
-						class="flex items-end gap-2 flex-wrap"
-					>
-							<input type="hidden" name="propertyId" value={prop.id} />
-						<div class="flex flex-col gap-1">
-							<span class="text-xs text-muted-foreground">Name</span>
-							<input name="name" placeholder="2 Bed + Kitchen" required
-								class="border-input bg-background rounded border px-2 py-1 text-sm w-40" />
-						</div>
-					<div class="flex flex-col gap-1">
-						<span class="text-xs text-muted-foreground">Short Code</span>
-						<input name="category" placeholder="2BDK" required maxlength="6"
-							class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono uppercase"
-							title="Internal code shown in the rate calendar grid (e.g. 1BD, 2BDK)" />
-					</div>
-						<div class="flex flex-col gap-1">
-							<span class="text-xs text-muted-foreground">Sort</span>
-						<input name="sortOrder" type="number" value="0"
-							class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
-					</div>
-					<div class="flex flex-col gap-1">
-						<span class="text-xs text-muted-foreground">Default rate</span>
-							<div class="flex items-center gap-1">
-								<span class="text-sm text-muted-foreground">$</span>
-								<input name="defaultRateCents" type="number" min="0" step="1"
-									placeholder="100"
-									class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono" />
-							</div>
-						</div>
-						<Button type="submit" size="sm" class="h-8" disabled={addingRoomType === prop.id}>
-							{addingRoomType === prop.id ? '…' : '+ Add type'}
-						</Button>
-						</form>
-					</div>
-				{/each}
-			</div>
-		</Tabs.Content>
-
-	
-		<!-- ── Channels ────────────────────────────────────────────────────── -->
-	<Tabs.Content value="channels">
-		<div class="space-y-6">
-
-		<!-- ── Channex Integration ──────────────────────────────────────── -->
-		<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
-			<div class="mb-3 flex items-start justify-between">
+	<!-- ── Content ──────────────────────────────────────────────────────────── -->
+	<main class="flex-1 overflow-y-auto">
+		<div class="max-w-2xl px-8 py-6">
+			{#if prop && activeSection === 'general'}
+				<PropertyGeneral {prop} />
+			{:else if prop && activeSection === 'policy'}
+				<PropertyPolicy {prop} />
+			{:else if prop && activeSection === 'booking'}
+				<PropertyBooking {prop} roomTypes={propRoomTypes} />
+			{:else if prop && activeSection === 'rooms'}
+				<PropertyRooms {prop} rooms={propRooms} roomTypes={propRoomTypes} />
+			{:else if prop && activeSection === 'taxes'}
+				<PropertyTaxes {prop} presets={propTaxes} />
+			{:else if prop && activeSection === 'channex'}
+				<PropertyChannex {prop} roomTypes={propRoomTypes} />
+			{:else if activeSection === 'channels'}
+				<Channels channels={data.channelsList} />
+			{:else if activeSection === 'email'}
 				<div>
-					<h2 class="font-semibold">Channex.io Channel Manager</h2>
-					<p class="text-sm text-muted-foreground mt-0.5">
-						Channex distributes your availability and rates to Booking.com, Expedia, Airbnb, Google Hotels, and more.
-						<a href="https://channex.io" target="_blank" rel="noopener" class="text-primary underline">channex.io</a>
+					<h2 class="mb-4 text-lg font-semibold">Email Notifications</h2>
+					<p class="text-muted-foreground mb-4 text-sm">
+						Configure email sending via Resend. Set the following in your
+						<code class="bg-muted rounded px-1">.env</code> file:
 					</p>
-				</div>
-			</div>
-
-			<div class="rounded-md bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800 mb-4">
-				<strong>Setup steps:</strong>
-				<ol class="list-decimal pl-5 mt-1 space-y-1 text-xs">
-					<li>Create a free account at <a href="https://channex.io" target="_blank" class="underline">channex.io</a></li>
-					<li>Create properties matching your motels, then room types and one rate plan ("Standard") per room type</li>
-					<li>Paste the Channex UUIDs below (find them in the Channex dashboard URL or API)</li>
-					<li>Add <code class="bg-amber-100 rounded px-1">CHANNEX_API_KEY</code> to your .env file</li>
-					<li>Register your webhook URL in Channex: <code class="bg-amber-100 rounded px-1 break-all">https://yourdomain.com/api/channex/webhook</code></li>
-					<li>Connect OTAs (Booking.com, Expedia) in the Channex dashboard — no code needed</li>
-				</ol>
-			</div>
-
-			<!-- Per-property Channex IDs -->
-			{#each data.propertiesList as prop}
-			<div class="mb-4 rounded-md border p-4">
-				<h3 class="font-medium text-sm mb-3">{prop.name}</h3>
-				<form method="POST" action="?/updateChannexProperty"
-					use:enhance={() => {
-						savingProperty = prop.id;
-						return async ({ result, update }) => {
-							savingProperty = null;
-							if (result.type === 'success') toast.success('Channex ID saved');
-							else toast.error('Save failed');
-							await update({ reset: false });
-						};
-					}}
-				>
-					<input type="hidden" name="id" value={prop.id} />
-					<div class="flex flex-col gap-1.5 mb-3">
-						<Label for="cx-prop-{prop.id}">Channex Property ID</Label>
-						<Input id="cx-prop-{prop.id}" name="channexPropertyId"
-							placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-							value={prop.channexPropertyId ?? ''}
-							class="font-mono text-xs" />
-					</div>
-					<Button type="submit" size="sm" disabled={savingProperty === prop.id}>
-						{savingProperty === prop.id ? 'Saving…' : 'Save'}
-					</Button>
-				</form>
-
-					<!-- Room type Channex IDs -->
-					<div class="mt-4 border-t pt-4">
-						<h4 class="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">Room Type Channex IDs</h4>
-						{#each data.roomTypesList.filter(rt => rt.propertyId === prop.id) as rt}
-							<form method="POST" action="?/updateRoomTypeChannex"
-								use:enhance={() => {
-									return async ({ update }) => { await update({ reset: false }); };
-								}}
-								class="flex items-end gap-2 flex-wrap mb-2"
-							>
-								<input type="hidden" name="id" value={rt.id} />
-							<div class="flex flex-col gap-1 flex-1 min-w-0">
-								<span class="text-xs text-muted-foreground">{rt.category}: {rt.name} — Room Type ID</span>
-								<Input name="channexRoomTypeId"
-									placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-									value={rt.channexRoomTypeId ?? ''}
-									class="font-mono text-xs h-8" />
+					<div class="space-y-4 text-sm">
+						<div class="rounded-md border p-4 space-y-2 font-mono text-xs">
+							<div><span class="font-semibold">RESEND_API_KEY</span>=re_xxxxxxxxxxxxxxxxxxxx</div>
+							<div>
+								<span class="font-semibold">RESEND_FROM_EMAIL</span>=reservations@yourmotel.com
+								<span class="text-muted-foreground ml-2">(must be a verified domain in Resend)</span>
 							</div>
-							<div class="flex flex-col gap-1 flex-1 min-w-0">
-								<span class="text-xs text-muted-foreground">Rate Plan ID</span>
-								<Input name="channexRatePlanId"
-										placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-										value={rt.channexRatePlanId ?? ''}
-										class="font-mono text-xs h-8" />
-								</div>
-								<Button type="submit" size="sm" class="h-8 shrink-0">Save</Button>
-							</form>
-						{/each}
-					</div>
-				</div>
-			{/each}
-		</div>
-
-		<!-- ── Booking Channels ──────────────────────────────────────────── -->
-		<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
-			<h2 class="mb-3 font-semibold">Booking Channels</h2>
-
-			<!-- Channel list -->
-			{#if data.channelsList.length > 0}
-				<div class="mb-4 space-y-2">
-					{#each data.channelsList as ch}
-						<div class="flex items-center gap-3 rounded-md border p-2.5 text-sm">
-							<span class="flex-1 font-medium">{ch.name}</span>
-							{#if ch.isOta}
-								<span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 uppercase">OTA</span>
-							{/if}
-							<span class="text-muted-foreground text-xs">sort: {ch.sortOrder}</span>
-							<span class={ch.isActive ? 'text-green-600 text-xs' : 'text-muted-foreground text-xs'}>
-								{ch.isActive ? 'Active' : 'Inactive'}
-							</span>
+							<div>
+								<span class="font-semibold">RESEND_OPERATOR_EMAIL</span>=owner@yourmotel.com
+								<span class="text-muted-foreground ml-2">(optional — new online booking alerts)</span>
+							</div>
 						</div>
-					{/each}
+						<div class="rounded-md border p-4">
+							<p class="mb-2 font-medium">When emails are sent</p>
+							<ul class="text-muted-foreground list-disc pl-5 space-y-1">
+								<li><strong>Booking confirmation</strong> — sent to guest when a booking is created</li>
+								<li><strong>Online booking alert</strong> — sent to operator when a guest books online</li>
+								<li><strong>Cancellation notice</strong> — sent to guest when a booking is cancelled</li>
+							</ul>
+						</div>
+						<p class="text-muted-foreground text-xs">
+							If <code class="bg-muted rounded px-1">RESEND_API_KEY</code> is blank, email is silently
+							disabled. Get a free key at
+							<a href="https://resend.com" target="_blank" class="underline text-primary">resend.com</a>.
+						</p>
+					</div>
 				</div>
 			{/if}
-
-			<!-- Add channel -->
-			<form
-				method="POST"
-				action="?/upsertChannel"
-		use:enhance={() => {
-				addingChannel = true;
-				return async ({ result, update }) => {
-					addingChannel = false;
-					if (result.type === 'success') {
-						toast.success('Channel added');
-						newChannel = { name: '', isOta: false, sortOrder: '10' };
-					} else toast.error('Save failed');
-					await update();
-					};
-				}}
-				class="flex items-end gap-2 flex-wrap"
-			>
-				<div class="flex flex-col gap-1">
-					<Label class="text-xs">Name</Label>
-					<Input name="name" placeholder="e.g. VRBO" bind:value={newChannel.name} class="h-8 w-32" required />
-				</div>
-				<div class="flex flex-col gap-1">
-					<Label class="text-xs">Sort order</Label>
-					<Input name="sortOrder" type="number" bind:value={newChannel.sortOrder} class="h-8 w-16" />
-				</div>
-				<div class="flex items-center gap-1.5 pb-0.5">
-					<input
-						type="checkbox"
-						id="isOta"
-						name="isOta"
-						bind:checked={newChannel.isOta}
-						value="true"
-						class="h-4 w-4"
-					/>
-					<Label for="isOta" class="text-sm cursor-pointer">OTA channel</Label>
-					<input type="hidden" name="isOta" value={String(newChannel.isOta)} />
-				</div>
-				<Button type="submit" size="sm" class="h-8" disabled={addingChannel}>
-					{addingChannel ? '…' : '+ Add channel'}
-				</Button>
-			</form>
 		</div>
-
-		</div>
-	</Tabs.Content>
-
-	<!-- ── Email Configuration ─────────────────────────────────────────── -->
-	<Tabs.Content value="email">
-		<div class="bg-card border-border rounded-lg border p-5 shadow-sm">
-			<h2 class="mb-1 font-semibold">Email Notifications</h2>
-			<p class="text-muted-foreground mb-4 text-sm">
-				Configure email sending via Resend. Set <code class="bg-muted rounded px-1">RESEND_API_KEY</code>,
-				<code class="bg-muted rounded px-1">RESEND_FROM_EMAIL</code>, and optionally
-				<code class="bg-muted rounded px-1">RESEND_OPERATOR_EMAIL</code> in your <code class="bg-muted rounded px-1">.env</code> file.
-			</p>
-			<div class="space-y-4 text-sm">
-				<div class="rounded-md border p-4">
-					<h3 class="mb-2 font-medium">When emails are sent</h3>
-					<ul class="text-muted-foreground list-disc pl-5 space-y-1">
-						<li><strong>Booking confirmation</strong> — sent to guest when a new booking is created (if guest email is on file)</li>
-						<li><strong>Online booking alert</strong> — sent to <code class="bg-muted rounded px-1">RESEND_OPERATOR_EMAIL</code> when a guest books online and room assignment is needed</li>
-						<li><strong>Cancellation notice</strong> — sent to guest when a booking is cancelled</li>
-					</ul>
-				</div>
-				<div class="rounded-md border p-4">
-					<h3 class="mb-2 font-medium">Environment variables</h3>
-					<div class="space-y-2 font-mono text-xs">
-						<div><span class="font-semibold">RESEND_API_KEY</span>=re_xxxxxxxxxxxxxxxxxxxx</div>
-						<div><span class="font-semibold">RESEND_FROM_EMAIL</span>=reservations@yourmotel.com <span class="text-muted-foreground">(must be verified domain in Resend)</span></div>
-						<div><span class="font-semibold">RESEND_OPERATOR_EMAIL</span>=owner@yourmotel.com <span class="text-muted-foreground">(optional — receives new online booking alerts)</span></div>
-					</div>
-				</div>
-				<p class="text-muted-foreground text-xs">
-					If <code class="bg-muted rounded px-1">RESEND_API_KEY</code> is blank, email sending is silently disabled — no errors will occur.
-					Get a free API key at <a href="https://resend.com" target="_blank" class="underline">resend.com</a>.
-				</p>
-			</div>
-		</div>
-	</Tabs.Content>
-	</Tabs.Root>
+	</main>
 </div>
 
-<!-- ── Delete Room Type confirmation ───────────────────────────────────── -->
-<AlertDialog.Root open={!!confirmDeleteRoomTypeId} onOpenChange={(o) => { if (!o) confirmDeleteRoomTypeId = null; }}>
-	<AlertDialog.Content>
-		<AlertDialog.Header>
-			<AlertDialog.Title>Delete room type?</AlertDialog.Title>
-			<AlertDialog.Description>
-				<strong>{confirmDeleteRoomTypeName}</strong> will be permanently deleted. Any rooms assigned to this type will have their type cleared. This cannot be undone.
-			</AlertDialog.Description>
-		</AlertDialog.Header>
-		<AlertDialog.Footer>
-			<AlertDialog.Cancel onclick={() => confirmDeleteRoomTypeId = null}>Cancel</AlertDialog.Cancel>
-			<form method="POST" action="?/deleteRoomType"
-				use:enhance={() => {
-					deletingRoomType = confirmDeleteRoomTypeId;
-					confirmDeleteRoomTypeId = null;
-					return async ({ result, update }) => {
-						deletingRoomType = null;
-						if (result.type === 'success') toast.success('Room type deleted');
-						else toast.error('Delete failed');
-						await update();
-					};
-				}}
-			>
-				<input type="hidden" name="id" value={confirmDeleteRoomTypeId ?? ''} />
-				<AlertDialog.Action type="submit">Delete</AlertDialog.Action>
-			</form>
-		</AlertDialog.Footer>
-	</AlertDialog.Content>
-</AlertDialog.Root>
+

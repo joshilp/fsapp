@@ -45,18 +45,14 @@ export const load: PageServerLoad = async ({ locals }) => {
 };
 
 export const actions: Actions = {
-	// Update property details
-	updateProperty: async ({ request, locals }) => {
+	// ── General: name, address, contact, logo, check-in/out ──────────────────
+	updatePropertyGeneral: async ({ request, locals }) => {
 		if (!locals.user) return fail(401, { error: 'Unauthorized' });
 		const fd = await request.formData();
 		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
-
 		const id = g('id');
 		if (!id) return fail(400, { error: 'Missing property ID' });
-
-		await db
-			.update(properties)
-			.set({
+		await db.update(properties).set({
 			name: g('name') ?? undefined,
 			address: g('address') ?? undefined,
 			city: g('city') ?? undefined,
@@ -66,22 +62,77 @@ export const actions: Actions = {
 			gstNumber: g('gstNumber'),
 			logoUrl: g('logoUrl'),
 			checkinTime: g('checkinTime') ?? undefined,
-				checkoutTime: g('checkoutTime') ?? undefined,
-				policyText: g('policyText'),
-				depositNights: parseInt(g('depositNights') ?? '1') || 1,
-				cancellationFeeCents: Math.round((parseFloat(g('cancellationFeeDollars') ?? '25') || 25) * 100),
-				noRefundDays: parseInt(g('noRefundDays') ?? '30') || 30,
-		depositCalcMethod: g('depositCalcMethod') ?? 'first_night',
+			checkoutTime: g('checkoutTime') ?? undefined,
+		}).where(eq(properties.id, id));
+		return { success: true };
+	},
+
+	// ── Policy: cancellation, deposit, policy text ────────────────────────────
+	updatePropertyPolicy: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		if (!id) return fail(400, { error: 'Missing property ID' });
+		await db.update(properties).set({
+			policyText: g('policyText'),
+			depositNights: parseInt(g('depositNights') ?? '1') || 1,
+			cancellationFeeCents: Math.round((parseFloat(g('cancellationFeeDollars') ?? '25') || 25) * 100),
+			noRefundDays: parseInt(g('noRefundDays') ?? '30') || 30,
+			depositCalcMethod: g('depositCalcMethod') ?? 'first_night',
+			depositPercent: parseInt(g('depositPercent') ?? '20') || 20,
+			depositFlatCents: Math.round((parseFloat(g('depositFlatDollars') ?? '0') || 0) * 100),
+		}).where(eq(properties.id, id));
+		return { success: true };
+	},
+
+	// ── Booking page: online booking settings ────────────────────────────────
+	updatePropertyBooking: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		if (!id) return fail(400, { error: 'Missing property ID' });
+		await db.update(properties).set({
+			bookingEnabled: (fd.get('bookingEnabled') as string) === '1',
+			bookingDescription: g('bookingDescription'),
+			heroImageUrl: g('heroImageUrl'),
+			accentColour: g('accentColour') || g('accentColourText') || null,
+		}).where(eq(properties.id, id));
+		return { success: true };
+	},
+
+	// Legacy full-update (kept for compatibility) ─────────────────────────────
+	updateProperty: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		if (!id) return fail(400, { error: 'Missing property ID' });
+		await db.update(properties).set({
+			name: g('name') ?? undefined,
+			address: g('address') ?? undefined,
+			city: g('city') ?? undefined,
+			province: g('province') ?? undefined,
+			postalCode: g('postalCode'),
+			phone: g('phone'),
+			gstNumber: g('gstNumber'),
+			logoUrl: g('logoUrl'),
+			checkinTime: g('checkinTime') ?? undefined,
+			checkoutTime: g('checkoutTime') ?? undefined,
+			policyText: g('policyText'),
+			depositNights: parseInt(g('depositNights') ?? '1') || 1,
+			cancellationFeeCents: Math.round((parseFloat(g('cancellationFeeDollars') ?? '25') || 25) * 100),
+			noRefundDays: parseInt(g('noRefundDays') ?? '30') || 30,
+			depositCalcMethod: g('depositCalcMethod') ?? 'first_night',
 			depositPercent: parseInt(g('depositPercent') ?? '20') || 20,
 			depositFlatCents: Math.round((parseFloat(g('depositFlatDollars') ?? '0') || 0) * 100),
 			channexPropertyId: g('channexPropertyId'),
 			bookingEnabled: (fd.get('bookingEnabled') as string) === '1',
 			bookingDescription: g('bookingDescription'),
 			heroImageUrl: g('heroImageUrl'),
-			accentColour: g('accentColour') || g('accentColourText') || null
-		})
-		.where(eq(properties.id, id));
-
+			accentColour: g('accentColour') || g('accentColourText') || null,
+		}).where(eq(properties.id, id));
 		return { success: true };
 	},
 
