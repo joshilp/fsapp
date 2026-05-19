@@ -37,6 +37,8 @@
 		pendingAssignBookingId?: string;
 		/** Called after a successful room assignment so parent can refresh + clear assign mode */
 		onRoomAssigned?: () => void;
+		/** When another grid is in assign mode, block new bookings on this grid */
+		blockNewBookings?: boolean;
 	};
 
 	let {
@@ -49,6 +51,7 @@
 		initialOpenId,
 		pendingAssignBookingId,
 		onRoomAssigned,
+		blockNewBookings = false,
 	}: Props = $props();
 
 	const { startDate, numDays, rooms: allRooms, propertyName, propertyId } = $derived(grid);
@@ -363,6 +366,8 @@
 			assignRoom(roomId);
 			return;
 		}
+		// Another property's grid is in assign mode — block new bookings to avoid confusion
+		if (blockNewBookings) return;
 		const room = allRooms.find((r) => r.id === roomId);
 		if (!room) return;
 		cardNewBooking = {
@@ -953,6 +958,7 @@
 	{currentUserId}
 	{today}
 	{propertyName}
+	{propertyId}
 />
 
 <!-- Detail dialog (kept for OTA import flow until fully migrated) -->

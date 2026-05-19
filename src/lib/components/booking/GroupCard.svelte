@@ -173,7 +173,7 @@
 
 	function initNew(rooms: NonNullable<typeof newRooms>) {
 		channelId = defChannel('phone');
-		fetchTaxPresets();
+		fetchTaxPresets(rooms[0]?.propertyId);
 		roomSpecs = rooms.map(r => ({
 			roomId: r.roomId,
 			roomNumber: r.roomNumber,
@@ -252,14 +252,15 @@
 				}))
 			};
 			});
-			fetchTaxPresets();
+			fetchTaxPresets(roomSpecs[0]?.propertyId);
 		} catch { saveError = 'Could not load group.'; }
 		finally { loading = false; }
 	}
 
-	async function fetchTaxPresets() {
+	async function fetchTaxPresets(propertyId?: string) {
 		try {
-			const r = await fetch('/api/tax-presets');
+			const url = propertyId ? `/api/tax-presets?propertyId=${encodeURIComponent(propertyId)}` : '/api/tax-presets';
+			const r = await fetch(url);
 			if (r.ok) taxPresets = await r.json();
 		} catch { /* ignore */ }
 	}

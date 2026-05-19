@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import { page } from '$app/stores';
-	import { invalidateAll } from '$app/navigation';
+	import { invalidateAll, goto } from '$app/navigation';
 	import BookingGrid from '$lib/components/booking/BookingGrid.svelte';
 	import BookingFilters from '$lib/components/booking/BookingFilters.svelte';
 	import BookingCard from '$lib/components/booking/BookingCard.svelte';
@@ -71,6 +71,23 @@
 		sharedCheckOut = b.checkOutDate;
 		pendingAssign  = b;
 		unassignedOpen = false;
+
+		// Fix 3: auto-switch focus mode to the correct property
+		if (layoutMode === 'focus') {
+			if (b.propertyId === data.falcon?.propertyId) focusProp = 'falcon';
+			else if (b.propertyId === data.spanish?.propertyId) focusProp = 'spanish';
+		}
+
+		// Fix 4: navigate to the right date window if check-in is out of view
+		const windowEnd = data.startDate
+			? (() => { const d = new Date(data.startDate + 'T12:00:00'); d.setDate(d.getDate() + data.numDays - 1); return d.toISOString().slice(0, 10); })()
+			: '';
+		if (data.startDate && (b.checkInDate < data.startDate || b.checkInDate > windowEnd)) {
+			// Navigate to the month containing check-in
+			const d = new Date(b.checkInDate + 'T12:00:00');
+			const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+			goto(`/booking?start=${start}`);
+		}
 	}
 
 	function cancelAssign() {
@@ -188,26 +205,28 @@
 						onDrawSelectionsChange={(s) => { falconSelections = s; }}
 						onGroupBook={openGroupCard}
 						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
-						pendingAssignBookingId={pendingAssign?.propertyId === data.falcon.propertyId ? pendingAssign?.id : undefined}
-						{onRoomAssigned}
-					/>
-				</div>
-				<div class="min-w-0 flex-1">
-					<BookingGrid
-						grid={data.spanish}
-						today={data.today}
-						channels={data.channels}
-						users={data.users}
-						currentUserId={data.currentUserId}
-						bind:filterCheckIn={sharedCheckIn}
-						bind:filterCheckOut={sharedCheckOut}
-						bind:drawMode={sharedDrawMode}
-						onDrawSelectionsChange={(s) => { spanishSelections = s; }}
-						onGroupBook={openGroupCard}
-						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
-						pendingAssignBookingId={pendingAssign?.propertyId === data.spanish.propertyId ? pendingAssign?.id : undefined}
-						{onRoomAssigned}
-					/>
+					pendingAssignBookingId={pendingAssign?.propertyId === data.falcon.propertyId ? pendingAssign?.id : undefined}
+					blockNewBookings={!!pendingAssign && pendingAssign.propertyId !== data.falcon.propertyId}
+					{onRoomAssigned}
+				/>
+			</div>
+			<div class="min-w-0 flex-1">
+				<BookingGrid
+					grid={data.spanish}
+					today={data.today}
+					channels={data.channels}
+					users={data.users}
+					currentUserId={data.currentUserId}
+					bind:filterCheckIn={sharedCheckIn}
+					bind:filterCheckOut={sharedCheckOut}
+					bind:drawMode={sharedDrawMode}
+					onDrawSelectionsChange={(s) => { spanishSelections = s; }}
+					onGroupBook={openGroupCard}
+					initialOpenId={$page.url.searchParams.get('open') ?? undefined}
+					pendingAssignBookingId={pendingAssign?.propertyId === data.spanish.propertyId ? pendingAssign?.id : undefined}
+					blockNewBookings={!!pendingAssign && pendingAssign.propertyId !== data.spanish.propertyId}
+					{onRoomAssigned}
+				/>
 				</div>
 			</div>
 
@@ -246,25 +265,27 @@
 						onDrawSelectionsChange={(s) => { falconSelections = s; }}
 						onGroupBook={openGroupCard}
 						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
-						pendingAssignBookingId={pendingAssign?.propertyId === data.falcon.propertyId ? pendingAssign?.id : undefined}
-						{onRoomAssigned}
-					/>
-				{:else}
-					<BookingGrid
-						grid={data.spanish}
-						today={data.today}
-						channels={data.channels}
-						users={data.users}
-						currentUserId={data.currentUserId}
-						bind:filterCheckIn={sharedCheckIn}
-						bind:filterCheckOut={sharedCheckOut}
-						bind:drawMode={sharedDrawMode}
-						onDrawSelectionsChange={(s) => { spanishSelections = s; }}
-						onGroupBook={openGroupCard}
-						initialOpenId={$page.url.searchParams.get('open') ?? undefined}
-						pendingAssignBookingId={pendingAssign?.propertyId === data.spanish.propertyId ? pendingAssign?.id : undefined}
-						{onRoomAssigned}
-					/>
+					pendingAssignBookingId={pendingAssign?.propertyId === data.falcon.propertyId ? pendingAssign?.id : undefined}
+					blockNewBookings={!!pendingAssign && pendingAssign.propertyId !== data.falcon.propertyId}
+					{onRoomAssigned}
+				/>
+			{:else}
+				<BookingGrid
+					grid={data.spanish}
+					today={data.today}
+					channels={data.channels}
+					users={data.users}
+					currentUserId={data.currentUserId}
+					bind:filterCheckIn={sharedCheckIn}
+					bind:filterCheckOut={sharedCheckOut}
+					bind:drawMode={sharedDrawMode}
+					onDrawSelectionsChange={(s) => { spanishSelections = s; }}
+					onGroupBook={openGroupCard}
+					initialOpenId={$page.url.searchParams.get('open') ?? undefined}
+					pendingAssignBookingId={pendingAssign?.propertyId === data.spanish.propertyId ? pendingAssign?.id : undefined}
+					blockNewBookings={!!pendingAssign && pendingAssign.propertyId !== data.spanish.propertyId}
+					{onRoomAssigned}
+				/>
 				{/if}
 			</div>
 		{/if}

@@ -53,9 +53,10 @@
 		currentUserId: string;
 		today: string;
 		propertyName?: string;
+		propertyId?: string;
 	};
 
-	let { open = $bindable(false), newBooking, groupRooms, bookingId, channels, users, currentUserId, today, propertyName }: Props = $props();
+	let { open = $bindable(false), newBooking, groupRooms, bookingId, channels, users, currentUserId, today, propertyName, propertyId: propertyIdProp }: Props = $props();
 
 	// ── UI state ──────────────────────────────────────────────────────────────
 	let loading   = $state(false);
@@ -421,6 +422,7 @@
 	function initGroup(gr: { roomId: string; roomNumber: string; checkIn: string; checkOut: string; roomConfigs: string[] }[]) {
 		if (!gr.length) return;
 		const first = gr[0];
+		propId = propertyIdProp ?? '';
 		propName = propertyName ?? '';
 		roomId_ = first.roomId; roomNumber_ = first.roomNumber;
 		roomConfigs_ = first.roomConfigs; selConfig = first.roomConfigs[0] ?? '';
