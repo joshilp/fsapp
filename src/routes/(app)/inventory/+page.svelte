@@ -50,6 +50,23 @@
 	function navUrl(fromDate: string, prop?: string) {
 		return `/inventory?from=${fromDate}&prop=${prop ?? activeProp}`;
 	}
+	function navTo(fromDate: string, prop?: string) {
+		editRange = null;
+		goto(navUrl(fromDate, prop));
+	}
+
+	// ─── Nav label ─────────────────────────────────────────────────────────────
+	const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+	const navLabel = $derived.by(() => {
+		const sd = new Date(data.from + 'T12:00:00');
+		const ed = new Date(data.dates[data.dates.length - 1] + 'T12:00:00');
+		if (sd.getDate() === 1 && sd.getMonth() === ed.getMonth() && sd.getFullYear() === ed.getFullYear()) {
+			return `${MONTHS[sd.getMonth()]} ${sd.getFullYear()}`;
+		}
+		const fmt = (d: Date) => d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+		if (sd.getFullYear() === ed.getFullYear()) return `${fmt(sd)} – ${fmt(ed)}, ${ed.getFullYear()}`;
+		return `${fmt(sd)}, ${sd.getFullYear()} – ${fmt(ed)}, ${ed.getFullYear()}`;
+	});
 
 	// ─── Drag-to-book / mode ─────────────────────────────────────────────────
 	const dragSel = new DragSelect();
@@ -676,24 +693,29 @@
 
 		<!-- Date navigation -->
 		<div class="flex items-center">
-			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setMonth(d.getMonth() - 1); d.setDate(1); goto(navUrl(d.toISOString().slice(0, 10))); }}
+			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setMonth(d.getMonth() - 1); d.setDate(1); navTo(d.toISOString().slice(0, 10)); }}
 				class="px-1.5 py-1 hover:bg-muted rounded text-muted-foreground text-sm" title="Previous month">‹‹</button>
-			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setDate(d.getDate() - 7); goto(navUrl(d.toISOString().slice(0, 10))); }}
+			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setDate(d.getDate() - 7); navTo(d.toISOString().slice(0, 10)); }}
 				class="px-1.5 py-1 hover:bg-muted rounded text-sm" title="Previous week">‹</button>
+
+			<span class="min-w-36 text-center text-xs font-medium px-2 select-none">{navLabel}</span>
+
+			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setDate(d.getDate() + 7); navTo(d.toISOString().slice(0, 10)); }}
+				class="px-1.5 py-1 hover:bg-muted rounded text-sm" title="Next week">›</button>
+			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(1); navTo(d.toISOString().slice(0, 10)); }}
+				class="px-1.5 py-1 hover:bg-muted rounded text-muted-foreground text-sm" title="Next month">››</button>
 
 			<input type="month"
 				value={data.from.slice(0, 7)}
-				onchange={(e) => { const v = (e.target as HTMLInputElement).value; if (v) goto(navUrl(v + '-01', activeProp)); }}
-				class="border-0 bg-transparent text-xs text-foreground font-medium font-mono cursor-pointer focus:outline-none hover:text-foreground px-2 py-1 min-w-28 text-center"
+				onchange={(e) => { const v = (e.target as HTMLInputElement).value; if (v) navTo(v + '-01', activeProp); }}
+				class="opacity-0 w-0 absolute pointer-events-none"
+				id="inv-month-jump"
 				title="Jump to month" />
-
-			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setDate(d.getDate() + 7); goto(navUrl(d.toISOString().slice(0, 10))); }}
-				class="px-1.5 py-1 hover:bg-muted rounded text-sm" title="Next week">›</button>
-			<button onclick={() => { const d = new Date(data.from + 'T12:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(1); goto(navUrl(d.toISOString().slice(0, 10))); }}
-				class="px-1.5 py-1 hover:bg-muted rounded text-muted-foreground text-sm" title="Next month">››</button>
+			<label for="inv-month-jump"
+				class="ml-1 px-1.5 py-1 hover:bg-muted rounded text-muted-foreground cursor-pointer text-xs" title="Jump to month">⌕</label>
 		</div>
-		{#if data.from > today.slice(0, 7) + '-01' || data.from < today.slice(0, 7) + '-01'}
-			<button onclick={() => { const d = new Date(); goto(navUrl(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`)); }}
+		{#if data.from.slice(0, 7) !== `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`}
+			<button onclick={() => { const d = new Date(); navTo(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`); }}
 				class="rounded border border-input px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors">Today</button>
 		{/if}
 
