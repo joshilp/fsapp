@@ -48,6 +48,34 @@ export async function bookAction(request: Request) {
 	});
 	if (!rt) return fail(400, { error: 'Invalid room type selection.' });
 
+	// ── Min-night enforcement ─────────────────────────────────────────────────
+	// Find any active rate season overlapping the stay that has a minNights > nights.
+	const nights = Math.round(
+		(new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000
+	);
+	const { rateSeasons, rateTiers } = await import('$lib/server/db/schema');
+	const overlappingSeasons = await db.query.rateSeasons.findMany({
+		where: and(
+			eq(rateSeasons.propertyId, propertyId),
+			lt(rateSeasons.startDate, checkOut),
+			gt(rateSeasons.endDate, checkIn)
+		),
+		columns: { id: true, name: true },
+		with: {
+			tiers: {
+				where: and(eq(rateTiers.roomTypeId, roomTypeId)),
+				columns: { minNights: true }
+			}
+		}
+	});
+	for (const season of overlappingSeasons) {
+		for (const tier of season.tiers) {
+			if (tier.minNights && tier.minNights > 1 && nights < tier.minNights) {
+				return fail(400, { error: `"${season.name}" requires a minimum ${tier.minNights}-night stay.` });
+			}
+		}
+	}
+
 	// ── Availability check (SQLite serialises all writes, so this is safe) ──────
 	// Two callers can't both pass this check and both insert — the second would
 	// see the first's row in the conflict query and be blocked, or the publicToken

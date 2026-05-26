@@ -1,6 +1,4 @@
 <script lang="ts">
-	import '../../layout.css';
-
 	let { children }: { children: import('svelte').Snippet } = $props();
 </script>
 

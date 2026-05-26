@@ -10,7 +10,7 @@ export const load: PageServerLoad = async ({ params }) => {
 	const booking = await db.query.bookings.findFirst({
 		where: eq(bookings.publicToken, token),
 		with: {
-			property: { columns: { name: true, address: true, city: true, province: true, phone: true, checkinTime: true, checkoutTime: true } },
+			property: { columns: { name: true, address: true, city: true, province: true, phone: true, checkinTime: true, checkoutTime: true, accentColour: true, logoUrl: true } },
 			guest: { columns: { name: true, email: true, phone: true } },
 			requestedRoomType: { columns: { name: true, category: true } }
 		},

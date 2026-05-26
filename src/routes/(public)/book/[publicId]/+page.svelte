@@ -23,6 +23,10 @@
 	let checkOut = $state(advanceDay(data.today));
 	let step1Error = $state('');
 
+	// If a room type was pre-selected, start on the dates step but note it
+	// so we skip room selection after dates are confirmed.
+	const deepLinked = !!data.preselectedRoomTypeId;
+
 	const nights = $derived(
 		Math.max(0, Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000))
 	);
@@ -32,7 +36,7 @@
 	}
 
 	// ─── Step 2: Room Type ─────────────────────────────────────────────────────
-	let selectedTypeId      = $state('');
+	let selectedTypeId      = $state(data.preselectedRoomTypeId ?? '');
 	let availableTypes      = $state<AvailableRoomType[]>([]);
 	let availabilityLoading = $state(false);
 	let availabilityError   = $state('');
@@ -62,9 +66,15 @@
 
 	function goToStep2() {
 		if (!validateStep1()) return;
-		selectedTypeId = '';
-		step = 2;
-		loadAvailability();
+		if (deepLinked) {
+			// Pre-selected room type — skip room picker, go straight to confirm
+			step = 3;
+			fetchRate();
+		} else {
+			selectedTypeId = '';
+			step = 2;
+			loadAvailability();
+		}
 	}
 
 	function bedLabel(rt: AvailableRoomType): string {
@@ -286,12 +296,12 @@
 					</button>
 				{/if}
 
-			<!-- ── Step 3: Guest Details + Confirm ────────────────────────────── -->
-			{:else if step === 3}
-				<div class="flex items-center justify-between mb-5">
-					<h2 class="text-lg font-semibold text-stone-900">Your details</h2>
-					<button onclick={() => { step = 2; }} class="text-sm text-stone-400 hover:text-stone-600">← Back</button>
-				</div>
+		<!-- ── Step 3: Guest Details + Confirm ────────────────────────────── -->
+		{:else if step === 3}
+			<div class="flex items-center justify-between mb-5">
+				<h2 class="text-lg font-semibold text-stone-900">Your details</h2>
+				<button onclick={() => { step = deepLinked ? 1 : 2; }} class="text-sm text-stone-400 hover:text-stone-600">← Back</button>
+			</div>
 
 				<!-- Mini summary -->
 				{#if selectedType}

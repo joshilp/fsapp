@@ -17,6 +17,8 @@
 
 	let { prop, roomTypes }: { prop: Prop; roomTypes: RoomType[] } = $props();
 	let saving = $state(false);
+	let copied   = $state(false);
+	let copiedRt = $state('');
 </script>
 
 <h2 class="mb-5 text-lg font-semibold">Booking Page</h2>
@@ -77,17 +79,45 @@
 
 <!-- Booking URL & IDs (read-only) -->
 <div class="mt-8 pt-6 border-t border-border max-w-lg">
-	<p class="mb-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Reference IDs</p>
+	<p class="mb-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Booking links</p>
 	{#if prop.publicId}
-		<div class="mb-3 flex flex-col gap-1">
-			<Label class="text-xs text-muted-foreground">Booking URL</Label>
+		<div class="mb-4 flex flex-col gap-1.5">
+			<Label class="text-xs text-muted-foreground">Direct booking URL — share this or embed on your website</Label>
 			<div class="flex items-center gap-2">
-				<code class="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono break-all">/book/{prop.publicId}</code>
+				<code class="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono break-all select-all">{typeof window !== 'undefined' ? window.location.origin : ''}/book/{prop.publicId}</code>
+				<button type="button"
+					onclick={async () => {
+						await navigator.clipboard.writeText(window.location.origin + '/book/' + prop.publicId);
+						copied = true; setTimeout(() => copied = false, 2000);
+					}}
+					class="rounded border border-input px-2.5 py-1.5 text-xs hover:bg-muted shrink-0">
+					{copied ? '✓ Copied' : 'Copy'}
+				</button>
 				<a href="/book/{prop.publicId}" target="_blank"
 					class="text-xs text-primary hover:underline shrink-0">Preview ↗</a>
 			</div>
+			<div class="mt-1 space-y-1">
+				{#each roomTypes as rt}
+					<div class="flex items-center gap-2 text-[11px] text-muted-foreground">
+						<span class="truncate">↳ Book <strong>{rt.name}</strong> directly:</span>
+						<code class="flex-1 rounded bg-muted px-2 py-0.5 font-mono text-[10px] truncate select-all">/book/{prop.publicId}?roomTypeId={rt.id}</code>
+						<button type="button"
+							onclick={async () => {
+								await navigator.clipboard.writeText(window.location.origin + '/book/' + prop.publicId + '?roomTypeId=' + rt.id);
+								copiedRt = rt.id; setTimeout(() => copiedRt = '', 2000);
+							}}
+							class="rounded border border-input px-2 py-0.5 text-[10px] hover:bg-muted shrink-0">
+							{copiedRt === rt.id ? '✓' : 'Copy'}
+						</button>
+					</div>
+				{/each}
+			</div>
 		</div>
+	{:else}
+		<p class="text-xs text-muted-foreground mb-4">No public ID assigned yet. Contact support to activate online bookings.</p>
 	{/if}
+
+	<p class="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide mt-4">Reference IDs</p>
 	<div class="flex flex-col gap-1 mb-2">
 		<Label class="text-xs text-muted-foreground">Property ID <span class="text-[10px]">(for TEST_PROPERTY_ID)</span></Label>
 		<code class="rounded bg-muted px-3 py-1.5 text-xs font-mono break-all select-all">{prop.id}</code>
