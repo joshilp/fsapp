@@ -141,24 +141,25 @@
 	<title>Book a Room — {property.name}</title>
 </svelte:head>
 
-<!-- Property hero header -->
-<div class="relative w-full overflow-hidden" style="background-color: {accent}">
-	{#if property.heroImageUrl}
-		<img src={property.heroImageUrl} alt={property.name} class="absolute inset-0 w-full h-full object-cover opacity-30" />
-	{/if}
-	<div class="relative z-10 mx-auto max-w-2xl px-4 py-10 text-center">
+<!-- Property header — white bar with accent top-line -->
+<div class="w-full border-b border-border bg-white" style="border-top: 3px solid {accent}">
+	<div class="mx-auto max-w-2xl px-4 py-4 flex items-center gap-3">
 		{#if property.logoUrl}
-			<img src={property.logoUrl} alt={property.name} class="mx-auto mb-3 h-16 w-auto object-contain drop-shadow" />
+			<img src={property.logoUrl} alt={property.name} class="h-10 w-auto max-w-[130px] object-contain" />
 		{:else}
-			<p class="text-2xl font-bold text-white drop-shadow mb-1">{property.name}</p>
+			<span class="text-base font-bold text-foreground">{property.name}</span>
 		{/if}
+		<div class="flex-1 min-w-0">
+			{#if property.logoUrl}
+				<p class="text-sm font-semibold text-foreground leading-tight truncate">{property.name}</p>
+			{/if}
+			{#if property.city || property.province}
+				<p class="text-xs text-muted-foreground">{[property.city, property.province].filter(Boolean).join(', ')}{#if property.phone} · <a href="tel:{property.phone}" class="hover:underline">{property.phone}</a>{/if}</p>
+			{/if}
+		</div>
 		{#if property.bookingDescription}
-			<p class="text-white/90 text-sm mt-2 max-w-md mx-auto">{property.bookingDescription}</p>
+			<p class="hidden sm:block text-xs text-muted-foreground max-w-xs text-right">{property.bookingDescription}</p>
 		{/if}
-		<p class="text-white/70 text-xs mt-1">
-			{property.city}, {property.province}
-			{#if property.phone} · {property.phone}{/if}
-		</p>
 	</div>
 </div>
 

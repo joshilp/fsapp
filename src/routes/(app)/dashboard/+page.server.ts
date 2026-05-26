@@ -77,7 +77,8 @@ export const load: PageServerLoad = async (event) => {
 		}),
 
 		db.query.properties.findMany({
-			columns: { id: true, name: true }
+			columns: { id: true, name: true, logoUrl: true, heroImageUrl: true, accentColour: true, publicId: true, bookingEnabled: true, city: true, province: true },
+			where: (p, { not, like }) => not(like(p.name, '[Test]%'))
 		})
 	]);
 

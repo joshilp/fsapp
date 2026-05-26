@@ -50,7 +50,7 @@ export async function bookAction(request: Request) {
 
 	// ── Min-night enforcement ─────────────────────────────────────────────────
 	// Find any active rate season overlapping the stay that has a minNights > nights.
-	const nights = Math.round(
+	const stayNights = Math.round(
 		(new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000
 	);
 	const { rateSeasons, rateTiers } = await import('$lib/server/db/schema');
@@ -70,7 +70,7 @@ export async function bookAction(request: Request) {
 	});
 	for (const season of overlappingSeasons) {
 		for (const tier of season.tiers) {
-			if (tier.minNights && tier.minNights > 1 && nights < tier.minNights) {
+			if (tier.minNights && tier.minNights > 1 && stayNights < tier.minNights) {
 				return fail(400, { error: `"${season.name}" requires a minimum ${tier.minNights}-night stay.` });
 			}
 		}
