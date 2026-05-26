@@ -186,11 +186,13 @@ export const actions: Actions = {
 			return fail(400, { error: 'Invalid rate' });
 		}
 		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
+		const appliesToRoom  = fd.get('appliesToRoom')  === '1';
+		const appliesToAddon = fd.get('appliesToAddon') === '1';
 
 		if (id) {
 			await db
 				.update(taxPresets)
-				.set({ label, ratePercent, sortOrder })
+				.set({ label, ratePercent, sortOrder, appliesToRoom, appliesToAddon })
 				.where(eq(taxPresets.id, id));
 		} else {
 			await db.insert(taxPresets).values({
@@ -199,6 +201,8 @@ export const actions: Actions = {
 				label,
 				ratePercent,
 				sortOrder,
+				appliesToRoom,
+				appliesToAddon,
 				isActive: true
 			});
 		}

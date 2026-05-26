@@ -196,8 +196,8 @@
 			<a href="/booking/{booking.id}/edit">
 				<Button variant="ghost" size="sm">Edit dates/room</Button>
 			</a>
-			<a href="/booking/{booking.id}/print" target="_blank">
-				<Button variant="outline" size="sm">🖨 Print</Button>
+			<a href="/booking/{booking.id}/receipt" target="_blank">
+				<Button variant="outline" size="sm">🖨 Print Receipt</Button>
 			</a>
 		</div>
 	</div>

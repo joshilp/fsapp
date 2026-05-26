@@ -26,7 +26,7 @@
 		checkOut: string;
 	};
 	type RateLine = { id: string; label: string; qty: string; unit: string; total: string };
-	type TaxLine  = { id: string; presetId: string; label: string; percent: string; total: string };
+	type TaxLine  = { id: string; presetId: string; label: string; percent: string; total: string; appliesToRoom: boolean; appliesToAddon: boolean };
 	type Payment  = { id: string; type: string; amount: number; paymentMethod: string; notes: string | null; chargedAt: number | null };
 	type TaxPreset = { id: string; label: string; ratePercent: number };
 	type AddonPreset = { id: string; name: string; defaultUnitCents: number | null; isTaxable: boolean };
@@ -137,7 +137,8 @@
 	let addonLines = $state<AddonLine[]>([]);
 	let taxLines   = $state<TaxLine[]>([]);
 	let taxPresets  = $state<TaxPreset[]>([]);
-	let addonPresets = $state<AddonPreset[]>([]);
+	let addonPresets    = $state<AddonPreset[]>([]);
+	let addonPickerOpen = $state(false);
 	let rateLoading = $state(false);
 	let minNightWarning = $state<string | null>(null);
 
@@ -180,6 +181,10 @@
 	let bookingCheckedOutAt = $state<number | null>(null);
 	let bookingCancelledAt  = $state<number | null>(null);
 	let priorStay_ = $state<{ roomNumber: string | null; checkInDate: string; checkOutDate: string } | null>(null);
+
+	// ── Deposit confirm prompt ─────────────────────────────────────────────────
+	let depositPromptPayId  = $state<string | null>(null);
+	let depositPromptBusy   = $state(false);
 
 	// ── Cancel booking ─────────────────────────────────────────────────────────
 	let cancelBusy   = $state(false);
@@ -394,8 +399,9 @@
 		return Math.max(0, Math.round((new Date(checkOut+'T12:00:00').getTime() - new Date(checkIn+'T12:00:00').getTime()) / 86400000));
 	});
 	const rateTotal          = $derived(rateLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
-	const addonTotal         = $derived(addonLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
-	const taxableAddonTotal  = $derived(addonLines.filter(l => l.isTaxable).reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
+	const addonTotal            = $derived(addonLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
+	const taxableAddonTotal     = $derived(addonLines.filter(l => l.isTaxable).reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
+	const nonTaxableAddonTotal  = $derived(addonLines.filter(l => !l.isTaxable).reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
 	const chargeableSubtotal = $derived(rateTotal + taxableAddonTotal); // base used for % tax calc
 	const taxTotal           = $derived(taxLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0));
 	const grandTotal         = $derived(rateTotal + addonTotal + taxTotal);
@@ -448,6 +454,7 @@
 		ccCapturing = false; ccCardType = 'Visa'; ccLastFour = ''; ccExpiry = ''; ccName = ''; ccBusy = false;
 		requestedRoomTypeId_ = ''; availRooms = []; roomPickerDismissed = false;
 		addingPay = false; payAmt = ''; payMethod = 'cash'; payType = 'final_charge'; payNotes = ''; payErr = '';
+		depositPromptPayId = null; depositPromptBusy = false;
 		suggestions = []; showSuggest = false;
 		depositAmt = ''; cancelPreview = null; cancelOpen = false; cancelBusy = false;
 		minNightWarning = null;
@@ -531,6 +538,24 @@
 		if (q && u) l.total = (q * u).toFixed(2);
 	}
 
+	function addAddonFromPreset(p: AddonPreset) {
+		addonLines = [...addonLines, {
+			id: crypto.randomUUID(),
+			presetId: p.id,
+			label: p.name,
+			qty: '1',
+			unit: (p.defaultUnitCents / 100).toFixed(2),
+			total: (p.defaultUnitCents / 100).toFixed(2),
+			isTaxable: p.isTaxable
+		}];
+		addonPickerOpen = false;
+	}
+
+	function addCustomAddon(taxable: boolean) {
+		addonLines = [...addonLines, { id: crypto.randomUUID(), presetId: '', label: '', qty: '1', unit: '', total: '', isTaxable: taxable }];
+		addonPickerOpen = false;
+	}
+
 	async function fetchCard(id: string) {
 		loading = true;
 		try {
@@ -592,7 +617,7 @@
 				total: (l.totalAmount/100).toFixed(2),
 				isTaxable: true  // legacy extras treated as taxable; future saves will persist the flag
 			}));
-			taxLines = taxes.map((l: {id:string;label:string;totalAmount:number}) => ({ id: l.id, presetId: '', label: l.label, percent: '', total: (l.totalAmount/100).toFixed(2) }));
+			taxLines = taxes.map((l: {id:string;label:string;totalAmount:number}) => ({ id: l.id, presetId: '', label: l.label, percent: '', total: (l.totalAmount/100).toFixed(2), appliesToRoom: true, appliesToAddon: true }));
 			fetchAddonPresets();
 		} catch (e) {
 			saveError = (e as Error).message;
@@ -629,28 +654,40 @@
 		const p = taxPresets.find(x => x.id === pid); if (!p) return;
 		line.presetId = pid; line.label = p.label;
 		line.percent = String(p.ratePercent);
-		line.total = ((Math.round(chargeableSubtotal*100) * p.ratePercent / 100) / 100).toFixed(2);
+		line.appliesToRoom  = p.appliesToRoom  ?? true;
+		line.appliesToAddon = p.appliesToAddon ?? true;
+		const base = (line.appliesToRoom ? rateTotal : 0) + (line.appliesToAddon ? taxableAddonTotal : 0);
+		line.total = (base * p.ratePercent / 100).toFixed(2);
 	}
 
 	/** Recalculate dollar amounts for any tax lines that have a percent set. */
 	function recalcPercentTaxes(sub: number) {
 		taxLines = taxLines.map(l => {
 			const pct = parseFloat(l.percent);
-			if (!pct || !sub) return l;
-			return { ...l, total: (sub * pct / 100).toFixed(2) };
+			if (!pct) return l;
+			const base = (l.appliesToRoom ? rateTotal : 0) + (l.appliesToAddon ? taxableAddonTotal : 0);
+			if (!base) return l;
+			return { ...l, total: (base * pct / 100).toFixed(2) };
 		});
 	}
 
 	/** Auto-create tax lines from all configured presets (only when none exist yet). */
 	function autoApplyTaxes(sub: number) {
 		if (!taxPresets.length || taxLines.length > 0 || sub <= 0) return;
-		taxLines = taxPresets.map(p => ({
-			id: crypto.randomUUID(),
-			presetId: p.id,
-			label: p.label,
-			percent: String(p.ratePercent),
-			total: sub > 0 ? (sub * p.ratePercent / 100).toFixed(2) : ''
-		}));
+		taxLines = taxPresets.map(p => {
+			const appliesToRoom  = p.appliesToRoom  ?? true;
+			const appliesToAddon = p.appliesToAddon ?? true;
+			const base = (appliesToRoom ? rateTotal : 0) + (appliesToAddon ? taxableAddonTotal : 0);
+			return {
+				id: crypto.randomUUID(),
+				presetId: p.id,
+				label: p.label,
+				percent: String(p.ratePercent),
+				total: base > 0 ? (base * p.ratePercent / 100).toFixed(2) : '',
+				appliesToRoom,
+				appliesToAddon
+			};
+		});
 	}
 
 	async function suggestRate(force = false) {
@@ -766,12 +803,44 @@
 
 	async function markPaymentReceived(payId: string) {
 		if (!bookingId) return;
-		const r = await fetch(`/api/payment-events/${payId}/receive`, { method: 'PATCH' });
-		if (r.ok) {
-			const d = await r.json();
-			if (d.promoted) status = 'confirmed';
-			await fetchCard(bookingId);
+		// If booking is Pending, show the confirm-booking dialog instead of auto-promoting
+		if (status === 'reserved') {
+			depositPromptPayId = payId;
+			return;
 		}
+		// Already confirmed or beyond — just mark received with no status change
+		const r = await fetch(`/api/payment-events/${payId}/receive`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ promote: false })
+		});
+		if (r.ok) await fetchCard(bookingId);
+	}
+
+	async function resolveDepositPrompt(confirm: boolean) {
+		if (!bookingId || !depositPromptPayId) return;
+		depositPromptBusy = true;
+		try {
+			const r = await fetch(`/api/payment-events/${depositPromptPayId}/receive`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ promote: confirm })
+			});
+			if (r.ok) {
+				const d = await r.json();
+				if (d.promoted) {
+					status = 'confirmed';
+					toast.success('Booking confirmed — confirmation email sent.');
+				} else {
+					toast.success('Deposit marked received.');
+				}
+				depositPromptPayId = null;
+				await fetchCard(bookingId);
+			} else {
+				toast.error('Failed — please try again.');
+			}
+		} catch { toast.error('Network error.'); }
+		finally { depositPromptBusy = false; }
 	}
 
 	async function deletePayment(payId: string) {
@@ -784,7 +853,7 @@
 	}
 </script>
 
-<CustomDialog bind:open title={cardTitle} description={cardDesc} dialogClass="sm:max-w-2xl" interactOutsideBehavior="ignore">
+<CustomDialog bind:open title={cardTitle} description={cardDesc} dialogClass="sm:max-w-4xl" interactOutsideBehavior="ignore">
 
 	{#snippet actions()}
 		<span class={['rounded-full border px-2.5 py-0.5 text-xs font-semibold', statusCls].join(' ')}>{statusLabel}</span>
@@ -1197,117 +1266,166 @@
 								class="text-xs text-muted-foreground hover:text-foreground">+ charge line</button>
 						</div>
 
-					<!-- Add-Ons -->
-					{#if addonLines.length > 0 || addonPresets.length > 0}
-					<div class="mt-3 space-y-1.5">
-						<p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Add-Ons</p>
-						{#each addonLines as line, i}
-							<!-- Hidden fields for save -->
-							<input type="hidden" name="addon-label-{i}"   value={line.label} />
-							<input type="hidden" name="addon-qty-{i}"     value={line.qty} />
-							<input type="hidden" name="addon-unit-{i}"    value={line.unit} />
-							<input type="hidden" name="addon-total-{i}"   value={line.total} />
-							<input type="hidden" name="addon-taxable-{i}" value={line.isTaxable ? '1' : '0'} />
-							<div class="flex items-center gap-1">
-								{#if addonPresets.length}
-									<select
-										onchange={(e) => pickAddonPreset(line, (e.target as HTMLSelectElement).value)}
-										class="rounded border border-input bg-background px-1 py-1 text-xs shrink-0 max-w-[110px]">
-										<option value="">Custom</option>
-										{#each addonPresets as p}
-											<option value={p.id} selected={line.presetId === p.id}>{p.name}</option>
-										{/each}
-									</select>
-								{/if}
-								<input placeholder="Label" bind:value={line.label}
-									class="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-xs" />
-								<input type="number" step="1" min="1" placeholder="Qty" bind:value={line.qty}
-									oninput={() => calcAddonTotal(line)}
-									class="w-12 rounded border border-input bg-background px-1 py-1 text-center text-xs" />
-								<input type="number" step="0.01" placeholder="$/ea" bind:value={line.unit}
-									oninput={() => calcAddonTotal(line)}
-									class="w-16 rounded border border-input bg-background px-2 py-1 text-xs" />
-								<div class="relative w-20">
-									<span class="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
-									<input type="number" step="0.01" bind:value={line.total}
-										class="w-full rounded border border-input bg-background pl-5 pr-1 py-1 text-xs" />
-								</div>
-								<button type="button"
-									title={line.isTaxable ? 'Taxable — click to toggle' : 'No tax — click to toggle'}
-									onclick={() => { line.isTaxable = !line.isTaxable; }}
-									class={['shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold leading-none',
-										line.isTaxable
-											? 'bg-teal-100 text-teal-700 hover:bg-teal-200'
-											: 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-									].join(' ')}>
-									{line.isTaxable ? 'TAX' : 'NO TAX'}
-								</button>
-								<button type="button" onclick={() => addonLines = addonLines.filter(l => l.id !== line.id)}
-									class="shrink-0 px-1 text-xs text-muted-foreground hover:text-destructive">×</button>
-							</div>
-						{/each}
-						<button type="button" onclick={() => {
-							const newLine = { id: crypto.randomUUID(), presetId: '', label: '', qty: '1', unit: '', total: '', isTaxable: true };
-							addonLines = [...addonLines, newLine];
-						}} class="text-xs text-muted-foreground hover:text-foreground">+ add-on</button>
-					</div>
-					{:else}
-					<div class="mt-2">
-						<button type="button" onclick={() => {
-							addonLines = [{ id: crypto.randomUUID(), presetId: '', label: '', qty: '1', unit: '', total: '', isTaxable: true }];
-						}} class="text-xs text-muted-foreground hover:text-foreground">+ add-on</button>
-					</div>
-					{/if}
+				<!-- Hidden form fields for all add-ons (server-side parsing) -->
+				{#each addonLines as line, i}
+					<input type="hidden" name="addon-label-{i}"   value={line.label} />
+					<input type="hidden" name="addon-qty-{i}"     value={line.qty} />
+					<input type="hidden" name="addon-unit-{i}"    value={line.unit} />
+					<input type="hidden" name="addon-total-{i}"   value={line.total} />
+					<input type="hidden" name="addon-taxable-{i}" value={line.isTaxable ? '1' : '0'} />
+				{/each}
 
-					<!-- Tax lines -->
-					<div class="mt-3 space-y-1.5">
-						<div class="flex justify-between text-xs text-muted-foreground font-medium border-t border-border pt-2 mb-2">
-							<span>Subtotal</span><span>${chargeableSubtotal.toFixed(2)}</span>
+				<!-- Add-Ons -->
+				<div class="mt-3 space-y-1.5">
+					<div class="flex items-center justify-between">
+						<p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Add-Ons</p>
+						<button type="button" onclick={() => addonPickerOpen = true}
+							class="text-xs text-muted-foreground hover:text-foreground">+ add-on</button>
+					</div>
+					{#each addonLines as line}
+						<div class="flex items-center gap-1.5">
+							<input placeholder="Label" bind:value={line.label}
+								class="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-xs" />
+							<input type="number" step="1" min="1" placeholder="Qty" bind:value={line.qty}
+								oninput={() => calcAddonTotal(line)}
+								class="w-12 rounded border border-input bg-background px-1 py-1 text-center text-xs" />
+							<input type="number" step="0.01" placeholder="$/ea" bind:value={line.unit}
+								oninput={() => calcAddonTotal(line)}
+								class="w-16 rounded border border-input bg-background px-2 py-1 text-xs" />
+							<div class="relative w-20">
+								<span class="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+								<input type="number" step="0.01" bind:value={line.total}
+									class="w-full rounded border border-input bg-background pl-5 pr-1 py-1 text-xs" />
+							</div>
+							<!-- Subtle taxable indicator — click to toggle if needed -->
+							<button type="button" title={line.isTaxable ? 'Taxable — click to mark non-taxable' : 'Non-taxable — click to mark taxable'}
+								onclick={() => line.isTaxable = !line.isTaxable}
+								class="shrink-0 w-5 text-center text-[10px] leading-none {line.isTaxable ? 'text-teal-500/70 hover:text-teal-700' : 'text-gray-400/60 hover:text-gray-600'}">
+								{line.isTaxable ? 'T' : '—'}
+							</button>
+							<button type="button" onclick={() => addonLines = addonLines.filter(l => l.id !== line.id)}
+								class="shrink-0 px-1 text-xs text-muted-foreground hover:text-destructive">×</button>
 						</div>
+					{/each}
+					{#if addonLines.length === 0}
+						<p class="text-xs italic text-muted-foreground/50">None yet</p>
+					{/if}
+				</div>
+
+				<!-- Tax lines -->
+				<div class="mt-3 space-y-1.5">
+					<div class="border-t border-border pt-2 mb-2">
 						<p class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Taxes</p>
-						{#each taxLines as line, i}
-							<div class="flex items-center gap-1">
-								{#if taxPresets.length}
-									<select onchange={(e) => applyPreset(line, (e.target as HTMLSelectElement).value)}
-										class="rounded border border-input bg-background px-1 py-1 text-xs shrink-0">
-										<option value="">Custom</option>
-										{#each taxPresets as p}<option value={p.id} selected={line.presetId===p.id}>{p.label}</option>{/each}
-									</select>
-								{/if}
-								<input name="tax-label-{i}" placeholder="Label" bind:value={line.label}
-									class="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-xs" />
-								<!-- Percent field: drives the dollar amount when set -->
-								<div class="relative w-14 shrink-0">
+					</div>
+					{#each taxLines as line, i}
+						{@const taxBase = (line.appliesToRoom ? rateTotal : 0) + (line.appliesToAddon ? taxableAddonTotal : 0)}
+						<div class="flex items-center gap-1">
+							{#if taxPresets.length}
+								<select onchange={(e) => applyPreset(line, (e.target as HTMLSelectElement).value)}
+									class="rounded border border-input bg-background px-1 py-1 text-xs shrink-0">
+									<option value="">Custom</option>
+									{#each taxPresets as p}<option value={p.id} selected={line.presetId===p.id}>{p.label}</option>{/each}
+								</select>
+							{/if}
+							<input name="tax-label-{i}" placeholder="Label" bind:value={line.label}
+								class="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-xs" />
+							<div class="relative w-14 shrink-0">
 								<input type="number" min="0" max="100" step="0.01" placeholder="%" bind:value={line.percent}
 									oninput={() => {
 										const pct = parseFloat(line.percent);
-										if (pct >= 0) line.total = (chargeableSubtotal * pct / 100).toFixed(2);
+										if (pct >= 0) line.total = (taxBase * pct / 100).toFixed(2);
 									}}
-										class="w-full rounded border border-input bg-background px-2 pr-4 py-1 text-xs" />
-									<span class="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
-								</div>
-								<!-- Dollar amount: auto-filled when percent set, manual otherwise -->
-								<div class="relative w-16 shrink-0">
-									<span class="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
-									<input name="tax-total-{i}" type="number" step="0.01" bind:value={line.total}
-										oninput={() => { if (line.percent) line.percent = ''; }}
-										class={['w-full rounded border border-input bg-background pl-4 pr-1 py-1 text-xs',
-											line.percent ? 'text-muted-foreground' : ''].join(' ')} />
-								</div>
-								<button type="button" onclick={() => taxLines = taxLines.filter(l => l.id !== line.id)}
-									class="shrink-0 px-1 text-xs text-muted-foreground hover:text-destructive">×</button>
+									class="w-full rounded border border-input bg-background px-2 pr-4 py-1 text-xs" />
+								<span class="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
 							</div>
-						{/each}
-						<button type="button" onclick={() => {
-							taxLines = [...taxLines, { id: crypto.randomUUID(), presetId: '', label: '', percent: '', total: '' }];
-						}} class="text-xs text-muted-foreground hover:text-foreground">+ tax line</button>
-					</div>
-
-						<!-- Divider + totals -->
-						<div class="mt-3 border-t border-border pt-2 space-y-1 text-sm">
-							{#if taxTotal > 0}<div class="flex justify-between text-muted-foreground"><span>Tax</span><span>${taxTotal.toFixed(2)}</span></div>{/if}
-							<div class="flex justify-between font-semibold text-base"><span>Total charges</span><span>${grandTotal.toFixed(2)}</span></div>
+							<div class="relative w-16 shrink-0">
+								<span class="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+								<input name="tax-total-{i}" type="number" step="0.01" bind:value={line.total}
+									oninput={() => { if (line.percent) line.percent = ''; }}
+									class={['w-full rounded border border-input bg-background pl-4 pr-1 py-1 text-xs',
+										line.percent ? 'text-muted-foreground' : ''].join(' ')} />
+							</div>
+							<button type="button" onclick={() => taxLines = taxLines.filter(l => l.id !== line.id)}
+								class="shrink-0 px-1 text-xs text-muted-foreground hover:text-destructive">×</button>
 						</div>
+					{/each}
+					<button type="button" onclick={() => {
+						taxLines = [...taxLines, { id: crypto.randomUUID(), presetId: '', label: '', percent: '', total: '', appliesToRoom: true, appliesToAddon: true }];
+					}} class="text-xs text-muted-foreground hover:text-foreground">+ tax line</button>
+				</div>
+
+				<!-- Non-taxable add-ons (display only — populated by picker) -->
+				<!-- Totals summary — grocery-receipt style: show each tax with its base -->
+				<div class="mt-3 border-t border-border pt-2 space-y-1 text-sm">
+					{#each taxLines as line}
+						{#if parseFloat(line.total) > 0}
+							{@const taxBase = (line.appliesToRoom ? rateTotal : 0) + (line.appliesToAddon ? taxableAddonTotal : 0)}
+							<div class="flex justify-between text-muted-foreground text-xs">
+								<span>
+									{line.label || 'Tax'}{line.percent ? ` (${line.percent}%)` : ''}
+									<span class="ml-1 opacity-60">on ${taxBase.toFixed(2)}</span>
+								</span>
+								<span>${parseFloat(line.total).toFixed(2)}</span>
+							</div>
+						{/if}
+					{/each}
+					<div class="flex justify-between font-semibold text-base border-t border-border pt-1 mt-0.5">
+						<span>Total charges</span><span>${grandTotal.toFixed(2)}</span>
+					</div>
+				</div>
+
+				<!-- Add-on picker overlay -->
+				{#if addonPickerOpen}
+					<div class="fixed inset-0 z-[200] flex items-center justify-center">
+						<div class="absolute inset-0 bg-black/50" role="button" tabindex="-1"
+							onclick={() => addonPickerOpen = false} onkeydown={() => {}}></div>
+						<div class="relative z-10 w-full max-w-sm rounded-lg border border-border bg-background p-5 shadow-xl">
+							<div class="mb-4 flex items-center justify-between">
+								<h3 class="text-sm font-semibold">Add an Add-On</h3>
+								<button type="button" onclick={() => addonPickerOpen = false}
+									class="text-muted-foreground hover:text-foreground text-lg leading-none">✕</button>
+							</div>
+							{#if addonPresets.length}
+								{#if addonPresets.some(p => p.isTaxable)}
+									<p class="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Taxable</p>
+									<div class="mb-3 space-y-1">
+										{#each addonPresets.filter(p => p.isTaxable) as p}
+											<button type="button" onclick={() => addAddonFromPreset(p)}
+												class="flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-sm hover:bg-muted text-left">
+												<span>{p.name}</span>
+												<span class="text-xs text-muted-foreground">${(p.defaultUnitCents / 100).toFixed(2)} / ea</span>
+											</button>
+										{/each}
+									</div>
+								{/if}
+								{#if addonPresets.some(p => !p.isTaxable)}
+									<p class="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Non-Taxable</p>
+									<div class="mb-3 space-y-1">
+										{#each addonPresets.filter(p => !p.isTaxable) as p}
+											<button type="button" onclick={() => addAddonFromPreset(p)}
+												class="flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-sm hover:bg-muted text-left">
+												<span>{p.name}</span>
+												<span class="text-xs text-muted-foreground">${(p.defaultUnitCents / 100).toFixed(2)} / ea</span>
+											</button>
+										{/each}
+									</div>
+								{/if}
+							{:else}
+								<p class="mb-3 text-sm text-muted-foreground">No presets configured. Enter manually below.</p>
+							{/if}
+							<div class="flex gap-2 border-t border-border pt-3">
+								<button type="button" onclick={() => addCustomAddon(true)}
+									class="flex-1 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-muted">
+									+ Custom (taxable)
+								</button>
+								<button type="button" onclick={() => addCustomAddon(false)}
+									class="flex-1 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-muted">
+									+ Custom (no tax)
+								</button>
+							</div>
+						</div>
+					</div>
+				{/if}
 
 						<!-- Payments -->
 						<div class="mt-4 border-t border-border pt-3">
@@ -1357,16 +1475,21 @@
 							{#if payments.length}
 								<div class="mb-2 space-y-0.5">
 									{#each payments as p}
-										<div class={['flex items-center gap-1 rounded px-2 py-1 text-xs',
-											(p as { status?: string }).status === 'pending'
-												? 'bg-amber-50 border border-amber-200'
-												: 'hover:bg-muted/40'
-										].join(' ')}>
+						<div class={['flex items-center gap-1 rounded px-2 py-1 text-xs',
+										(p as { status?: string }).status === 'pending'
+											? 'bg-amber-50 border border-amber-200'
+											: 'hover:bg-muted/40'
+									].join(' ')}>
+										<div class="min-w-0 flex-1">
 											<span class="text-muted-foreground">{fmtPayType(p.type)} · {p.paymentMethod}</span>
 											{#if (p as { status?: string }).status === 'pending'}
-												<span class="text-[10px] font-semibold text-amber-700 rounded-full bg-amber-100 px-1.5 py-0.5">PENDING</span>
+												<span class="ml-1 text-[10px] font-semibold text-amber-700 rounded-full bg-amber-100 px-1.5 py-0.5">PENDING</span>
 											{/if}
-											<span class={['ml-auto font-medium', p.type === 'refund' ? 'text-destructive' : (p as { status?: string }).status === 'pending' ? 'text-amber-600' : 'text-green-700'].join(' ')}>
+											{#if p.notes}
+												<p class="mt-0.5 text-[10px] italic text-muted-foreground/70 truncate">{p.notes}</p>
+											{/if}
+										</div>
+											<span class={['shrink-0 font-medium', p.type === 'refund' ? 'text-destructive' : (p as { status?: string }).status === 'pending' ? 'text-amber-600' : 'text-green-700'].join(' ')}>
 												{p.type === 'refund' ? '+' : '−'}{fmtMoney(p.amount)}
 											</span>
 											<!-- ⋮ context menu -->
@@ -1402,7 +1525,25 @@
 									<p class="mb-2 text-xs text-muted-foreground italic">No payments recorded yet.</p>
 								{/if}
 
-								<!-- Inline add-payment form -->
+								<!-- Deposit confirm prompt -->
+							{#if depositPromptPayId}
+								<div class="mt-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm">
+									<p class="mb-1 font-medium text-blue-900">Deposit received — confirm this booking?</p>
+									<p class="mb-3 text-xs text-blue-700">Confirming will update the status to <strong>Confirmed</strong> and send a confirmation email to the guest.</p>
+									<div class="flex gap-2">
+										<button type="button" onclick={() => resolveDepositPrompt(true)} disabled={depositPromptBusy}
+											class="flex-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+											{depositPromptBusy ? '…' : 'Confirm booking'}
+										</button>
+										<button type="button" onclick={() => resolveDepositPrompt(false)} disabled={depositPromptBusy}
+											class="rounded-md border border-blue-300 bg-white px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+											Skip for now
+										</button>
+									</div>
+								</div>
+							{/if}
+
+							<!-- Inline add-payment form -->
 								{#if addingPay}
 									<div class="mt-2 space-y-2 rounded-md border border-border bg-muted/30 p-3">
 										<div class="grid grid-cols-2 gap-2">
@@ -1493,11 +1634,12 @@
 												class="rounded-md border border-input px-3 py-1 text-xs hover:bg-muted">Cancel</button>
 										</div>
 									</div>
-								{/if}
-							</div>
+							{/if}
+						</div>
+						{/if}
 
-					<!-- Balance row (always visible for existing bookings) -->
-					{#if !isNew}
+				<!-- Balance row (always visible for existing bookings) -->
+				{#if !isNew}
 						<div class={['mt-3 flex items-center justify-between rounded-md border px-3 py-2.5 text-sm font-semibold', balanceCents > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-green-200 bg-green-50 text-green-800'].join(' ')}>
 							<div>
 								<span>{balanceCents > 0 ? 'Balance due' : 'Paid in full'}</span>
@@ -1516,10 +1658,11 @@
 								<span class="text-base">{balanceCents > 0 ? fmtMoney(balanceCents) : '✓'}</span>
 							</div>
 						</div>
-					{/if}
-				</section>
+				{/if}
+					</div><!-- /payments section -->
+			</section>
 
-			{/if}<!-- end room picker / folio swap -->
+		{/if}<!-- end room picker / folio swap -->
 
 			</div><!-- /right -->
 

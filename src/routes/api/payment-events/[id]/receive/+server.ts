@@ -12,8 +12,13 @@ import { db } from '$lib/server/db';
 import { paymentEvents, bookings } from '$lib/server/db/schema';
 import { sendGuestConfirmation } from '$lib/server/email';
 
-export const PATCH: RequestHandler = async ({ params, locals, url }) => {
+export const PATCH: RequestHandler = async ({ params, locals, url, request }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
+
+	const body = await request.json().catch(() => ({})) as { promote?: boolean };
+	// Default promote=true preserves the previous auto-promote behaviour for
+	// callers that don't pass a body (e.g. old clients, online booking engine).
+	const shouldPromote = body?.promote !== false;
 
 	const pe = await db.query.paymentEvents.findFirst({
 		where: eq(paymentEvents.id, params.id),
@@ -46,7 +51,7 @@ export const PATCH: RequestHandler = async ({ params, locals, url }) => {
 		}
 	});
 	let promoted = false;
-	if (booking?.status === 'reserved') {
+	if (shouldPromote && booking?.status === 'reserved') {
 		await db.update(bookings)
 			.set({ status: 'confirmed', confirmationSentAt: now })
 			.where(eq(bookings.id, pe.bookingId));

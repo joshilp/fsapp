@@ -111,21 +111,23 @@
 						<td class="py-1.5 text-right">{fmtMoney(l.totalAmount)}</td>
 					</tr>
 				{/each}
-				{#if taxes.length > 0}
-					<!-- Subtotal row before taxes -->
-					<tr class="border-t border-gray-200">
-						<td colspan="3" class="py-1.5 text-right text-xs text-gray-400">Subtotal</td>
-						<td class="py-1.5 text-right text-xs text-gray-500">
-							{fmtMoney([...rates, ...extras].reduce((s, l) => s + l.totalAmount, 0))}
+			{#if taxes.length > 0}
+				<!-- Subtotal row before taxes -->
+				<tr class="border-t border-gray-200">
+					<td colspan="3" class="py-1.5 text-right text-xs text-gray-400">Subtotal (before tax)</td>
+					<td class="py-1.5 text-right text-xs text-gray-500">
+						{fmtMoney([...rates, ...extras].reduce((s, l) => s + l.totalAmount, 0))}
+					</td>
+				</tr>
+				{#each taxes as l}
+					<tr class="border-b border-gray-100">
+						<td class="py-1.5 text-gray-600" colspan="3">
+							{l.label}{l.taxPercent ? ` (${l.taxPercent}%)` : ''}
 						</td>
+						<td class="py-1.5 text-right text-gray-600">{fmtMoney(l.totalAmount)}</td>
 					</tr>
-					{#each taxes as l}
-						<tr class="border-b border-gray-100">
-							<td class="py-1.5 text-gray-600" colspan="3">{l.label}</td>
-							<td class="py-1.5 text-right text-gray-600">{fmtMoney(l.totalAmount)}</td>
-						</tr>
-					{/each}
-				{/if}
+				{/each}
+			{/if}
 			</tbody>
 			<tfoot>
 				<tr class="border-t-2 border-gray-300 font-bold">

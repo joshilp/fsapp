@@ -224,6 +224,8 @@ export const taxPresets = sqliteTable('tax_presets', {
 		.references(() => properties.id, { onDelete: 'cascade' }),
 	label: text('label').notNull(), // e.g. "GST", "PST"
 	ratePercent: real('rate_percent').notNull(), // e.g. 5.0, 11.0
+	appliesToRoom:  integer('applies_to_room',  { mode: 'boolean' }).notNull().default(true),
+	appliesToAddon: integer('applies_to_addon', { mode: 'boolean' }).notNull().default(true),
 	isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
 	sortOrder: integer('sort_order').notNull().default(0),
 	createdAt: integer('created_at', { mode: 'timestamp_ms' })
