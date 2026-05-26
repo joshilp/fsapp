@@ -14,11 +14,16 @@ Built with SvelteKit 5, Drizzle ORM, SQLite (better-sqlite3), and Tailwind CSS.
 - **Channex.io Integration** — channel manager sync; push ARI to OTAs, receive booking webhooks
 - **Channex Mock Mode** — test the full integration locally without a paid account (`/dev/channex`)
 - **Deposit Workflow** — pending deposits with "Mark received" and auto-promote to Confirmed
-- **Folio / Ledger** — line-item charges, taxes, payments, balance-due display
+- **Folio / Ledger** — line-item charges, taxes, add-ons, payments, balance-due display
+- **Add-Ons** — pre-configured extras (taxable / non-taxable) with per-booking picker
+- **Tax Presets** — per-property tax rates with room/add-on applicability flags
+- **Self Check-in** — unique guest link shows booking summary, policy waiver, door code, and arrival instructions
+- **Pre-arrival Emails** — automated day-before email with self check-in link (cron-triggered)
 - **Guest Profiles** — auto-complete, address, vehicle, waiver, behaviour rating
-- **Housekeeping View** — room status board
+- **Housekeeping View** — room status board (clean / dirty / in progress / out of order), auto-marks dirty on checkout
 - **Reports** — occupancy and revenue summaries
 - **Email Confirmations** — mailto deep-link or Resend API integration
+- **Elavon Converge** — per-property payment processing via hosted Checkout.js fields
 - **Roles** — admin approval required; admin sees Users page
 
 ---
@@ -66,6 +71,8 @@ Optional:
 |----------|-------------|
 | `RESEND_API_KEY` | Resend.com API key for email sending |
 | `RESEND_FROM_EMAIL` | Sender address (must be verified domain) |
+| `RESEND_OPERATOR_EMAIL` | Staff email to receive new booking alerts |
+| `CRON_SECRET` | Secret token protecting cron endpoints (see Cron Jobs) |
 | `CHANNEX_API_KEY` | Channex.io API key for OTA sync |
 | `CHANNEX_WEBHOOK_SECRET` | Webhook signature secret (optional) |
 | `CHANNEX_MOCK` | Set `true` to log ARI locally instead of calling Channex |
@@ -105,6 +112,110 @@ pnpm db:seed:demo      # seed ~20 realistic demo bookings
 pnpm db:seed:reset     # wipe demo bookings and re-seed
 pnpm db:seed:admin     # create or update admin user (needs ADMIN_* env vars)
 ```
+
+---
+
+## Cron Jobs
+
+Scheduled tasks are implemented as secured API endpoints that an external caller
+hits on a schedule. No scheduler daemon is bundled — use any free service.
+
+### Available cron endpoints
+
+| Endpoint | Method | What it does |
+|----------|--------|-------------|
+| `/api/cron/pre-arrival` | `POST` | Sends pre-arrival email with self check-in link to guests arriving tomorrow |
+
+All endpoints require:
+```
+Authorization: Bearer <CRON_SECRET>
+```
+
+### Setup
+
+**Step 1 — Generate a secret**
+```bash
+openssl rand -hex 32
+```
+Add it to `.env`:
+```
+CRON_SECRET=your_generated_secret_here
+```
+
+**Step 2 — Choose a free cron service**
+
+#### Option A: cron-job.org (easiest — no code needed)
+
+1. Sign up free at [cron-job.org](https://cron-job.org)
+2. Click **Create cronjob**
+3. Set the URL: `https://yourdomain.com/api/cron/pre-arrival`
+4. Set the schedule: **Daily at 08:00**
+5. Under **Headers**, add:
+   - Header name: `Authorization`
+   - Value: `Bearer your_generated_secret_here`
+6. Save — done
+
+#### Option B: GitHub Actions (if your repo is on GitHub)
+
+Create `.github/workflows/cron.yml`:
+
+```yaml
+name: Daily cron jobs
+on:
+  schedule:
+    - cron: '0 15 * * *'   # 08:00 MST = 15:00 UTC
+  workflow_dispatch:         # also allows manual trigger
+
+jobs:
+  pre-arrival:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send pre-arrival emails
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://yourdomain.com/api/cron/pre-arrival
+```
+
+In your GitHub repo → **Settings → Secrets**, add `CRON_SECRET` with the same value.
+
+#### Option C: System cron (VPS / self-hosted)
+
+```bash
+# Edit crontab
+crontab -e
+
+# Add this line (runs at 08:00 daily)
+0 8 * * * curl -sf -X POST -H "Authorization: Bearer YOUR_SECRET" https://yourdomain.com/api/cron/pre-arrival
+```
+
+### Testing the endpoint manually
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer your_secret" \
+  "https://yourdomain.com/api/cron/pre-arrival"
+
+# Test a specific date (useful in dev):
+curl -X POST \
+  -H "Authorization: Bearer your_secret" \
+  "https://yourdomain.com/api/cron/pre-arrival?date=2026-06-01"
+```
+
+Response:
+```json
+{ "ok": true, "date": "2026-06-01", "candidates": 3, "sent": 3 }
+```
+
+### How the pre-arrival email works
+
+1. Cron fires at 08:00 daily
+2. Endpoint finds bookings where `checkInDate = tomorrow` AND `selfCheckinToken` exists AND `preArrivalSentAt IS NULL`
+3. Sends each guest a branded email with a **Check In Online →** button linking to `/checkin/[token]`
+4. Stamps `preArrivalSentAt` — never double-sends even if the cron fires twice
+5. Guest opens link, agrees to policies, gets their door code + arrival instructions
+
+> **Prerequisites**: The self check-in link must be generated before the cron runs. Click **🔗 Self check-in link** on any booking card to generate and copy it. The cron skips bookings without a token.
 
 ---
 
@@ -182,12 +293,17 @@ src/
       channex.ts        Channex API client (real + mock)
       channex-mock.ts   In-memory ARI push log for mock mode
       booking-queries.ts  Server-side query helpers
+      email.ts          Resend email templates (confirmation, pre-arrival, cancellation)
+      elavon.ts         Elavon Converge payment API client
   routes/
     (app)/              All authenticated pages (booking, inventory, settings…)
       dev/channex/      Channex mock simulator (only visible in mock mode)
     api/                API endpoints (booking CRUD, ARI override, webhooks…)
+      booking/[id]/     charge, refund, void, checkout-token, self-checkin-link…
+      cron/             Cron-triggered endpoints (pre-arrival)
       dev/              Dev-only endpoints (channex-log, channex-trigger)
     auth/               Login / sign-up pages
+    checkin/[token]/    Public self check-in page (no auth required)
 
 tests/                  Playwright test suite (see tests/README.md)
 scripts/                DB seed and migration scripts

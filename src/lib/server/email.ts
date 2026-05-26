@@ -30,6 +30,29 @@ type OperatorAlertParams = {
 	confirmationUrl: string;
 };
 
+type CancellationNoticeParams = {
+	guestName: string;
+	guestEmail: string;
+	propertyName: string;
+	checkInDate: string;
+	checkOutDate: string;
+	refundCents: number;
+	cancellationFeeCents: number;
+};
+
+export type PreArrivalParams = {
+	guestName: string;
+	guestEmail: string;
+	propertyName: string;
+	propertyPhone: string | null;
+	propertyAddress: string | null;
+	checkInDate: string;
+	checkOutDate: string;
+	nights: number;
+	checkinTime: string;
+	selfCheckinUrl: string;
+};
+
 function fmtDate(iso: string) {
 	return new Date(iso + 'T12:00:00').toLocaleDateString('en-CA', {
 		weekday: 'short',
@@ -184,16 +207,6 @@ export async function sendOperatorAlert(p: OperatorAlertParams): Promise<void> {
 	});
 }
 
-type CancellationNoticeParams = {
-	guestName: string;
-	guestEmail: string;
-	propertyName: string;
-	checkInDate: string;
-	checkOutDate: string;
-	refundCents: number;
-	cancellationFeeCents: number;
-};
-
 export async function sendCancellationNotice(p: CancellationNoticeParams): Promise<void> {
 	const from = env.RESEND_FROM_EMAIL || 'noreply@example.com';
 
@@ -244,6 +257,79 @@ export async function sendCancellationNotice(p: CancellationNoticeParams): Promi
 		from,
 		to: [p.guestEmail],
 		subject: `Booking Cancelled — ${p.propertyName}`,
+		html
+	});
+}
+
+/**
+ * Pre-arrival email sent automatically the day before check-in.
+ * Includes the self check-in link so the guest can complete check-in online
+ * and receive their door code without needing to visit the front desk.
+ */
+export async function sendPreArrival(p: PreArrivalParams): Promise<void> {
+	const from = env.RESEND_FROM_EMAIL || 'noreply@example.com';
+
+	const html = `
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px;color:#1a1a1a">
+  <h2 style="margin-bottom:4px">${p.propertyName}</h2>
+  <p style="color:#666;margin-top:0">Your stay is tomorrow — complete check-in online</p>
+  <hr style="border:none;border-top:1px solid #ddd;margin:16px 0">
+
+  <p>Hi ${p.guestName},</p>
+  <p>We're looking forward to welcoming you tomorrow! You can skip the front desk by completing your check-in online right now.</p>
+
+  <table style="width:100%;border-collapse:collapse;margin:16px 0">
+    <tr style="background:#f9f9f9">
+      <td style="padding:6px 12px 6px 0;color:#666;width:40%">Check-in</td>
+      <td style="padding:6px 0"><strong>${fmtDate(p.checkInDate)}</strong> after ${p.checkinTime}</td>
+    </tr>
+    <tr>
+      <td style="padding:6px 12px 6px 0;color:#666">Check-out</td>
+      <td style="padding:6px 0"><strong>${fmtDate(p.checkOutDate)}</strong> (${p.nights} night${p.nights === 1 ? '' : 's'})</td>
+    </tr>
+    ${p.propertyAddress ? `
+    <tr style="background:#f9f9f9">
+      <td style="padding:6px 12px 6px 0;color:#666">Address</td>
+      <td style="padding:6px 0">${p.propertyAddress}</td>
+    </tr>` : ''}
+    ${p.propertyPhone ? `
+    <tr>
+      <td style="padding:6px 12px 6px 0;color:#666">Phone</td>
+      <td style="padding:6px 0">${p.propertyPhone}</td>
+    </tr>` : ''}
+  </table>
+
+  <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px;margin:20px 0;text-align:center">
+    <p style="margin:0 0 12px;font-weight:600;color:#1e40af">Complete your online check-in to get your room access code</p>
+    <a href="${p.selfCheckinUrl}"
+       style="display:inline-block;background:#2563eb;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:16px">
+      Check In Online →
+    </a>
+    <p style="margin:12px 0 0;font-size:12px;color:#6b7280">
+      This link is unique to your booking. Do not share it.
+    </p>
+  </div>
+
+  <p style="color:#555;font-size:14px">
+    If you have any questions before arrival, please call us at ${p.propertyPhone ?? p.propertyName}.
+  </p>
+
+  <p style="color:#555;font-size:14px">See you soon!</p>
+  <p style="color:#555;font-size:14px">— The team at ${p.propertyName}</p>
+
+  <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
+  <p style="color:#aaa;font-size:11px">
+    You are receiving this because you have a reservation at ${p.propertyName}.
+  </p>
+</body>
+</html>`;
+
+	await send({
+		from,
+		to: [p.guestEmail],
+		subject: `Your stay is tomorrow — ${p.propertyName} · check in online`,
 		html
 	});
 }

@@ -410,6 +410,8 @@ export const bookings = sqliteTable(
 		selfCheckinToken: text('self_checkin_token').unique(),
 		// Timestamp when the guest completed self check-in
 		selfCheckinAt: integer('self_checkin_at', { mode: 'timestamp_ms' }),
+		// Timestamp when pre-arrival email (with self check-in link) was sent
+		preArrivalSentAt: integer('pre_arrival_sent_at', { mode: 'timestamp_ms' }),
 
 		// Tracks when a confirmation email was last sent to the guest
 		confirmationSentAt: integer('confirmation_sent_at', { mode: 'timestamp_ms' }),
