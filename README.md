@@ -73,6 +73,7 @@ Optional:
 | `RESEND_FROM_EMAIL` | Sender address (must be verified domain) |
 | `RESEND_OPERATOR_EMAIL` | Staff email to receive new booking alerts |
 | `CRON_SECRET` | Secret token protecting cron endpoints (see Cron Jobs) |
+| `ELAVON_DEMO` | Set `true` to use Elavon demo environment (no real charges) |
 | `CHANNEX_API_KEY` | Channex.io API key for OTA sync |
 | `CHANNEX_WEBHOOK_SECRET` | Webhook signature secret (optional) |
 | `CHANNEX_MOCK` | Set `true` to log ARI locally instead of calling Channex |
@@ -112,6 +113,68 @@ pnpm db:seed:demo      # seed ~20 realistic demo bookings
 pnpm db:seed:reset     # wipe demo bookings and re-seed
 pnpm db:seed:admin     # create or update admin user (needs ADMIN_* env vars)
 ```
+
+---
+
+## Elavon Converge Integration
+
+Elavon Converge is a payment processor used by many Canadian and US hotels.
+Each property can have its own merchant account configured independently.
+
+### How it works
+
+- Guests' card details are captured via Elavon's **Checkout.js** hosted fields —
+  card numbers never touch your server
+- The app exchanges the hosted-fields token for a charge via the Converge API
+- Charges, refunds, and voids are all recorded as payment events in the folio
+
+### Setup (per property)
+
+**Step 1 — Call Elavon**
+
+Call Elavon Software Support: **1-800-377-3962**
+
+Ask them to:
+1. Enable **tokenization** on your merchant account
+2. Create an **API User** (separate from your staff login)
+3. Whitelist your server's outbound IP address
+
+They will give you three credentials:
+- **Merchant ID** (`ssl_merchant_id`)
+- **API User ID** (`ssl_user_id`)
+- **PIN** (`ssl_pin`)
+
+**Step 2 — Enter credentials in the app**
+
+Go to **Settings → [Property] → Payments** and enter the three credentials.
+A green "Elavon Converge connected" badge appears once saved.
+
+**Step 3 — Use it**
+
+Open any booking card. A **💳 Charge card via Elavon** button appears in the
+payments section. Click it to open the hosted card fields, enter an amount, and
+charge the card. The payment appears in the folio immediately.
+
+### Demo / test mode
+
+Set `ELAVON_DEMO=true` in `.env` to route all API calls to the Elavon demo
+environment (`api.demo.convergepay.com`). No real charges are made.
+
+```
+ELAVON_DEMO=true
+```
+
+Remove or set to `false` for production.
+
+### Transaction types
+
+| Action | When to use |
+|--------|-------------|
+| **Charge** | Taking a deposit or final payment |
+| **Refund** | Returning money after settlement (any day) |
+| **Void** | Cancelling a charge before it settles (same day only) |
+
+> See `.dev/elavon-setup-guide.md` for the full setup checklist.
 
 ---
 
@@ -216,6 +279,8 @@ Response:
 5. Guest opens link, agrees to policies, gets their door code + arrival instructions
 
 > **Prerequisites**: The self check-in link must be generated before the cron runs. Click **🔗 Self check-in link** on any booking card to generate and copy it. The cron skips bookings without a token.
+>
+> **Tip — auto-generate tokens on confirmation**: If you want fully hands-off operation, generate the token at the time of booking confirmation by calling `GET /api/booking/[id]/self-checkin-link` from your confirm flow. The endpoint is idempotent — calling it multiple times always returns the same token.
 
 ---
 
