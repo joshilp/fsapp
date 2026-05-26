@@ -151,6 +151,15 @@
 	let ccExpiry     = $state('');  // MM/YY
 	let ccName       = $state('');
 	let ccBusy       = $state(false);
+
+	// ── Elavon Converge ───────────────────────────────────────────────────────
+	let elavonPanelOpen   = $state(false);
+	let elavonToken       = $state('');       // Checkout.js session token
+	let elavonTokenBusy   = $state(false);
+	let elavonCharging    = $state(false);
+	let elavonChargeAmt   = $state('');       // dollars string
+	let elavonChargeType  = $state<'deposit'|'final_charge'>('final_charge');
+	let elavonChargeError = $state('');
 	let addingPay    = $state(false);
 	let payAmt       = $state<number | ''>('');
 	let payMethod    = $state('cash');
@@ -206,6 +215,7 @@
 	let propPhone    = $state<string | null>(null);
 	let propCheckInTime  = $state('2:00 PM');
 	let propCheckOutTime = $state('10:30 AM');
+	let propElavonEnabled = $state(false); // true when property has Elavon credentials on file
 
 	function buildEmailSubject() {
 		return `Booking Confirmation — ${propName || 'Your Reservation'}`;
@@ -358,6 +368,90 @@
 			toast.success('Card removed.');
 		} catch { toast.error('Network error.'); }
 		finally { ccBusy = false; }
+	}
+
+	// ── Elavon helpers ────────────────────────────────────────────────────────
+
+	async function openElavonPanel() {
+		if (!bookingId) return;
+		elavonPanelOpen = true;
+		elavonToken = '';
+		elavonChargeError = '';
+		elavonTokenBusy = true;
+		try {
+			const r = await fetch(`/api/booking/${bookingId}/checkout-token`);
+			const d = await r.json();
+			if (!r.ok) { elavonChargeError = d.error ?? 'Failed to get session token'; return; }
+			elavonToken = d.token;
+			// Initialise Checkout.js hosted fields once token is ready
+			initCheckoutJs(elavonToken);
+		} catch { elavonChargeError = 'Network error getting token'; }
+		finally { elavonTokenBusy = false; }
+	}
+
+	function initCheckoutJs(token: string) {
+		// ConvergeEmbeddedPayment is injected by the Checkout.js script tag.
+		// We only call this in-browser; SSR guard via the typeof check.
+		if (typeof window === 'undefined') return;
+		const w = window as unknown as Record<string, unknown>;
+		if (typeof w['ConvergeEmbeddedPayment'] !== 'undefined') {
+			(w['ConvergeEmbeddedPayment'] as { init: (t: string, cb: object) => void })
+				.init(token, {
+					onTokenGenerated: (t: string) => { elavonDoCharge(t); },
+					onError: (msg: string) => { elavonChargeError = msg; },
+				});
+		}
+	}
+
+	async function elavonDoCharge(paymentToken: string) {
+		if (!bookingId || elavonCharging) return;
+		if (!elavonChargeAmt || parseFloat(elavonChargeAmt) <= 0) {
+			elavonChargeError = 'Enter a valid amount.'; return;
+		}
+		elavonCharging = true; elavonChargeError = '';
+		try {
+			const r = await fetch(`/api/booking/${bookingId}/charge`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ token: paymentToken, amountDollars: parseFloat(elavonChargeAmt).toFixed(2), type: elavonChargeType }),
+			});
+			const d = await r.json();
+			if (!r.ok) { elavonChargeError = d.error ?? 'Charge failed'; return; }
+			toast.success(`Charged $${elavonChargeAmt} — approval ${d.approvalCode}`);
+			elavonPanelOpen = false; elavonChargeAmt = '';
+			if (bookingId) await fetchCard(bookingId);
+		} catch { elavonChargeError = 'Network error.'; }
+		finally { elavonCharging = false; }
+	}
+
+	async function elavonRefundPayment(txnId: string, amountDollars: string) {
+		if (!bookingId) return;
+		try {
+			const r = await fetch(`/api/booking/${bookingId}/refund`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ txnId, amountDollars }),
+			});
+			const d = await r.json();
+			if (!r.ok) { toast.error(d.error ?? 'Refund failed'); return; }
+			toast.success('Refund processed');
+			if (bookingId) await fetchCard(bookingId);
+		} catch { toast.error('Network error.'); }
+	}
+
+	async function elavonVoidPayment(txnId: string) {
+		if (!bookingId) return;
+		try {
+			const r = await fetch(`/api/booking/${bookingId}/void`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ txnId }),
+			});
+			const d = await r.json();
+			if (!r.ok) { toast.error(d.error ?? 'Void failed'); return; }
+			toast.success('Transaction voided');
+			if (bookingId) await fetchCard(bookingId);
+		} catch { toast.error('Network error.'); }
 	}
 
 	async function toggleCheckin() {
@@ -570,6 +664,7 @@
 		propPhone   = b.room?.property?.phone ?? null;
 		propCheckInTime  = b.room?.property?.checkinTime  ?? '2:00 PM';
 		propCheckOutTime = b.room?.property?.checkoutTime ?? '10:30 AM';
+		propElavonEnabled = !!(b.property?.elavonMerchantId);
 		roomId_ = b.roomId ?? ''; roomNumber_ = b.room?.roomNumber ?? '';
 		roomTypeName = b.room?.roomType?.name ?? '';
 		roomConfigs_ = b.roomConfigs ?? []; selConfig = b.roomConfig ?? roomConfigs_[0] ?? '';
@@ -852,6 +947,13 @@
 	} catch { toast.error('Failed to delete payment — please try again.'); }
 	}
 </script>
+
+<!-- Elavon Checkout.js — loaded once; only used when property has credentials -->
+<svelte:head>
+	{#if propElavonEnabled}
+	<script src="https://api.convergepay.com/hosted-payments/Checkout.js"></script>
+	{/if}
+</svelte:head>
 
 <CustomDialog bind:open title={cardTitle} description={cardDesc} dialogClass="sm:max-w-4xl" interactOutsideBehavior="ignore">
 
@@ -1634,9 +1736,71 @@
 												class="rounded-md border border-input px-3 py-1 text-xs hover:bg-muted">Cancel</button>
 										</div>
 									</div>
+						{/if}
+					</div>
+					{/if}
+
+					<!-- Elavon Converge charge panel (only when property has credentials) -->
+					{#if !isNew && propElavonEnabled}
+						<div class="mt-2">
+							{#if !elavonPanelOpen}
+								<button type="button" onclick={openElavonPanel}
+									class="flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100">
+									💳 Charge card via Elavon
+								</button>
+							{:else}
+								<div class="mt-1 rounded-md border border-blue-200 bg-blue-50/40 p-3 space-y-2">
+									<div class="flex items-center justify-between">
+										<p class="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Elavon Converge — Charge Card</p>
+										<button type="button" onclick={() => { elavonPanelOpen = false; elavonChargeError = ''; }}
+											class="text-xs text-muted-foreground hover:text-foreground">✕ close</button>
+									</div>
+									{#if elavonTokenBusy}
+										<p class="text-xs text-muted-foreground">Loading secure payment fields…</p>
+									{:else if elavonChargeError}
+										<p class="rounded bg-destructive/10 px-2 py-1 text-xs text-destructive">{elavonChargeError}</p>
+									{/if}
+
+									<!-- Amount + type -->
+									<div class="grid grid-cols-2 gap-2">
+										<div>
+											<label class="mb-0.5 block text-xs text-muted-foreground">Amount ($)</label>
+											<input type="number" step="0.01" min="0" bind:value={elavonChargeAmt}
+												placeholder={balanceCents > 0 ? (balanceCents/100).toFixed(2) : '0.00'}
+												class="w-full rounded border border-input bg-background px-2 py-1 text-xs" />
+										</div>
+										<div>
+											<label class="mb-0.5 block text-xs text-muted-foreground">Type</label>
+											<select bind:value={elavonChargeType}
+												class="w-full rounded border border-input bg-background px-2 py-1 text-xs">
+												<option value="deposit">Deposit</option>
+												<option value="final_charge">Final charge</option>
+											</select>
+										</div>
+									</div>
+
+									<!-- Checkout.js hosted card fields render here -->
+									<div id="ssl_hosted_payment_fields_container" class="min-h-[80px] rounded border border-border bg-background p-2"></div>
+
+									<div class="flex gap-2">
+										<button type="button"
+											disabled={elavonCharging || elavonTokenBusy || !elavonToken}
+											onclick={() => {
+												if (typeof window !== 'undefined') {
+													const w = window as unknown as Record<string, unknown>;
+													if (typeof w['ConvergeEmbeddedPayment'] !== 'undefined') {
+														(w['ConvergeEmbeddedPayment'] as { pay: () => void }).pay();
+													}
+												}
+											}}
+											class="flex-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+											{elavonCharging ? 'Processing…' : 'Charge card'}
+										</button>
+									</div>
+								</div>
 							{/if}
 						</div>
-						{/if}
+					{/if}
 
 				<!-- Balance row (always visible for existing bookings) -->
 				{#if !isNew}

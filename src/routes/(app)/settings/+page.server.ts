@@ -142,9 +142,23 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
-	// Update Channex IDs for a property (safe — only touches Channex fields)
-	updateChannexProperty: async ({ request, locals }) => {
+	// Update Elavon Converge payment credentials for a property
+	updatePropertyPayments: async ({ request, locals }) => {
 		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		if (!id) return fail(400, { error: 'Missing property ID' });
+		await db.update(properties).set({
+			elavonMerchantId: g('elavonMerchantId'),
+			elavonUserId:     g('elavonUserId'),
+			elavonPin:        g('elavonPin'),
+		}).where(eq(properties.id, id));
+		return { success: true };
+	},
+
+	// Update Channex IDs for a property (safe — only touches Channex fields)
+	updateChannexProperty: async ({ request, locals }) => {		if (!locals.user) return fail(401, { error: 'Unauthorized' });
 		const fd = await request.formData();
 		const id = (fd.get('id') as string)?.trim();
 		const channexPropertyId = (fd.get('channexPropertyId') as string)?.trim() || null;

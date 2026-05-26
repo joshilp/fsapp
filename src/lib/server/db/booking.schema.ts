@@ -57,6 +57,12 @@ export const properties = sqliteTable('properties', {
 	// ── Channex channel manager ───────────────────────────────────────────────
 	// UUID of this property in your Channex account. Set in Settings → Channels.
 	channexPropertyId: text('channex_property_id'),
+	// ── Elavon Converge payment processing ───────────────────────────────────
+	// Credentials stored per-property so each merchant account charges separately.
+	// Obtained from Elavon by calling 1-800-377-3962 and requesting API user setup.
+	elavonMerchantId: text('elavon_merchant_id'),
+	elavonUserId:     text('elavon_user_id'),
+	elavonPin:        text('elavon_pin'),        // store encrypted in production
 	// ── Online booking (guest-facing page) ───────────────────────────────────
 	// Short unique public ID used in booking URLs: /book/[publicId]
 	publicId: text('public_id').unique(),

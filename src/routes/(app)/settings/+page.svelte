@@ -7,11 +7,12 @@
 	import PropertyAddons from '$lib/components/settings/PropertyAddons.svelte';
 	import PropertyRooms from '$lib/components/settings/PropertyRooms.svelte';
 	import PropertyChannex from '$lib/components/settings/PropertyChannex.svelte';
+	import PropertyPayments from '$lib/components/settings/PropertyPayments.svelte';
 	import Channels from '$lib/components/settings/Channels.svelte';
 
 	let { data }: { data: PageData } = $props();
 
-	const PROP_SECTIONS = ['general', 'policy', 'booking', 'rooms', 'taxes', 'addons', 'channex'] as const;
+	const PROP_SECTIONS = ['general', 'policy', 'booking', 'rooms', 'taxes', 'addons', 'payments', 'channex'] as const;
 	const GLOBAL_SECTIONS = ['channels', 'email'] as const;
 	type Section = typeof PROP_SECTIONS[number] | typeof GLOBAL_SECTIONS[number];
 
@@ -31,6 +32,7 @@
 		rooms: 'Rooms & Types',
 		taxes: 'Taxes',
 		addons: 'Add-Ons',
+		payments: 'Payments',
 		channex: 'Channex',
 		channels: 'Channels',
 		email: 'Email',
@@ -104,7 +106,9 @@
 				<PropertyTaxes {prop} presets={propTaxes} />
 			{:else if prop && activeSection === 'addons'}
 				<PropertyAddons {prop} presets={propAddons} />
-			{:else if prop && activeSection === 'channex'}
+			{:else if prop && activeSection === 'payments'}
+			<PropertyPayments {prop} />
+		{:else if prop && activeSection === 'channex'}
 				<PropertyChannex {prop} roomTypes={propRoomTypes} />
 			{:else if activeSection === 'channels'}
 				<Channels channels={data.channelsList} />
