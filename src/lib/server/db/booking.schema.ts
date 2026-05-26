@@ -130,6 +130,10 @@ export const rooms = sqliteTable(
 		cleaningEaseWeight: integer('cleaning_ease_weight').notNull().default(5),
 		notes: text('notes'),
 		isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+		// Door access code shown to guest at self check-in
+		doorCode: text('door_code'),
+		// Free-text arrival instructions (parking, key lockbox, Wi-Fi, etc.)
+		checkinInstructions: text('checkin_instructions'),
 		...timestamps
 	},
 	(t) => [
@@ -401,6 +405,11 @@ export const bookings = sqliteTable(
 
 		// Guest signed the registration card / waiver
 		waiverSigned: integer('waiver_signed', { mode: 'boolean' }).default(false),
+
+		// Self check-in: unique token sent to guest via link
+		selfCheckinToken: text('self_checkin_token').unique(),
+		// Timestamp when the guest completed self check-in
+		selfCheckinAt: integer('self_checkin_at', { mode: 'timestamp_ms' }),
 
 		// Tracks when a confirmation email was last sent to the guest
 		confirmationSentAt: integer('confirmation_sent_at', { mode: 'timestamp_ms' }),

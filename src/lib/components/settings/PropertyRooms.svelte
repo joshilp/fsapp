@@ -13,6 +13,7 @@
 	};
 	type Room = {
 		id: string; roomNumber: string; isActive: boolean; hasKitchen: boolean;
+		doorCode?: string | null; checkinInstructions?: string | null;
 		roomType?: { name: string; category: string } | null;
 	};
 
@@ -31,6 +32,18 @@
 	let roomError = $state('');
 	let newRoomNumber = $state('');
 	let newRoomTypeId = $state('');
+
+	// ── Room door code / checkin instructions inline edit ─────────────────────
+	let editingRoomId      = $state<string | null>(null);
+	let editDoorCode       = $state('');
+	let editInstructions   = $state('');
+	let roomAccessSaving   = $state(false);
+
+	function startRoomAccessEdit(room: Room) {
+		editingRoomId    = room.id;
+		editDoorCode     = room.doorCode ?? '';
+		editInstructions = room.checkinInstructions ?? '';
+	}
 </script>
 
 <!-- ── Room Types ─────────────────────────────────────────────────────────── -->
@@ -159,12 +172,13 @@
 		<div class="mb-5 overflow-x-auto max-w-xl">
 			<table class="w-full text-sm">
 				<thead>
-					<tr class="text-muted-foreground border-border border-b text-xs">
-						<th class="pb-1 pr-4 text-left font-medium">Room #</th>
-						<th class="pb-1 pr-4 text-left font-medium">Type</th>
-						<th class="pb-1 pr-4 text-left font-medium">Kitchen</th>
-						<th class="pb-1 text-right font-medium">Active</th>
-					</tr>
+			<tr class="text-muted-foreground border-border border-b text-xs">
+					<th class="pb-1 pr-4 text-left font-medium">Room #</th>
+					<th class="pb-1 pr-4 text-left font-medium">Type</th>
+					<th class="pb-1 pr-4 text-left font-medium">Kitchen</th>
+					<th class="pb-1 pr-4 text-left font-medium">Door Code</th>
+					<th class="pb-1 text-right font-medium">Active</th>
+				</tr>
 				</thead>
 				<tbody>
 					{#each rooms as room}
@@ -176,8 +190,42 @@
 									<span class="text-xs">· {room.roomType.name}</span>
 								{/if}
 							</td>
-							<td class="py-2 pr-4 text-xs">{room.hasKitchen ? '✓' : '—'}</td>
-							<td class="py-2 text-right">
+					<td class="py-2 pr-4 text-xs">{room.hasKitchen ? '✓' : '—'}</td>
+						<td class="py-2 pr-4 text-xs">
+							{#if editingRoomId === room.id}
+								<form method="POST" action="?/updateRoomAccess"
+									use:enhance={() => {
+										roomAccessSaving = true;
+										return async ({ result, update }) => {
+											roomAccessSaving = false;
+											if (result.type === 'success') { toast.success('Saved'); editingRoomId = null; }
+											else toast.error('Save failed');
+											await update();
+										};
+									}}
+									class="flex flex-col gap-1"
+								>
+									<input type="hidden" name="id" value={room.id} />
+									<input type="text" name="doorCode" bind:value={editDoorCode}
+										placeholder="e.g. 4821" class="w-24 rounded border border-input bg-background px-2 py-0.5 text-xs font-mono" />
+									<textarea name="checkinInstructions" bind:value={editInstructions}
+										placeholder="Parking, Wi-Fi, lockbox…" rows="2"
+										class="w-48 rounded border border-input bg-background px-2 py-0.5 text-xs resize-none"></textarea>
+									<div class="flex gap-1">
+										<button type="submit" disabled={roomAccessSaving}
+											class="rounded bg-primary px-2 py-0.5 text-xs text-primary-foreground disabled:opacity-50">Save</button>
+										<button type="button" onclick={() => editingRoomId = null}
+											class="rounded border border-input px-2 py-0.5 text-xs hover:bg-muted">✕</button>
+									</div>
+								</form>
+							{:else}
+								<button type="button" onclick={() => startRoomAccessEdit(room)}
+									class="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+									{room.doorCode ? room.doorCode : '+ set code'}
+								</button>
+							{/if}
+						</td>
+						<td class="py-2 text-right">
 								<form method="POST" action="?/toggleRoom"
 									use:enhance={() => {
 										togglingRoom = room.id;

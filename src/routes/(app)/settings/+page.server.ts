@@ -321,6 +321,19 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
+	updateRoomAccess: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		if (!id) return fail(400, { error: 'Missing ID' });
+		await db.update(rooms).set({
+			doorCode:            g('doorCode'),
+			checkinInstructions: g('checkinInstructions'),
+		}).where(eq(rooms.id, id));
+		return { success: true };
+	},
+
 	// ── Room types ──────────────────────────────────────────────────────────────
 
 	upsertRoomType: async ({ request, locals }) => {

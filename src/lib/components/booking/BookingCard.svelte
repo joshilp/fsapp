@@ -209,6 +209,12 @@
 	// ── Send Confirmation ──────────────────────────────────────────────────────
 	let confirmBusy  = $state(false);
 	let confirmSentAt = $state<string | null>(null); // ISO string or null
+
+	// ── Self Check-in Link ────────────────────────────────────────────────────
+	let selfCheckinUrl       = $state('');
+	let selfCheckinAt_       = $state<number | null>(null);
+	let selfCheckinLinkBusy  = $state(false);
+	let selfCheckinCopied    = $state(false);
 	// Property details for the email preview
 	let propLogoUrl  = $state<string | null>(null);
 	let propAddress  = $state<string | null>(null);
@@ -270,6 +276,28 @@
 				toast.error('Failed to send confirmation email.');
 			}
 		} catch { toast.error('Failed to send confirmation email.'); } finally { confirmBusy = false; }
+	}
+
+	async function getSelfCheckinLink() {
+		if (!bookingId || selfCheckinLinkBusy) return;
+		selfCheckinLinkBusy = true;
+		try {
+			const r = await fetch(`/api/booking/${bookingId}/self-checkin-link`);
+			const d = await r.json();
+			if (r.ok) selfCheckinUrl = d.url;
+			else toast.error(d.error ?? 'Failed to get link');
+		} catch { toast.error('Network error'); }
+		finally { selfCheckinLinkBusy = false; }
+	}
+
+	async function copySelfCheckinLink() {
+		if (!selfCheckinUrl) await getSelfCheckinLink();
+		if (!selfCheckinUrl) return;
+		try {
+			await navigator.clipboard.writeText(selfCheckinUrl);
+			selfCheckinCopied = true;
+			setTimeout(() => { selfCheckinCopied = false; }, 2500);
+		} catch { toast.error('Could not copy to clipboard'); }
 	}
 
 	async function copyConfirmationText() {
@@ -553,6 +581,7 @@
 		depositAmt = ''; cancelPreview = null; cancelOpen = false; cancelBusy = false;
 		minNightWarning = null;
 		confirmBusy = false; confirmSentAt = null;
+		selfCheckinUrl = ''; selfCheckinAt_ = null; selfCheckinLinkBusy = false; selfCheckinCopied = false;
 		propLogoUrl = null; propAddress = null; propPhone = null;
 		leftTab = 'guest'; openPayMenu = null;
 		legendOpen = false;
@@ -678,6 +707,7 @@
 		payments = b.paymentEvents ?? [];
 		groupInfo = d.groupInfo ?? null;
 		confirmSentAt = b.confirmationSentAt ? new Date(b.confirmationSentAt).toISOString() : null;
+		selfCheckinAt_ = b.selfCheckinAt ?? null;
 			bookingCreatedAt   = b.createdAt ?? null;
 			bookingClerkName   = b.clerk?.name ?? '';
 			bookingCheckedInAt  = b.checkedInAt ?? null;
@@ -1261,9 +1291,12 @@
 							{@render event(null, 'Moved from Room ' + (priorStay_.roomNumber ?? '?'), `${fmt(priorStay_.checkInDate)} → ${fmt(priorStay_.checkOutDate)}`, 'border-orange-400 bg-orange-100')}
 						{/if}
 						{@render event(bookingCreatedAt, 'Booking created', bookingClerkName ? `by ${bookingClerkName}` : undefined, 'border-blue-400 bg-blue-100')}
-						{#if confirmSentAt}
-							{@render event(new Date(confirmSentAt).getTime(), 'Confirmation sent', guestEmail || undefined, 'border-teal-400 bg-teal-100')}
-						{/if}
+					{#if confirmSentAt}
+						{@render event(new Date(confirmSentAt).getTime(), 'Confirmation sent', guestEmail || undefined, 'border-teal-400 bg-teal-100')}
+					{/if}
+					{#if selfCheckinAt_}
+						{@render event(selfCheckinAt_, 'Self check-in completed', undefined, 'border-purple-400 bg-purple-100')}
+					{/if}
 						{#each payments as p}
 							{@render event(p.chargedAt, `${fmtPayType(p.type)} · ${fmtMoney(p.amount)}`, `${p.paymentMethod}${(p as {status?:string}).status === 'pending' ? ' (pending)' : ''}`, p.type === 'refund' ? 'border-red-400 bg-red-100' : 'border-green-400 bg-green-100')}
 						{/each}
@@ -1971,10 +2004,35 @@
 								</a>
 							</div>
 						{/snippet}
-					</CustomDialog>
-					</span>
+				</CustomDialog>
+				</span>
 
-					{#if status !== 'cancelled' && status !== 'checked_out'}
+				<!-- Self Check-in Link — confirmed/checked_in bookings only -->
+				{#if status === 'confirmed' || status === 'reserved'}
+					<div class="relative">
+						{#if selfCheckinAt_}
+							<!-- Already completed: show badge -->
+							<span class="flex items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2.5 py-1.5 text-xs text-purple-700">
+								✓ Self check-in done
+							</span>
+						{:else}
+							<button type="button"
+								onclick={copySelfCheckinLink}
+								disabled={selfCheckinLinkBusy}
+								class="rounded-md border border-input px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50">
+								{selfCheckinLinkBusy ? 'Generating…' : selfCheckinCopied ? '✓ Copied!' : '🔗 Self check-in link'}
+							</button>
+							{#if selfCheckinUrl && !selfCheckinCopied}
+								<div class="absolute bottom-full mb-1 left-0 z-50 w-64 rounded-md border border-border bg-popover p-2 text-xs shadow-md">
+									<p class="text-muted-foreground mb-1">Share this link with your guest:</p>
+									<p class="break-all font-mono text-[10px] text-foreground select-all">{selfCheckinUrl}</p>
+								</div>
+							{/if}
+						{/if}
+					</div>
+				{/if}
+
+				{#if status !== 'cancelled' && status !== 'checked_out'}
 						<button type="button" onclick={openCancelDialog} disabled={cancelBusy}
 							class="rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">
 							Cancel booking…
