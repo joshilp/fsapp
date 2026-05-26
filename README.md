@@ -116,6 +116,51 @@ pnpm db:seed:admin     # create or update admin user (needs ADMIN_* env vars)
 
 ---
 
+## Guest Automation Flow
+
+Once Resend and a cron service are configured, the entire guest communication
+lifecycle runs without operator involvement.
+
+```
+Guest books (phone / OTA / online)
+         ↓
+Deposit received → operator confirms booking
+         ↓ (automatic)
+Confirmation email sent to guest
+Self check-in token generated
+         ↓ (automatic — cron at 08:00 day before)
+Pre-arrival email sent with "Check In Online →" link
+         ↓ (guest action)
+Guest taps link, reviews policies, agrees
+→ Door code + arrival instructions revealed on screen
+         ↓ (operator action)
+Operator checks guest out
+         ↓ (automatic)
+Room marked dirty in housekeeping board
+Receipt email sent to guest with full folio + print link
+```
+
+**What the operator still does:**
+- Takes the initial reservation and marks deposit received
+- Assigns a room (if not pre-assigned from an OTA)
+- Clicks "Confirm" to trigger the automation chain
+- Checks the guest out at the end of the stay
+
+**What is fully automatic:**
+- Confirmation email
+- Self check-in token generation
+- Pre-arrival reminder with check-in link (via cron)
+- Door code delivery (guest sees it after completing online check-in)
+- Checkout receipt email
+- Housekeeping status update
+
+> **Prerequisites for full automation:**
+> 1. `RESEND_API_KEY` configured (see Setup)
+> 2. Door codes entered in Settings → Rooms → [Room] → Door Code
+> 3. Cron job pointing at `/api/cron/pre-arrival` (see Cron Jobs)
+
+---
+
 ## Elavon Converge Integration
 
 Elavon Converge is a payment processor used by many Canadian and US hotels.
