@@ -262,8 +262,7 @@ export async function sendCancellationNotice(p: CancellationNoticeParams): Promi
 }
 
 /**
- * Pre-arrival email sent automatically the day before check-in.
- * Includes the self check-in link so the guest can complete check-in online
+ * Pre-arrival email sent automatically the day before check-in. * Includes the self check-in link so the guest can complete check-in online
  * and receive their door code without needing to visit the front desk.
  */
 export async function sendPreArrival(p: PreArrivalParams): Promise<void> {
@@ -330,6 +329,133 @@ export async function sendPreArrival(p: PreArrivalParams): Promise<void> {
 		from,
 		to: [p.guestEmail],
 		subject: `Your stay is tomorrow — ${p.propertyName} · check in online`,
+		html
+	});
+}
+
+export type CheckoutReceiptParams = {
+	guestName: string;
+	guestEmail: string;
+	propertyName: string;
+	propertyPhone: string | null;
+	propertyAddress: string | null;
+	propertyCity: string | null;
+	propertyProvince: string | null;
+	propertyGstNumber: string | null;
+	checkInDate: string;
+	checkOutDate: string;
+	nights: number;
+	roomNumber: string | null;
+	roomTypeName: string | null;
+	lineItems: { label: string; type: string; totalAmount: number }[];
+	payments: { type: string; paymentMethod: string; amount: number; receiptNumber: string | null }[];
+	receiptUrl: string;
+};
+
+/**
+ * Post-checkout receipt email sent automatically when a guest checks out.
+ * Contains a full folio summary and a link to the printable receipt page.
+ */
+export async function sendCheckoutReceipt(p: CheckoutReceiptParams): Promise<void> {
+	const from = env.RESEND_FROM_EMAIL || 'noreply@example.com';
+
+	const chargesTotal = p.lineItems.reduce((s, l) => s + l.totalAmount, 0);
+	const collected    = p.payments.filter(x => x.type !== 'refund').reduce((s, x) => s + x.amount, 0);
+	const refunded     = p.payments.filter(x => x.type === 'refund').reduce((s, x) => s + x.amount, 0);
+	const balance      = chargesTotal - collected + refunded;
+
+	const rates  = p.lineItems.filter(l => l.type === 'rate');
+	const extras = p.lineItems.filter(l => l.type === 'extra');
+	const taxes  = p.lineItems.filter(l => l.type === 'tax');
+
+	function row(label: string, amount: number, bg = '') {
+		return `<tr${bg ? ` style="background:${bg}"` : ''}>
+      <td style="padding:5px 12px 5px 0;color:#555;font-size:13px">${label}</td>
+      <td style="padding:5px 0;text-align:right;font-size:13px">${fmtMoney(amount)}</td>
+    </tr>`;
+	}
+
+	const chargeRows = [
+		...rates.map(l  => row(l.label, l.totalAmount)),
+		...extras.map(l => row(l.label, l.totalAmount, '#fafafa')),
+		...taxes.map(l  => row(l.label, l.totalAmount, '#fafafa')),
+	].join('');
+
+	const paymentRows = p.payments.map(x => {
+		const label = x.type === 'refund' ? 'Refund' : x.type === 'deposit' ? 'Deposit' : 'Payment';
+		const method = ({ cash:'Cash', card:'Card', etransfer:'e-Transfer', check:'Cheque', other:'Other' } as Record<string,string>)[x.paymentMethod] ?? x.paymentMethod;
+		return row(`${label} — ${method}${x.receiptNumber ? ' #' + x.receiptNumber : ''}`, x.type === 'refund' ? x.amount : -x.amount);
+	}).join('');
+
+	const html = `
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px;color:#1a1a1a">
+  <h2 style="margin-bottom:4px">${p.propertyName}</h2>
+  <p style="color:#666;margin-top:0">Checkout Receipt</p>
+  ${p.propertyAddress ? `<p style="color:#888;font-size:12px;margin:2px 0">${p.propertyAddress}${p.propertyCity ? ', ' + p.propertyCity : ''}${p.propertyProvince ? ', ' + p.propertyProvince : ''}</p>` : ''}
+  ${p.propertyPhone ? `<p style="color:#888;font-size:12px;margin:2px 0">${p.propertyPhone}</p>` : ''}
+  ${p.propertyGstNumber ? `<p style="color:#aaa;font-size:11px;margin:2px 0">GST/HST #: ${p.propertyGstNumber}</p>` : ''}
+  <hr style="border:none;border-top:1px solid #ddd;margin:16px 0">
+
+  <p>Hi ${p.guestName},</p>
+  <p>Thank you for your stay! Here is your receipt.</p>
+
+  <table style="width:100%;border-collapse:collapse;margin:12px 0">
+    <tr style="background:#f9f9f9">
+      <td style="padding:6px 12px 6px 0;color:#666;font-size:13px;width:40%">Room</td>
+      <td style="padding:6px 0;font-size:13px">${p.roomNumber ? 'Room ' + p.roomNumber : '—'}${p.roomTypeName ? ' — ' + p.roomTypeName : ''}</td>
+    </tr>
+    <tr>
+      <td style="padding:6px 12px 6px 0;color:#666;font-size:13px">Check-in</td>
+      <td style="padding:6px 0;font-size:13px">${fmtDate(p.checkInDate)}</td>
+    </tr>
+    <tr style="background:#f9f9f9">
+      <td style="padding:6px 12px 6px 0;color:#666;font-size:13px">Check-out</td>
+      <td style="padding:6px 0;font-size:13px">${fmtDate(p.checkOutDate)} (${p.nights} night${p.nights === 1 ? '' : 's'})</td>
+    </tr>
+  </table>
+
+  <p style="font-size:13px;font-weight:600;margin:16px 0 6px;color:#333">Charges</p>
+  <table style="width:100%;border-collapse:collapse">${chargeRows}
+    <tr style="border-top:2px solid #ddd">
+      <td style="padding:7px 12px 7px 0;font-weight:700;font-size:13px">Total</td>
+      <td style="padding:7px 0;text-align:right;font-weight:700;font-size:13px">${fmtMoney(chargesTotal)}</td>
+    </tr>
+  </table>
+
+  ${p.payments.length > 0 ? `
+  <p style="font-size:13px;font-weight:600;margin:16px 0 6px;color:#333">Payments</p>
+  <table style="width:100%;border-collapse:collapse">${paymentRows}</table>` : ''}
+
+  <table style="width:100%;border-collapse:collapse;margin-top:8px">
+    <tr style="background:${balance <= 0 ? '#e8f5e9' : '#fff3cd'}">
+      <td style="padding:8px 12px 8px 0;font-weight:700;font-size:14px">Balance</td>
+      <td style="padding:8px 0;text-align:right;font-weight:700;font-size:14px;color:${balance <= 0 ? '#2e7d32' : '#b45309'}">${balance <= 0 ? 'Paid in Full' : fmtMoney(balance) + ' owing'}</td>
+    </tr>
+  </table>
+
+  <div style="margin:24px 0;text-align:center">
+    <a href="${p.receiptUrl}"
+       style="display:inline-block;background:#1d1d1d;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">
+      View / Print Full Receipt →
+    </a>
+  </div>
+
+  <p style="color:#555;font-size:14px">We hope you enjoyed your stay and look forward to welcoming you back!</p>
+  <p style="color:#555;font-size:14px">— ${p.propertyName}</p>
+
+  <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
+  <p style="color:#aaa;font-size:11px">
+    If you have any questions about this receipt, please contact us${p.propertyPhone ? ' at ' + p.propertyPhone : ''}.
+  </p>
+</body>
+</html>`;
+
+	await send({
+		from,
+		to: [p.guestEmail],
+		subject: `Receipt — ${p.propertyName} · ${fmtDate(p.checkOutDate)}`,
 		html
 	});
 }
