@@ -6,13 +6,14 @@
 	import PropertyTaxes from '$lib/components/settings/PropertyTaxes.svelte';
 	import PropertyAddons from '$lib/components/settings/PropertyAddons.svelte';
 	import PropertyRooms from '$lib/components/settings/PropertyRooms.svelte';
+	import PropertyRates from '$lib/components/settings/PropertyRates.svelte';
 	import PropertyChannex from '$lib/components/settings/PropertyChannex.svelte';
 	import PropertyPayments from '$lib/components/settings/PropertyPayments.svelte';
 	import Channels from '$lib/components/settings/Channels.svelte';
 
 	let { data }: { data: PageData } = $props();
 
-	const PROP_SECTIONS = ['general', 'policy', 'booking', 'rooms', 'taxes', 'addons', 'payments', 'channex'] as const;
+	const PROP_SECTIONS = ['general', 'policy', 'booking', 'rooms', 'taxes', 'addons', 'rates', 'payments', 'channex'] as const;
 	const GLOBAL_SECTIONS = ['channels', 'email'] as const;
 	type Section = typeof PROP_SECTIONS[number] | typeof GLOBAL_SECTIONS[number];
 
@@ -24,6 +25,8 @@
 	const propRooms = $derived(data.roomsList.filter((r) => r.propertyId === selectedPropId));
 	const propTaxes  = $derived(data.taxPresetsList.filter((t) => t.propertyId === selectedPropId));
 	const propAddons = $derived(data.addonPresetsList.filter((a) => a.propertyId === selectedPropId));
+	const propLosDiscounts = $derived(data.losDiscountsList.filter((l) => l.propertyId === selectedPropId));
+	const propPromoCodes   = $derived(data.promoCodesList.filter((c) => c.propertyId === selectedPropId));
 
 	const SECTION_LABELS: Record<Section, string> = {
 		general: 'General',
@@ -32,6 +35,7 @@
 		rooms: 'Rooms & Types',
 		taxes: 'Taxes',
 		addons: 'Add-Ons',
+		rates: 'Rates & Promos',
 		payments: 'Payments',
 		channex: 'Channex',
 		channels: 'Channels',
@@ -104,9 +108,11 @@
 				<PropertyRooms {prop} rooms={propRooms} roomTypes={propRoomTypes} />
 			{:else if prop && activeSection === 'taxes'}
 				<PropertyTaxes {prop} presets={propTaxes} />
-			{:else if prop && activeSection === 'addons'}
-				<PropertyAddons {prop} presets={propAddons} />
-			{:else if prop && activeSection === 'payments'}
+		{:else if prop && activeSection === 'addons'}
+			<PropertyAddons {prop} presets={propAddons} />
+		{:else if prop && activeSection === 'rates'}
+			<PropertyRates {prop} roomTypes={propRoomTypes} losDiscounts={propLosDiscounts} promoCodes={propPromoCodes} />
+		{:else if prop && activeSection === 'payments'}
 			<PropertyPayments {prop} />
 		{:else if prop && activeSection === 'channex'}
 				<PropertyChannex {prop} roomTypes={propRoomTypes} />

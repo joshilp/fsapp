@@ -10,6 +10,7 @@
 	type RoomType = {
 		id: string; propertyId: string; name: string; category: string;
 		sortOrder: number; defaultRateCents?: number | null;
+		description?: string | null; imageUrl?: string | null; maxOccupancy?: number | null;
 	};
 	type Room = {
 		id: string; roomNumber: string; isActive: boolean; hasKitchen: boolean;
@@ -83,16 +84,35 @@
 							<input name="sortOrder" type="number" value={rt.sortOrder}
 								class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
 						</div>
-						<div class="flex flex-col gap-1">
-							<span class="text-xs text-muted-foreground">Default rate</span>
-							<div class="flex items-center gap-1">
-								<span class="text-sm text-muted-foreground">$</span>
-								<input name="defaultRateCents" type="number" min="0" step="1"
-									value={rt.defaultRateCents ? (rt.defaultRateCents / 100).toFixed(0) : ''}
-									placeholder="100"
-									class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono" />
-							</div>
+					<div class="flex flex-col gap-1">
+						<span class="text-xs text-muted-foreground">Default rate</span>
+						<div class="flex items-center gap-1">
+							<span class="text-sm text-muted-foreground">$</span>
+							<input name="defaultRateCents" type="number" min="0" step="1"
+								value={rt.defaultRateCents ? (rt.defaultRateCents / 100).toFixed(0) : ''}
+								placeholder="100"
+								class="border-input bg-background rounded border px-2 py-1 text-sm w-20 font-mono" />
 						</div>
+					</div>
+					<div class="flex flex-col gap-1">
+						<span class="text-xs text-muted-foreground">Sleeps (max)</span>
+						<input name="maxOccupancy" type="number" min="1" max="20"
+							value={rt.maxOccupancy ?? ''}
+							placeholder="2"
+							class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
+					</div>
+					<div class="flex flex-col gap-1 w-full">
+						<span class="text-xs text-muted-foreground">Photo URL</span>
+						<input name="imageUrl" type="url" value={rt.imageUrl ?? ''}
+							placeholder="https://…"
+							class="border-input bg-background rounded border px-2 py-1 text-sm w-full" />
+					</div>
+					<div class="flex flex-col gap-1 w-full">
+						<span class="text-xs text-muted-foreground">Description (shown on booking page)</span>
+						<textarea name="description" rows="2"
+							placeholder="Bright corner room with full kitchen and balcony view…"
+							class="border-input bg-background rounded border px-2 py-1 text-sm w-full resize-none">{rt.description ?? ''}</textarea>
+					</div>
 						<Button type="submit" size="sm" class="h-8">Save</Button>
 						<Button type="button" variant="ghost" size="sm" class="h-8"
 							onclick={() => { editingRoomTypeId = null; }}>Cancel</Button>

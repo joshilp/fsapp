@@ -3,9 +3,9 @@
  * Handles validation, atomic availability check, and booking insertion.
  */
 import { fail } from '@sveltejs/kit';
-import { eq, and, lt, gt, ne, inArray, isNull } from 'drizzle-orm';
+import { eq, and, lt, gt, ne, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { bookings, bookingChannels, bookingLineItems, guests, properties, roomTypes, rooms } from '$lib/server/db/schema';
+import { bookings, bookingChannels, bookingLineItems, guests, promoCodes, properties, roomTypes, rooms } from '$lib/server/db/schema';
 import { sendGuestConfirmation, sendOperatorAlert } from '$lib/server/email';
 import { env } from '$env/dynamic/private';
 import { syncARIForStay } from '$lib/server/ari-sync';
@@ -33,6 +33,7 @@ export async function bookAction(request: Request) {
 	const notes            = get('notes');
 	const quotedTotalCents = parseInt(get('quotedTotalCents') || '0', 10);
 	const quotedNights     = parseInt(get('quotedNights') || '1', 10);
+	const promoCodeId      = get('promoCodeId') || null;
 
 	const today = new Date().toISOString().slice(0, 10);
 	if (!propertyId)  return fail(400, { error: 'Please select a property.' });
@@ -125,12 +126,19 @@ export async function bookAction(request: Request) {
 			propertyId, roomId: null, requestedRoomTypeId: roomTypeId,
 			guestId: guest.id, channelId: onlineCh?.id ?? null,
 			status: 'confirmed', checkInDate: checkIn, checkOutDate: checkOut,
-			numAdults, numChildren, notes: notes || null, publicToken: newToken
+			numAdults, numChildren, notes: notes || null, publicToken: newToken,
+			promoCodeId: promoCodeId || null
 		}).returning({ id: bookings.id, publicToken: bookings.publicToken });
 		booking = b;
 	} catch {
-		// The publicToken UNIQUE constraint fires if a duplicate token was generated
 		return fail(400, { error: 'Booking failed due to a conflict. Please try again.' });
+	}
+
+	// Increment promo code usage count
+	if (promoCodeId) {
+		await db.update(promoCodes)
+			.set({ usedCount: sql`${promoCodes.usedCount} + 1` })
+			.where(eq(promoCodes.id, promoCodeId));
 	}
 
 	if (quotedTotalCents > 0 && quotedNights > 0) {

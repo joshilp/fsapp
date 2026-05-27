@@ -89,6 +89,10 @@ export const roomTypes = sqliteTable('room_types', {
 	name: text('name').notNull(), // e.g. "1 Bed", "2 Bed + Kitchen"
 	category: text('category').notNull(), // A | B | C | D
 	sortOrder: integer('sort_order').notNull().default(0),
+	// ── Guest-facing booking page ─────────────────────────────────────────────
+	description: text('description'),   // short marketing blurb shown on booking page
+	imageUrl: text('image_url'),        // photo URL (overrides stock category image)
+	maxOccupancy: integer('max_occupancy'), // max guests (shown as "Sleeps N")
 	// ── Channex channel manager mapping ──────────────────────────────────────
 	// channexRoomTypeId: UUID of the matching Room Type in Channex
 	// channexRatePlanId: UUID of the default Rate Plan in Channex (one per room type)
@@ -264,7 +268,54 @@ export const addonPresets = sqliteTable('addon_presets', {
 		.notNull()
 });
 
-// ─── Booking Channels ─────────────────────────────────────────────────────────
+// ─── Length-of-Stay Discounts ────────────────────────────────────────────────
+// Automatic % discount applied when a booking meets the minimum night threshold.
+// roomTypeId = null means the rule applies to all room types in the property.
+
+export const losDiscounts = sqliteTable('los_discounts', {
+	id: id(),
+	propertyId: text('property_id')
+		.notNull()
+		.references(() => properties.id, { onDelete: 'cascade' }),
+	// null = applies to all room types for this property
+	roomTypeId: text('room_type_id').references(() => roomTypes.id, { onDelete: 'cascade' }),
+	label: text('label').notNull(),       // e.g. "Weekly stay — 10% off"
+	minNights: integer('min_nights').notNull(), // must book at least this many nights
+	discountPercent: real('discount_percent').notNull(), // e.g. 10.0 = 10%
+	isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+	sortOrder: integer('sort_order').notNull().default(0),
+	createdAt: integer('created_at', { mode: 'timestamp_ms' })
+		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+		.notNull()
+});
+
+// ─── Promo Codes ─────────────────────────────────────────────────────────────
+// Guest-entered discount codes on the public booking page.
+// Either discountPercent OR discountCents applies (not both).
+
+export const promoCodes = sqliteTable(
+	'promo_codes',
+	{
+		id: id(),
+		propertyId: text('property_id')
+			.notNull()
+			.references(() => properties.id, { onDelete: 'cascade' }),
+		code: text('code').notNull(),           // e.g. "SUMMER10" (case-insensitive)
+		label: text('label').notNull(),          // internal name, e.g. "Summer 2026"
+		discountPercent: real('discount_percent'), // e.g. 10.0 = 10% off subtotal
+		discountCents: integer('discount_cents'),  // flat deduction in cents
+		maxUses: integer('max_uses'),            // null = unlimited
+		usedCount: integer('used_count').notNull().default(0),
+		expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
+		isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' })
+			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+			.notNull()
+	},
+	(t) => [unique('promo_codes_property_code_uq').on(t.propertyId, t.code)]
+);
+
+
 // Extensible source list. Seed data: Direct, Expedia, Booking.com.
 // isOta flags channels that use a separate confirmation folder workflow.
 
@@ -416,6 +467,9 @@ export const bookings = sqliteTable(
 		// Tracks when a confirmation email was last sent to the guest
 		confirmationSentAt: integer('confirmation_sent_at', { mode: 'timestamp_ms' }),
 
+		// Applied promo code (for tracking usage)
+		promoCodeId: text('promo_code_id').references(() => promoCodes.id, { onDelete: 'set null' }),
+
 		...timestamps
 	},
 	(t) => [
@@ -531,13 +585,26 @@ export const propertiesRelations = relations(properties, ({ many }) => ({
 	rateSeasons: many(rateSeasons),
 	taxPresets: many(taxPresets),
 	addonPresets: many(addonPresets),
+	losDiscounts: many(losDiscounts),
+	promoCodes: many(promoCodes),
 	bookings: many(bookings)
 }));
 
 export const roomTypesRelations = relations(roomTypes, ({ one, many }) => ({
 	property: one(properties, { fields: [roomTypes.propertyId], references: [properties.id] }),
 	rooms: many(rooms),
-	rateTiers: many(rateTiers)
+	rateTiers: many(rateTiers),
+	losDiscounts: many(losDiscounts)
+}));
+
+export const losDiscountsRelations = relations(losDiscounts, ({ one }) => ({
+	property: one(properties, { fields: [losDiscounts.propertyId], references: [properties.id] }),
+	roomType: one(roomTypes, { fields: [losDiscounts.roomTypeId], references: [roomTypes.id] })
+}));
+
+export const promoCodesRelations = relations(promoCodes, ({ one, many }) => ({
+	property: one(properties, { fields: [promoCodes.propertyId], references: [properties.id] }),
+	bookings: many(bookings)
 }));
 
 export const roomsRelations = relations(rooms, ({ one, many }) => ({
@@ -590,6 +657,7 @@ export const bookingsRelations = relations(bookings, ({ one, many }) => ({
 	channel: one(bookingChannels, { fields: [bookings.channelId], references: [bookingChannels.id] }),
 	clerk: one(user, { fields: [bookings.clerkId], references: [user.id] }),
 	group: one(groups, { fields: [bookings.groupId], references: [groups.id] }),
+	promoCode: one(promoCodes, { fields: [bookings.promoCodeId], references: [promoCodes.id] }),
 	lineItems: many(bookingLineItems),
 	paymentEvents: many(paymentEvents),
 	ccStaging: one(ccStaging, { fields: [bookings.id], references: [ccStaging.bookingId] })

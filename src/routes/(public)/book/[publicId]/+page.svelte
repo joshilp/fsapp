@@ -104,15 +104,25 @@
 	let rateQuote   = $state<PublicPricing | null>(null);
 	let rateLoading = $state(false);
 
+	let promoInput   = $state('');
+	let promoChecking = $state(false);
+
 	async function fetchRate() {
 		if (!selectedTypeId) return;
 		rateLoading = true;
 		rateQuote = null;
 		try {
-			const res = await fetch(`/api/public/pricing?roomTypeId=${selectedTypeId}&checkIn=${checkIn}&checkOut=${checkOut}`);
+			const promoParam = promoInput.trim() ? `&promo=${encodeURIComponent(promoInput.trim())}` : '';
+			const res = await fetch(`/api/public/pricing?roomTypeId=${selectedTypeId}&checkIn=${checkIn}&checkOut=${checkOut}${promoParam}`);
 			if (res.ok) rateQuote = await res.json();
 		} catch { /* ignore */ }
 		rateLoading = false;
+	}
+
+	async function applyPromo() {
+		promoChecking = true;
+		await fetchRate();
+		promoChecking = false;
 	}
 
 	function goToStep3() {
@@ -256,39 +266,54 @@
 						<button onclick={() => { step = 1; }} class="mt-4 text-sm hover:underline" style="color:{accent}">← Change dates</button>
 					</div>
 				{:else}
-					<div class="space-y-3">
-						{#each availableTypes as rt}
-							<button
-								type="button"
-								onclick={() => { selectedTypeId = rt.id; }}
-								class="w-full rounded-xl border-2 overflow-hidden text-left transition-all flex"
-								style={selectedTypeId === rt.id ? `border-color:${accent}; background-color:${accent}18` : 'border-color:#e7e5e4'}
-							>
-								<img src={categoryImages[rt.category] ?? categoryImages['A']} alt={rt.name} class="w-24 sm:w-32 object-cover shrink-0" />
-								<div class="p-4 flex-1">
-									<div class="flex items-start justify-between gap-2">
-										<div>
-											<p class="font-semibold text-stone-900">{rt.name}</p>
+				<div class="space-y-3">
+					{#each availableTypes as rt}
+						{@const totalNights = nights}
+						{@const totalPrice = rt.minRateCents ? rt.minRateCents * totalNights : null}
+						{@const photo = rt.imageUrl ?? categoryImages[rt.category] ?? categoryImages['A']}
+						<button
+							type="button"
+							onclick={() => { selectedTypeId = rt.id; }}
+							class="w-full rounded-xl border-2 overflow-hidden text-left transition-all flex"
+							style={selectedTypeId === rt.id ? `border-color:${accent}; background-color:${accent}18` : 'border-color:#e7e5e4'}
+						>
+							<img src={photo} alt={rt.name} class="w-28 sm:w-36 object-cover shrink-0" />
+							<div class="p-4 flex-1 min-w-0">
+								<div class="flex items-start justify-between gap-2">
+									<div class="min-w-0 flex-1">
+										<p class="font-semibold text-stone-900">{rt.name}</p>
+										<!-- Bed config + amenities row -->
+										<div class="flex flex-wrap items-center gap-1.5 mt-1">
 											{#if bedLabel(rt)}
-												<p class="text-stone-500 text-xs mt-0.5">{bedLabel(rt)}</p>
+												<span class="text-stone-500 text-xs">{bedLabel(rt)}</span>
 											{/if}
 											{#if rt.beds?.hasKitchen}
-												<span class="mt-2 inline-block text-[10px] bg-green-100 text-green-700 rounded-full px-2 py-0.5">Kitchen</span>
+												<span class="text-[10px] bg-green-100 text-green-700 rounded-full px-2 py-0.5">Kitchen</span>
+											{/if}
+											{#if rt.maxOccupancy}
+												<span class="text-[10px] bg-stone-100 text-stone-600 rounded-full px-2 py-0.5">Sleeps {rt.maxOccupancy}</span>
 											{/if}
 										</div>
-										<div class="text-right shrink-0">
-											{#if rt.minRateCents}
-												<p class="text-xs text-stone-400">from</p>
-												<p class="text-lg font-bold text-stone-900">${(rt.minRateCents / 100).toFixed(0)}</p>
-												<p class="text-xs text-stone-400">/night</p>
+										{#if rt.description}
+											<p class="text-stone-500 text-xs mt-1.5 line-clamp-2">{rt.description}</p>
+										{/if}
+									</div>
+									<div class="text-right shrink-0">
+										{#if rt.minRateCents}
+											<p class="text-xs text-stone-400">from</p>
+											<p class="text-lg font-bold text-stone-900">${(rt.minRateCents / 100).toFixed(0)}</p>
+											<p class="text-xs text-stone-400">/night</p>
+											{#if totalNights > 1 && totalPrice}
+												<p class="text-xs text-stone-500 mt-0.5 font-medium">{fmt(totalPrice)} est.</p>
 											{/if}
-											<p class="text-xs text-stone-400 mt-1">{rt.availableCount} avail.</p>
-										</div>
+										{/if}
+										<p class="text-xs text-stone-400 mt-1">{rt.availableCount} avail.</p>
 									</div>
 								</div>
-							</button>
-						{/each}
-					</div>
+							</div>
+						</button>
+					{/each}
+				</div>
 
 					<button type="button" onclick={goToStep3} disabled={!selectedTypeId}
 						class="mt-5 w-full rounded-xl py-3 text-sm font-bold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
@@ -304,21 +329,22 @@
 				<button onclick={() => { step = deepLinked ? 1 : 2; }} class="text-sm text-stone-400 hover:text-stone-600">← Back</button>
 			</div>
 
-				<!-- Mini summary -->
-				{#if selectedType}
-					<div class="rounded-xl border px-4 py-3 text-sm mb-5 flex items-center gap-3" style="border-color:{accent}40; background-color:{accent}0D">
-						<img src={categoryImages[selectedType.category] ?? categoryImages['A']} alt="" class="h-12 w-16 rounded-lg object-cover shrink-0" />
-						<div class="min-w-0">
-							<p class="font-semibold text-stone-900">{selectedType.name}</p>
-							<p class="text-stone-500 text-xs">{fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights}n</p>
-							{#if rateQuote}
-								<p class="text-xs font-semibold mt-0.5" style="color:{accent}">Est. {fmt(rateQuote.subtotalCents)} total (before tax)</p>
-							{:else if rateLoading}
-								<p class="text-stone-400 text-xs">Calculating rate…</p>
-							{/if}
-						</div>
+			<!-- Mini summary -->
+			{#if selectedType}
+				{@const photo = selectedType.imageUrl ?? categoryImages[selectedType.category] ?? categoryImages['A']}
+				<div class="rounded-xl border px-4 py-3 text-sm mb-5 flex items-center gap-3" style="border-color:{accent}40; background-color:{accent}0D">
+					<img src={photo} alt="" class="h-12 w-16 rounded-lg object-cover shrink-0" />
+					<div class="min-w-0">
+						<p class="font-semibold text-stone-900">{selectedType.name}</p>
+						<p class="text-stone-500 text-xs">{fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights}n</p>
+						{#if rateQuote}
+							<p class="text-xs font-semibold mt-0.5" style="color:{accent}">Est. {fmt(rateQuote.totalAfterDiscountsCents)} total (before tax)</p>
+						{:else if rateLoading}
+							<p class="text-stone-400 text-xs">Calculating rate…</p>
+						{/if}
 					</div>
-				{/if}
+				</div>
+			{/if}
 
 				<div class="space-y-4 mb-5">
 					<div class="grid gap-4 sm:grid-cols-2">
@@ -365,25 +391,60 @@
 					</div>
 				</div>
 
-				<!-- Rate breakdown -->
-				{#if rateQuote && rateQuote.lines.length > 0}
-					<div class="rounded-xl bg-stone-50 border border-stone-100 px-4 py-3 mb-5 text-sm">
-						<p class="text-xs text-stone-400 mb-2">Estimated rate breakdown</p>
-						{#each rateQuote.lines as line}
-							<div class="flex justify-between text-stone-600">
-								<span>{line.nights}n × ${(line.unitCents/100).toFixed(0)}/night</span>
-								<span class="font-medium">{fmt(line.totalCents)}</span>
-							</div>
-						{/each}
-						<div class="mt-2 pt-2 border-t border-stone-100 flex justify-between font-semibold text-stone-900">
-							<span>Subtotal (before tax)</span>
-							<span>{fmt(rateQuote.subtotalCents)}</span>
+			<!-- Rate breakdown + promo code -->
+			{#if rateQuote && rateQuote.lines.length > 0}
+				<div class="rounded-xl bg-stone-50 border border-stone-100 px-4 py-3 mb-5 text-sm">
+					<p class="text-xs text-stone-400 mb-2">Estimated rate breakdown</p>
+					{#each rateQuote.lines as line}
+						<div class="flex justify-between text-stone-600">
+							<span>{line.nights}n × ${(line.unitCents/100).toFixed(0)}/night</span>
+							<span class="font-medium">{fmt(line.totalCents)}</span>
 						</div>
-						{#if rateQuote.minNightWarning}
-							<p class="text-xs text-amber-600 mt-1">⚠ {rateQuote.minNightWarning}</p>
-						{/if}
+					{/each}
+					<div class="mt-2 pt-2 border-t border-stone-100 flex justify-between text-stone-700">
+						<span>Subtotal</span>
+						<span>{fmt(rateQuote.subtotalCents)}</span>
 					</div>
-				{/if}
+					{#if rateQuote.losDiscount}
+						<div class="flex justify-between text-green-700 text-xs mt-1">
+							<span>🏷 {rateQuote.losDiscount.label} ({rateQuote.losDiscount.discountPercent}% off)</span>
+							<span>−{fmt(rateQuote.losDiscountCents)}</span>
+						</div>
+					{/if}
+					{#if rateQuote.promo}
+						<div class="flex justify-between text-green-700 text-xs mt-1">
+							<span>🎟 Promo: {rateQuote.promo.code}</span>
+							<span>−{fmt(rateQuote.promoDiscountCents)}</span>
+						</div>
+					{/if}
+					<div class="mt-2 pt-2 border-t border-stone-200 flex justify-between font-semibold text-stone-900">
+						<span>Total (before tax)</span>
+						<span>{fmt(rateQuote.totalAfterDiscountsCents)}</span>
+					</div>
+					{#if rateQuote.minNightWarning}
+						<p class="text-xs text-amber-600 mt-1">⚠ {rateQuote.minNightWarning}</p>
+					{/if}
+				</div>
+
+				<!-- Promo code -->
+				<div class="mb-5">
+					<p class="text-xs font-medium text-stone-600 mb-1.5">Have a promo code?</p>
+					<div class="flex gap-2">
+						<input type="text" bind:value={promoInput} placeholder="e.g. SUMMER10"
+							class="flex-1 rounded-xl border border-stone-200 px-3 py-2 text-sm font-mono uppercase focus:outline-none focus:ring-2"
+							onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyPromo(); } }} />
+						<button type="button" onclick={applyPromo} disabled={promoChecking || !promoInput.trim()}
+							class="rounded-xl border border-stone-200 px-4 py-2 text-sm font-medium hover:bg-stone-50 disabled:opacity-40 transition-colors">
+							{promoChecking ? '…' : 'Apply'}
+						</button>
+					</div>
+					{#if promoInput.trim() && rateQuote && !rateQuote.promo}
+						<p class="text-xs text-red-500 mt-1">Code not valid or expired.</p>
+					{:else if rateQuote?.promo}
+						<p class="text-xs text-green-600 mt-1">✓ {rateQuote.promo.label} applied.</p>
+					{/if}
+				</div>
+			{/if}
 
 				<!-- Notice -->
 				<div class="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-700 mb-5 space-y-1">
@@ -414,9 +475,12 @@
 					<input type="hidden" name="numAdults"   value={numAdults} />
 					<input type="hidden" name="numChildren" value={numChildren} />
 					<input type="hidden" name="notes"       value={guestNotes} />
-					{#if rateQuote && rateQuote.subtotalCents > 0}
-						<input type="hidden" name="quotedTotalCents" value={rateQuote.subtotalCents} />
-						<input type="hidden" name="quotedNights"     value={nights} />
+				{#if rateQuote && rateQuote.totalAfterDiscountsCents > 0}
+					<input type="hidden" name="quotedTotalCents" value={rateQuote.totalAfterDiscountsCents} />
+					<input type="hidden" name="quotedNights"     value={nights} />
+					{#if rateQuote.promo}
+						<input type="hidden" name="promoCodeId" value={rateQuote.promo.id} />
+					{/if}
 					{/if}
 
 					<button type="submit" disabled={submitting || !guestName.trim() || !guestEmail.trim()}

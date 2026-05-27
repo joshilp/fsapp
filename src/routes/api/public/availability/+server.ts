@@ -12,6 +12,9 @@ export type AvailableRoomType = {
 	availableCount: number;
 	totalCount: number;
 	minRateCents: number | null;
+	description: string | null;
+	imageUrl: string | null;
+	maxOccupancy: number | null;
 	// bed / amenity summary for display
 	beds: {
 		kingBeds: number;
@@ -92,7 +95,7 @@ export const GET: RequestHandler = async ({ url }) => {
 	// Load room types for this property
 	const propRoomTypes = await db.query.roomTypes.findMany({
 		where: eq(roomTypes.propertyId, propertyId),
-		columns: { id: true, name: true, category: true, sortOrder: true },
+		columns: { id: true, name: true, category: true, sortOrder: true, description: true, imageUrl: true, maxOccupancy: true },
 		orderBy: (rt, { asc }) => [asc(rt.sortOrder)]
 	});
 
@@ -102,7 +105,6 @@ export const GET: RequestHandler = async ({ url }) => {
 		const taken       = rtRooms.filter((r) => conflictedRoomIds.has(r.id)).length + (unassignedByType.get(rt.id) ?? 0);
 		const availableCount = Math.max(0, totalCount - taken);
 
-		// Use first room of this type for bed/amenity info (they're all the same type)
 		const rep = rtRooms[0] ?? null;
 
 		return {
@@ -110,6 +112,9 @@ export const GET: RequestHandler = async ({ url }) => {
 			name:          rt.name,
 			category:      rt.category,
 			sortOrder:     rt.sortOrder,
+			description:   rt.description ?? null,
+			imageUrl:      rt.imageUrl ?? null,
+			maxOccupancy:  rt.maxOccupancy ?? null,
 			availableCount,
 			totalCount,
 			minRateCents:  minRateByType.get(rt.id) ?? null,

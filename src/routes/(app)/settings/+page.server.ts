@@ -4,6 +4,8 @@ import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import {
 	bookingChannels,
+	losDiscounts,
+	promoCodes,
 	properties,
 	rooms,
 	roomTypes,
@@ -14,7 +16,7 @@ import {
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) redirect(303, '/auth/login');
 
-	const [propertiesList, taxPresetsList, addonPresetsList, roomsList, roomTypesList, channelsList] =
+	const [propertiesList, taxPresetsList, addonPresetsList, roomsList, roomTypesList, channelsList, losDiscountsList, promoCodesList] =
 		await Promise.all([
 			db.query.properties.findMany({ orderBy: (t, { asc }) => [asc(t.name)] }),
 			db.query.taxPresets.findMany({
@@ -38,6 +40,14 @@ export const load: PageServerLoad = async ({ locals }) => {
 				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.sortOrder)]
 			}),
 			db.query.bookingChannels.findMany({ orderBy: (t, { asc }) => [asc(t.sortOrder)] }),
+			db.query.losDiscounts.findMany({
+				with: { roomType: { columns: { name: true, category: true } } },
+				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.sortOrder)]
+			}),
+			db.query.promoCodes.findMany({
+				where: (t, { eq }) => eq(t.isActive, true),
+				orderBy: (t, { asc }) => [asc(t.propertyId), asc(t.createdAt)]
+			}),
 		]);
 
 	return {
@@ -46,7 +56,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 		addonPresetsList,
 		roomsList,
 		roomTypesList,
-		channelsList
+		channelsList,
+		losDiscountsList,
+		promoCodesList
 	};
 };
 
@@ -347,11 +359,15 @@ export const actions: Actions = {
 		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
 		const defaultRateRaw = g('defaultRateCents');
 		const defaultRateCents = defaultRateRaw ? Math.round(parseFloat(defaultRateRaw) * 100) || null : null;
+		const description = g('description');
+		const imageUrl = g('imageUrl');
+		const maxOccupancyRaw = g('maxOccupancy');
+		const maxOccupancy = maxOccupancyRaw ? parseInt(maxOccupancyRaw) || null : null;
 		if (!propertyId || !name || !category) return fail(400, { error: 'Missing fields' });
 		if (id) {
-			await db.update(roomTypes).set({ name, category, sortOrder, defaultRateCents }).where(eq(roomTypes.id, id));
+			await db.update(roomTypes).set({ name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy }).where(eq(roomTypes.id, id));
 		} else {
-			await db.insert(roomTypes).values({ id: crypto.randomUUID(), propertyId, name, category, sortOrder, defaultRateCents });
+			await db.insert(roomTypes).values({ id: crypto.randomUUID(), propertyId, name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy });
 		}
 		return { success: true };
 	},
@@ -361,6 +377,74 @@ export const actions: Actions = {
 		const id = ((await request.formData()).get('id') as string)?.trim();
 		if (!id) return fail(400, { error: 'Missing ID' });
 		await db.delete(roomTypes).where(eq(roomTypes.id, id));
+		return { success: true };
+	},
+
+	// ── LOS Discounts ─────────────────────────────────────────────────────────
+	upsertLosDiscount: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		const propertyId = g('propertyId');
+		const label = g('label');
+		const minNightsRaw = g('minNights');
+		const discountPercentRaw = g('discountPercent');
+		const roomTypeId = g('roomTypeId') || null;
+		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
+		if (!propertyId || !label || !minNightsRaw || !discountPercentRaw) return fail(400, { error: 'Missing fields' });
+		const minNights = parseInt(minNightsRaw);
+		const discountPercent = parseFloat(discountPercentRaw);
+		if (isNaN(minNights) || minNights < 2) return fail(400, { error: 'Min nights must be ≥ 2' });
+		if (isNaN(discountPercent) || discountPercent <= 0 || discountPercent >= 100) return fail(400, { error: 'Discount must be 0–100%' });
+		if (id) {
+			await db.update(losDiscounts).set({ label, minNights, discountPercent, roomTypeId, sortOrder }).where(eq(losDiscounts.id, id));
+		} else {
+			await db.insert(losDiscounts).values({ id: crypto.randomUUID(), propertyId, label, minNights, discountPercent, roomTypeId, sortOrder });
+		}
+		return { success: true };
+	},
+
+	deleteLosDiscount: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const id = ((await request.formData()).get('id') as string)?.trim();
+		if (!id) return fail(400, { error: 'Missing ID' });
+		await db.delete(losDiscounts).where(eq(losDiscounts.id, id));
+		return { success: true };
+	},
+
+	// ── Promo Codes ───────────────────────────────────────────────────────────
+	upsertPromoCode: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		const propertyId = g('propertyId');
+		const code = g('code')?.toUpperCase();
+		const label = g('label');
+		const discountPercentRaw = g('discountPercent');
+		const discountCentsRaw = g('discountDollars');
+		const maxUsesRaw = g('maxUses');
+		const expiresRaw = g('expiresAt');
+		if (!propertyId || !code || !label) return fail(400, { error: 'Missing fields' });
+		const discountPercent = discountPercentRaw ? parseFloat(discountPercentRaw) || null : null;
+		const discountCents = discountCentsRaw ? Math.round(parseFloat(discountCentsRaw) * 100) || null : null;
+		if (!discountPercent && !discountCents) return fail(400, { error: 'Must set a % or $ discount' });
+		const maxUses = maxUsesRaw ? parseInt(maxUsesRaw) || null : null;
+		const expiresAt = expiresRaw ? new Date(expiresRaw) : null;
+		if (id) {
+			await db.update(promoCodes).set({ code, label, discountPercent, discountCents, maxUses, expiresAt }).where(eq(promoCodes.id, id));
+		} else {
+			await db.insert(promoCodes).values({ id: crypto.randomUUID(), propertyId, code, label, discountPercent, discountCents, maxUses, expiresAt });
+		}
+		return { success: true };
+	},
+
+	deletePromoCode: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const id = ((await request.formData()).get('id') as string)?.trim();
+		if (!id) return fail(400, { error: 'Missing ID' });
+		await db.update(promoCodes).set({ isActive: false }).where(eq(promoCodes.id, id));
 		return { success: true };
 	},
 
