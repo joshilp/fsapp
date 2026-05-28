@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import { and, eq, lt, gt, ne, inArray, isNull, lte, gte } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { bookings, rooms, roomTypes, rateSeasons, rateTiers } from '$lib/server/db/schema';
+import { bookings, rooms, roomTypes, rateSeasons, rateTiers, rateOverrides } from '$lib/server/db/schema';
 
 export type AvailableRoomType = {
 	id: string;
@@ -15,7 +15,6 @@ export type AvailableRoomType = {
 	description: string | null;
 	imageUrl: string | null;
 	maxOccupancy: number | null;
-	// bed / amenity summary for display
 	beds: {
 		kingBeds: number;
 		queenBeds: number;
@@ -40,7 +39,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		columns: { id: true, roomTypeId: true, kingBeds: true, queenBeds: true, doubleBeds: true, hasKitchen: true, hasHideabed: true }
 	});
 
-	// Rooms already taken by bookings with a concrete roomId
+	// Rooms already taken by concrete-assigned bookings
 	const allRoomIds = allRooms.map((r) => r.id);
 	const conflictedRoomIds = allRoomIds.length > 0
 		? new Set(
@@ -58,7 +57,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		)
 		: new Set<string>();
 
-	// All unassigned bookings in this date range for this property
+	// Unassigned bookings by room type for this date range
 	const unassignedConflicts = await db
 		.select({ roomTypeId: bookings.requestedRoomTypeId })
 		.from(bookings)
@@ -75,33 +74,35 @@ export const GET: RequestHandler = async ({ url }) => {
 		if (b.roomTypeId) unassignedByType.set(b.roomTypeId, (unassignedByType.get(b.roomTypeId) ?? 0) + 1);
 	}
 
-	// Min rates per room type
+	// Min rates per room type (exclude manual-only seasons)
 	const tiers = await db.query.rateTiers.findMany({
 		with: {
 			season: {
-				columns: { startDate: true, endDate: true },
-				where: and(lte(rateSeasons.startDate, checkOut), gte(rateSeasons.endDate, checkIn))
+				columns: { startDate: true, endDate: true, isManualOnly: true },
+				where: and(
+					lte(rateSeasons.startDate, checkOut),
+					gte(rateSeasons.endDate, checkIn)
+				)
 			}
 		},
 		columns: { roomTypeId: true, nightlyRate: true }
 	});
 	const minRateByType = new Map<string, number>();
 	for (const t of tiers) {
-		if (!t.season) continue;
+		if (!t.season || t.season.isManualOnly) continue;
 		const cur = minRateByType.get(t.roomTypeId);
 		if (cur === undefined || t.nightlyRate < cur) minRateByType.set(t.roomTypeId, t.nightlyRate);
 	}
 
-	// Load room types for this property (including parentRoomTypeId)
+	// Load room types for this property
 	const propRoomTypes = await db.query.roomTypes.findMany({
 		where: eq(roomTypes.propertyId, propertyId),
 		columns: { id: true, name: true, category: true, sortOrder: true, description: true, imageUrl: true, maxOccupancy: true, parentRoomTypeId: true },
 		orderBy: (rt, { asc }) => [asc(rt.sortOrder)]
 	});
 
-	// Build a map of parentId → child type IDs for pool-based availability
-	// Each "pool" is rooted at a parent room type. Children share its physical rooms.
-	const childrenOf = new Map<string, string[]>();   // parentId → [childId, ...]
+	// Parent/child pool mapping
+	const childrenOf = new Map<string, string[]>();
 	for (const rt of propRoomTypes) {
 		if (rt.parentRoomTypeId) {
 			const arr = childrenOf.get(rt.parentRoomTypeId) ?? [];
@@ -110,27 +111,54 @@ export const GET: RequestHandler = async ({ url }) => {
 		}
 	}
 
-	// For each room type, resolve its pool root and compute availability
+	// Fetch rate overrides for all relevant room types in the date range
+	const allTypeIds = propRoomTypes.map((rt) => rt.id);
+	const stayOverrides = allTypeIds.length > 0
+		? await db.query.rateOverrides.findMany({
+			where: and(
+				inArray(rateOverrides.roomTypeId, allTypeIds),
+				gte(rateOverrides.date, checkIn),
+				lt(rateOverrides.date, checkOut)
+			),
+			columns: { roomTypeId: true, date: true, stopSell: true, availabilityOverride: true }
+		})
+		: [];
+
+	// Group overrides by room type
+	const overridesByType = new Map<string, typeof stayOverrides>();
+	for (const o of stayOverrides) {
+		const arr = overridesByType.get(o.roomTypeId) ?? [];
+		arr.push(o);
+		overridesByType.set(o.roomTypeId, arr);
+	}
+
 	const result: AvailableRoomType[] = propRoomTypes.map((rt) => {
-		const isChild   = !!rt.parentRoomTypeId;
+		const isChild    = !!rt.parentRoomTypeId;
 		const poolRootId = isChild ? rt.parentRoomTypeId! : rt.id;
-		const siblings  = childrenOf.get(poolRootId) ?? [];
+		const siblings   = childrenOf.get(poolRootId) ?? [];
 
-		// Physical rooms belonging to the pool root
-		const poolRooms   = allRooms.filter((r) => r.roomTypeId === poolRootId);
-		const totalCount  = poolRooms.length;
+		// Stop-sell: blocked if this type OR its parent has any stop_sell date in range
+		const myOvr     = overridesByType.get(rt.id) ?? [];
+		const parentOvr = isChild ? (overridesByType.get(rt.parentRoomTypeId!) ?? []) : [];
+		if (myOvr.some((o) => o.stopSell) || parentOvr.some((o) => o.stopSell)) return null;
 
-		// Rooms physically blocked (assigned to conflicting bookings)
-		const takenRooms = poolRooms.filter((r) => conflictedRoomIds.has(r.id)).length;
+		// Physical rooms belong to the pool root
+		const poolRooms  = allRooms.filter((r) => r.roomTypeId === poolRootId);
+		const totalCount = poolRooms.length;
 
-		// Unassigned bookings that consume this pool:
-		// root + all children (siblings for a child, own children for a parent)
-		const poolTypeIds = [poolRootId, ...siblings];
-		const takenUnassigned = poolTypeIds.reduce((sum, tid) => sum + (unassignedByType.get(tid) ?? 0), 0);
+		// Availability override (on parent/standalone): cap the total
+		const poolOvr      = isChild ? parentOvr : myOvr;
+		const avOvrs       = poolOvr.filter((o) => o.availabilityOverride !== null);
+		const overrideCap  = avOvrs.length > 0 ? Math.min(...avOvrs.map((o) => o.availabilityOverride!)) : totalCount;
+		const effectiveTotal = Math.min(totalCount, overrideCap);
 
-		const availableCount = Math.max(0, totalCount - takenRooms - takenUnassigned);
+		// Taken: rooms assigned to conflicting bookings + unassigned bookings across the whole pool
+		const takenRooms      = poolRooms.filter((r) => conflictedRoomIds.has(r.id)).length;
+		const poolTypeIds     = [poolRootId, ...siblings];
+		const takenUnassigned = poolTypeIds.reduce((s, tid) => s + (unassignedByType.get(tid) ?? 0), 0);
 
-		// Representative room for bed config (always from pool root)
+		const availableCount = Math.max(0, effectiveTotal - takenRooms - takenUnassigned);
+
 		const rep = poolRooms[0] ?? null;
 
 		return {
@@ -142,7 +170,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			imageUrl:      rt.imageUrl ?? null,
 			maxOccupancy:  rt.maxOccupancy ?? null,
 			availableCount,
-			totalCount,
+			totalCount:    effectiveTotal,
 			minRateCents:  minRateByType.get(rt.id) ?? null,
 			beds: rep ? {
 				kingBeds:    rep.kingBeds,
@@ -152,7 +180,8 @@ export const GET: RequestHandler = async ({ url }) => {
 				hasHideabed: rep.hasHideabed
 			} : null
 		};
-	}).filter((rt) => rt.availableCount > 0);
+	})
+	.filter((rt): rt is AvailableRoomType => rt !== null && rt.availableCount > 0);
 
 	return json(result);
 };

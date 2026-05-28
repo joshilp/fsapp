@@ -3,9 +3,9 @@
  * Handles validation, atomic availability check, and booking insertion.
  */
 import { fail } from '@sveltejs/kit';
-import { eq, and, lt, gt, ne, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, lt, gt, ne, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { bookings, bookingChannels, bookingLineItems, guests, promoCodes, properties, roomTypes, rooms } from '$lib/server/db/schema';
+import { bookings, bookingChannels, bookingLineItems, guests, promoCodes, properties, roomTypes, rooms, rateOverrides } from '$lib/server/db/schema';
 import { sendGuestConfirmation, sendOperatorAlert } from '$lib/server/email';
 import { env } from '$env/dynamic/private';
 import { syncARIForStay } from '$lib/server/ari-sync';
@@ -45,15 +45,52 @@ export async function bookAction(request: Request) {
 
 	const rt = await db.query.roomTypes.findFirst({
 		where: and(eq(roomTypes.id, roomTypeId), eq(roomTypes.propertyId, propertyId)),
-		columns: { id: true, name: true }
+		columns: { id: true, name: true, parentRoomTypeId: true }
 	});
 	if (!rt) return fail(400, { error: 'Invalid room type selection.' });
 
-	// ── Min-night enforcement ─────────────────────────────────────────────────
-	// Find any active rate season overlapping the stay that has a minNights > nights.
 	const stayNights = Math.round(
 		(new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000
 	);
+
+	// Pool root: child types borrow inventory from the parent
+	const poolRootId = rt.parentRoomTypeId ?? roomTypeId;
+
+	// ── Rate-override enforcement (stop-sell, closed-to-arrival, per-date min nights) ──
+	const stayOverrides = await db.query.rateOverrides.findMany({
+		where: and(
+			eq(rateOverrides.roomTypeId, roomTypeId),
+			gte(rateOverrides.date, checkIn),
+			lt(rateOverrides.date, checkOut)
+		),
+		columns: { date: true, stopSell: true, closedToArrival: true, minNights: true }
+	});
+	// Also check parent overrides if this is a child
+	const parentOverrides = rt.parentRoomTypeId
+		? await db.query.rateOverrides.findMany({
+			where: and(
+				eq(rateOverrides.roomTypeId, rt.parentRoomTypeId),
+				gte(rateOverrides.date, checkIn),
+				lt(rateOverrides.date, checkOut)
+			),
+			columns: { date: true, stopSell: true, closedToArrival: true, minNights: true }
+		})
+		: [];
+	const allOverrides = [...stayOverrides, ...parentOverrides];
+
+	if (allOverrides.some((o) => o.stopSell)) {
+		return fail(400, { error: 'Those dates are no longer available for online booking.' });
+	}
+	const checkInOverride = allOverrides.find((o) => o.date === checkIn);
+	if (checkInOverride?.closedToArrival) {
+		return fail(400, { error: 'Check-in is not available on that date. Please choose a different arrival date.' });
+	}
+	const maxOverrideMin = allOverrides.reduce((m, o) => Math.max(m, o.minNights ?? 1), 1);
+	if (stayNights < maxOverrideMin) {
+		return fail(400, { error: `A minimum ${maxOverrideMin}-night stay is required for those dates.` });
+	}
+
+	// ── Min-night enforcement (season level) ─────────────────────────────────
 	const { rateSeasons, rateTiers } = await import('$lib/server/db/schema');
 	const overlappingSeasons = await db.query.rateSeasons.findMany({
 		where: and(
@@ -77,12 +114,10 @@ export async function bookAction(request: Request) {
 		}
 	}
 
-	// ── Availability check (SQLite serialises all writes, so this is safe) ──────
-	// Two callers can't both pass this check and both insert — the second would
-	// see the first's row in the conflict query and be blocked, or the publicToken
-	// UNIQUE constraint would reject the second insert.
+	// ── Availability check ────────────────────────────────────────────────────
+	// For child types, use the parent's physical rooms as the pool.
 	const propRooms = await db.query.rooms.findMany({
-		where: and(eq(rooms.propertyId, propertyId), eq(rooms.roomTypeId, roomTypeId), eq(rooms.isActive, true)),
+		where: and(eq(rooms.propertyId, propertyId), eq(rooms.roomTypeId, poolRootId), eq(rooms.isActive, true)),
 		columns: { id: true }
 	});
 	if (propRooms.length === 0) {
@@ -100,13 +135,19 @@ export async function bookAction(request: Request) {
 		))).map((r) => r.roomId).filter((id): id is string => id !== null)
 	);
 
-	const unassigned = await db.select({ id: bookings.id }).from(bookings).where(and(
+	const unassigned = await db.select({ roomTypeId: bookings.requestedRoomTypeId }).from(bookings).where(and(
 		lt(bookings.checkInDate, checkOut), gt(bookings.checkOutDate, checkIn),
 		ne(bookings.status, 'cancelled'), ne(bookings.status, 'blocked'),
-		isNull(bookings.roomId), eq(bookings.requestedRoomTypeId, roomTypeId)
+		isNull(bookings.roomId), eq(bookings.propertyId, propertyId)
 	));
+	// Count unassigned bookings that consume the same pool (pool root + all children)
+	const poolTypeIds = await db.query.roomTypes.findMany({
+		where: eq(roomTypes.propertyId, propertyId),
+		columns: { id: true, parentRoomTypeId: true }
+	}).then((rts) => [poolRootId, ...rts.filter((r) => r.parentRoomTypeId === poolRootId).map((r) => r.id)]);
+	const unassignedCount = unassigned.filter((u) => u.roomTypeId && poolTypeIds.includes(u.roomTypeId)).length;
 
-	if (conflictedRoomIds.size + unassigned.length >= totalRooms) {
+	if (conflictedRoomIds.size + unassignedCount >= totalRooms) {
 		return fail(400, { error: 'Sorry, no rooms of that type are available for those dates. Please try different dates or another room type.' });
 	}
 

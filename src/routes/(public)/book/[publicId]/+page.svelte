@@ -4,6 +4,7 @@
 	import type { PageData, ActionData } from './$types';
 	import type { AvailableRoomType } from '$routes/api/public/availability/+server';
 	import type { PublicPricing } from '$routes/api/public/pricing/+server';
+	import BookingCalendar from '$lib/components/booking/BookingCalendar.svelte';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -112,12 +113,20 @@
 		rateLoading = true;
 		rateQuote = null;
 		try {
-			const promoParam = promoInput.trim() ? `&promo=${encodeURIComponent(promoInput.trim())}` : '';
-			const res = await fetch(`/api/public/pricing?roomTypeId=${selectedTypeId}&checkIn=${checkIn}&checkOut=${checkOut}${promoParam}`);
+			const promoParam  = promoInput.trim() ? `&promo=${encodeURIComponent(promoInput.trim())}` : '';
+			const guestsParam = `&numGuests=${numAdults + numChildren}`;
+			const res = await fetch(`/api/public/pricing?roomTypeId=${selectedTypeId}&checkIn=${checkIn}&checkOut=${checkOut}${promoParam}${guestsParam}`);
 			if (res.ok) rateQuote = await res.json();
 		} catch { /* ignore */ }
 		rateLoading = false;
 	}
+
+	// Re-fetch rate when guest count changes (extra guest fee may apply)
+	$effect(() => {
+		// eslint-disable-next-line @typescript-eslint/no-unused-expressions
+		numAdults; numChildren;
+		if (step === 3 && selectedTypeId) fetchRate();
+	});
 
 	async function applyPromo() {
 		promoChecking = true;
@@ -198,33 +207,21 @@
 
 		<div class="bg-white rounded-2xl shadow-sm border border-stone-100 p-6 sm:p-8">
 
-			<!-- ── Step 1: Dates ─────────────────────────────────────────────── -->
-			{#if step === 1}
-				<h2 class="text-lg font-semibold text-stone-900 mb-5">Choose your dates</h2>
+		<!-- ── Step 1: Dates ─────────────────────────────────────────────── -->
+		{#if step === 1}
+			<h2 class="text-lg font-semibold text-stone-900 mb-5">Choose your dates</h2>
 
-				<div class="grid grid-cols-2 gap-4 mb-6">
-					<div>
-						<label class="block text-sm font-medium text-stone-700 mb-1.5" for="ci">Check-in</label>
-						<input id="ci" type="date"
-							bind:value={checkIn}
-							min={data.today}
-							oninput={() => { if (checkOut <= checkIn) checkOut = advanceDay(checkIn); }}
-							class="w-full rounded-xl border border-stone-200 px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
-						/>
-					</div>
-					<div>
-						<label class="block text-sm font-medium text-stone-700 mb-1.5" for="co">Check-out</label>
-						<input id="co" type="date"
-							bind:value={checkOut}
-							min={advanceDay(checkIn)}
-							class="w-full rounded-xl border border-stone-200 px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
-						/>
-					</div>
-				</div>
+			<BookingCalendar
+				{propertyId}
+				{today}
+				{accent}
+				bind:checkIn
+				bind:checkOut
+			/>
 
-				{#if nights > 0}
-					<p class="text-sm text-stone-500 mb-4">{nights} night{nights === 1 ? '' : 's'} · {fmtDate(checkIn)} → {fmtDate(checkOut)}</p>
-				{/if}
+			{#if nights > 0}
+				<p class="text-sm text-stone-500 mt-4 mb-4">{nights} night{nights === 1 ? '' : 's'} · {fmtDate(checkIn)} → {fmtDate(checkOut)}</p>
+			{/if}
 
 				{#if property.cancellationPolicy}
 					<div class="rounded-xl bg-stone-50 border border-stone-100 px-4 py-3 text-xs text-stone-500 mb-5">
@@ -395,16 +392,22 @@
 			{#if rateQuote && rateQuote.lines.length > 0}
 				<div class="rounded-xl bg-stone-50 border border-stone-100 px-4 py-3 mb-5 text-sm">
 					<p class="text-xs text-stone-400 mb-2">Estimated rate breakdown</p>
-					{#each rateQuote.lines as line}
-						<div class="flex justify-between text-stone-600">
-							<span>{line.nights}n × ${(line.unitCents/100).toFixed(0)}/night</span>
-							<span class="font-medium">{fmt(line.totalCents)}</span>
-						</div>
-					{/each}
-					<div class="mt-2 pt-2 border-t border-stone-100 flex justify-between text-stone-700">
-						<span>Subtotal</span>
-						<span>{fmt(rateQuote.subtotalCents)}</span>
+				{#each rateQuote.lines as line}
+					<div class="flex justify-between text-stone-600">
+						<span>{line.nights}n × ${(line.unitCents/100).toFixed(0)}/night</span>
+						<span class="font-medium">{fmt(line.totalCents)}</span>
 					</div>
+				{/each}
+				<div class="mt-2 pt-2 border-t border-stone-100 flex justify-between text-stone-700">
+					<span>Subtotal</span>
+					<span>{fmt(rateQuote.subtotalCents)}</span>
+				</div>
+				{#if rateQuote.extraGuestTotalCents > 0}
+					<div class="flex justify-between text-stone-600 text-xs mt-1">
+						<span>Extra guest fee (+{(numAdults + numChildren) - 2} guest{(numAdults + numChildren) > 3 ? 's' : ''}, {rateQuote.extraGuestNights}n)</span>
+						<span>+{fmt(rateQuote.extraGuestTotalCents)}</span>
+					</div>
+				{/if}
 					{#if rateQuote.losDiscount}
 						<div class="flex justify-between text-green-700 text-xs mt-1">
 							<span>🏷 {rateQuote.losDiscount.label} ({rateQuote.losDiscount.discountPercent}% off)</span>

@@ -45,18 +45,19 @@ export const actions: Actions = {
 		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
 		const baseRateCentsRaw = g('baseRateCents');
 		const baseRateCents = baseRateCentsRaw ? Math.round(parseFloat(baseRateCentsRaw) * 100) || null : null;
+		const isManualOnly = (fd.get('isManualOnly') as string) === '1';
 		if (!propertyId || !name || !startDate || !endDate)
 			return fail(400, { error: 'Missing fields' });
 		if (startDate > endDate) return fail(400, { error: 'Start must be before end' });
 		if (id) {
 			await db
 				.update(rateSeasons)
-				.set({ name, colour, startDate, endDate, minNights, sortOrder, baseRateCents })
+				.set({ name, colour, startDate, endDate, minNights, sortOrder, baseRateCents, isManualOnly })
 				.where(eq(rateSeasons.id, id));
 		} else {
 			const newId = crypto.randomUUID();
 			await db.insert(rateSeasons).values({
-				id: newId, propertyId, name, colour, startDate, endDate, minNights, sortOrder, baseRateCents
+				id: newId, propertyId, name, colour, startDate, endDate, minNights, sortOrder, baseRateCents, isManualOnly
 			});
 			// Auto-create tiers for all room types at the base rate when provided
 			if (baseRateCents) {
@@ -91,6 +92,10 @@ export const actions: Actions = {
 		const rateStr = g('nightlyRate');
 		const upchargeStr = g('upcharge');
 		const baseCentsStr = g('baseRateCents');
+		const baseOccupancyRaw = g('baseOccupancy');
+		const extraGuestFeeRaw = g('extraGuestFeeCents');
+		const baseOccupancy = baseOccupancyRaw ? parseInt(baseOccupancyRaw) || 2 : 2;
+		const extraGuestFeeCents = extraGuestFeeRaw ? Math.round(parseFloat(extraGuestFeeRaw) * 100) || 0 : 0;
 		if (!seasonId || !roomTypeId) return fail(400, { error: 'Missing fields' });
 		let nightlyRate: number;
 		if (upchargeStr !== null && baseCentsStr !== null) {
@@ -107,10 +112,10 @@ export const actions: Actions = {
 			where: and(eq(rateTiers.seasonId, seasonId), eq(rateTiers.roomTypeId, roomTypeId))
 		});
 		if (existing) {
-			await db.update(rateTiers).set({ nightlyRate }).where(eq(rateTiers.id, existing.id));
+			await db.update(rateTiers).set({ nightlyRate, baseOccupancy, extraGuestFeeCents }).where(eq(rateTiers.id, existing.id));
 		} else {
 			await db.insert(rateTiers).values({
-				id: crypto.randomUUID(), seasonId, roomTypeId, nightlyRate
+				id: crypto.randomUUID(), seasonId, roomTypeId, nightlyRate, baseOccupancy, extraGuestFeeCents
 			});
 		}
 		return { success: true };

@@ -259,7 +259,8 @@
 		start: string; end: string;
 		name: string; colour: string;
 		rate: string; minNights: string;
-		hint: string | null; // describes the layer being overridden
+		isManualOnly: boolean;
+		hint: string | null;
 	} | null>(null);
 
 	function openCreate(start: string, end: string) {
@@ -280,6 +281,7 @@
 			colour: nextColour(),
 			rate: prefillRate,
 			minNights: prefillMin,
+			isManualOnly: false,
 			hint
 		};
 		selectedSeason = null;
@@ -378,13 +380,21 @@
 								class="border-input bg-background rounded border px-2 py-1.5 text-sm font-mono w-full" />
 						</div>
 					</div>
-					<div class="flex flex-col gap-1">
-						<label for="dp-min" class="text-xs text-muted-foreground">Min nights</label>
-						<input id="dp-min" name="minNights" type="number" min="1" max="14"
-							bind:value={dragPopover.minNights}
-							class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
-					</div>
+				<div class="flex flex-col gap-1">
+					<label for="dp-min" class="text-xs text-muted-foreground">Min nights</label>
+					<input id="dp-min" name="minNights" type="number" min="1" max="14"
+						bind:value={dragPopover.minNights}
+						class="border-input bg-background rounded border px-2 py-1.5 text-sm" />
 				</div>
+			</div>
+
+			<label class="flex items-center gap-2 text-sm cursor-pointer mt-1">
+				<input type="checkbox" name="isManualOnly" value="1"
+					checked={dragPopover.isManualOnly ?? false}
+					onchange={(e) => { if (dragPopover) dragPopover.isManualOnly = (e.currentTarget as HTMLInputElement).checked; }}
+					class="rounded" />
+				<span class="text-sm">Staff only <span class="text-xs text-muted-foreground">(not shown on public booking page)</span></span>
+			</label>
 
 				<div class="flex flex-col gap-1">
 					<label class="text-xs text-muted-foreground">Colour</label>
@@ -848,10 +858,16 @@
 								value={s.baseRateCents ? (s.baseRateCents / 100).toFixed(0) : ''}
 								placeholder="e.g. 100"
 								class="border-input bg-background w-24 rounded border px-2 py-1.5 text-sm font-mono" />
-							<span class="text-xs text-muted-foreground">/night</span>
-						</div>
+						<span class="text-xs text-muted-foreground">/night</span>
 					</div>
-					<button type="submit" disabled={saving}
+				</div>
+				<label class="flex items-center gap-2 text-sm cursor-pointer">
+					<input type="checkbox" name="isManualOnly" value="1"
+						checked={s.isManualOnly}
+						class="rounded" />
+					<span>Staff only <span class="text-xs text-muted-foreground">(not shown on public booking page)</span></span>
+				</label>
+				<button type="submit" disabled={saving}
 						class="w-full rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
 						{saving ? 'Saving…' : 'Save Changes'}
 					</button>
@@ -948,7 +964,7 @@
 									saving = true;
 									return async ({ update }) => { saving = false; await update({ reset: false }); };
 								}}
-								class="flex items-center gap-2"
+								class="flex items-center gap-2 flex-wrap"
 							>
 								<input type="hidden" name="seasonId" value={s.id} />
 								<input type="hidden" name="roomTypeId" value={rt.id} />
@@ -966,8 +982,21 @@
 										placeholder="—"
 										class="border-input bg-background w-20 rounded border px-2 py-1 text-sm font-mono text-right"
 									/>
-									<button type="submit" class="rounded border px-2 py-1 text-xs hover:bg-muted" disabled={saving}>✓</button>
 								</div>
+								<div class="flex items-center gap-1" title="Base occupancy (guests included in rate)">
+									<span class="text-xs text-muted-foreground">Base occ</span>
+									<input name="baseOccupancy" type="number" min="1" max="10"
+										value={tier?.baseOccupancy ?? 2}
+										class="border-input bg-background w-12 rounded border px-1 py-1 text-xs font-mono text-right" />
+								</div>
+								<div class="flex items-center gap-1" title="Extra guest fee per night above base occupancy">
+									<span class="text-xs text-muted-foreground">+$/extra</span>
+									<input name="extraGuestFeeCents" type="number" min="0" step="0.01"
+										value={tier?.extraGuestFeeCents ? (tier.extraGuestFeeCents / 100).toFixed(0) : ''}
+										placeholder="0"
+										class="border-input bg-background w-16 rounded border px-1 py-1 text-xs font-mono text-right" />
+								</div>
+								<button type="submit" class="rounded border px-2 py-1 text-xs hover:bg-muted" disabled={saving}>✓</button>
 							</form>
 						{/each}
 						{#if roomTypes.length === 0}

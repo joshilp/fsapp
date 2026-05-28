@@ -168,6 +168,8 @@ export const rateSeasons = sqliteTable(
 		endDate: text('end_date').notNull(),
 		// Minimum stay required for this season (e.g. 3 for long weekends)
 		minNights: integer('min_nights').notNull().default(1),
+		// Staff-only: if true, this season is never shown on the public booking page
+		isManualOnly: integer('is_manual_only', { mode: 'boolean' }).notNull().default(false),
 		sortOrder: integer('sort_order').notNull().default(0),
 		// Optional base rate in cents. When set, room-type tiers store an upcharge on top.
 		// Effective rate = baseRateCents + tier.nightlyRate_upcharge → stored as tier.nightlyRate.
@@ -190,7 +192,10 @@ export const rateTiers = sqliteTable(
 		roomTypeId: text('room_type_id')
 			.notNull()
 			.references(() => roomTypes.id, { onDelete: 'cascade' }),
-		nightlyRate: integer('nightly_rate').notNull() // cents e.g. 18900 = $189.00
+		nightlyRate: integer('nightly_rate').notNull(), // cents e.g. 18900 = $189.00
+		// Occupancy-based pricing: guests above baseOccupancy are charged extraGuestFeeCents/night each
+		baseOccupancy: integer('base_occupancy').notNull().default(2),
+		extraGuestFeeCents: integer('extra_guest_fee_cents').notNull().default(0)
 	},
 	(t) => [unique('rate_tiers_season_type_uq').on(t.seasonId, t.roomTypeId)]
 );
