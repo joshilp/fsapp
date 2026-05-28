@@ -48,6 +48,7 @@
 	let blackoutRoomTypeId = $state('all');
 	let blackoutSaving = $state(false);
 	let blackoutResult = $state('');
+	let blackoutMode = $state<'apply' | 'lift'>('apply');
 
 	const activeRoomTypes = $derived(
 		data.propertiesList
@@ -73,7 +74,7 @@
 		const body: Record<string, unknown> = {
 			dates,
 			rateMode: 'none',
-			stopSell: true
+			stopSell: blackoutMode === 'apply'
 		};
 		if (blackoutRoomTypeId === 'all') {
 			body.propertyId = activeProp;
@@ -88,7 +89,8 @@
 			});
 			const data2 = await res.json();
 			if (res.ok) {
-				blackoutResult = `✓ ${data2.updated} date(s) closed. Synced to Channex.`;
+				const verb = blackoutMode === 'apply' ? 'closed' : 'reopened';
+				blackoutResult = `✓ ${data2.updated} date(s) ${verb}. Synced to Channex.`;
 				await invalidateAll();
 			} else {
 				blackoutResult = data2.error ?? 'Failed.';
@@ -895,7 +897,20 @@
 	<div class="border-b border-border bg-amber-50 px-4 py-3">
 		<div class="flex flex-wrap items-end gap-3 max-w-2xl">
 			<div>
-				<p class="text-xs font-semibold text-amber-900 mb-1">Quick Blackout — close dates to online booking</p>
+				<p class="text-xs font-semibold text-amber-900 mb-1">Quick Blackout — close / reopen dates</p>
+				<div class="flex items-center gap-1 rounded-md border border-amber-200 bg-white p-0.5 text-xs">
+					<button
+						onclick={() => { blackoutMode = 'apply'; blackoutResult = ''; }}
+						class="rounded px-3 py-1 transition-colors {blackoutMode === 'apply' ? 'bg-amber-600 text-white font-semibold' : 'text-amber-700 hover:bg-amber-100'}"
+					>🚫 Close dates</button>
+					<button
+						onclick={() => { blackoutMode = 'lift'; blackoutResult = ''; }}
+						class="rounded px-3 py-1 transition-colors {blackoutMode === 'lift' ? 'bg-green-600 text-white font-semibold' : 'text-amber-700 hover:bg-amber-100'}"
+					>✓ Reopen dates</button>
+				</div>
+			</div>
+			<div>
+				<p class="text-xs font-semibold text-amber-900 mb-1">Date range</p>
 				<div class="flex items-center gap-2">
 					<input type="date" bind:value={blackoutFrom}
 						class="rounded border border-amber-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
@@ -915,8 +930,8 @@
 				</select>
 			</div>
 			<button onclick={applyBlackout} disabled={blackoutSaving || !blackoutFrom || !blackoutTo}
-				class="rounded bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50 transition-colors">
-				{blackoutSaving ? 'Closing…' : 'Apply stop-sell'}
+				class="rounded px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50 transition-colors {blackoutMode === 'apply' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'}">
+				{blackoutSaving ? 'Saving…' : blackoutMode === 'apply' ? 'Apply stop-sell' : 'Lift stop-sell'}
 			</button>
 			<button onclick={() => { blackoutOpen = false; blackoutResult = ''; }}
 				class="rounded border border-amber-200 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-100 transition-colors">
@@ -926,7 +941,7 @@
 				<p class="text-xs font-medium {blackoutResult.startsWith('✓') ? 'text-green-700' : 'text-red-600'}">{blackoutResult}</p>
 			{/if}
 		</div>
-		<p class="text-[10px] text-amber-600 mt-1.5">Tip: staff can still create internal bookings on blacked-out dates. Only online/OTA booking is blocked.</p>
+		<p class="text-[10px] text-amber-600 mt-1.5">Staff can still create internal bookings on closed dates. Only online/OTA booking is blocked.</p>
 	</div>
 	{/if}
 

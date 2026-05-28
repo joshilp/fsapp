@@ -47,7 +47,7 @@
 				{ id: 'stop-sell',         title: 'Stop-sell & availability cap', status: 'implemented' },
 				{ id: 'parent-child',      title: 'Parent / child room types', status: 'implemented' },
 				{ id: 'restrictions',      title: 'Min stay, CTA & CTD',       status: 'implemented' },
-				{ id: 'blackouts',         title: 'Blackout dates',             status: 'partial' }
+				{ id: 'blackouts',         title: 'Blackout dates',             status: 'implemented' }
 			]
 		},
 		{
@@ -514,16 +514,15 @@
 		{:else if activeId === 'blackouts'}
 			<div class="prose-help">
 				<p class="lead">Blackouts close a room type to all online bookings for a period of time.</p>
-				<div class="callout callout-warning">
-					<strong>Partial feature:</strong> Per-date stop-sell is fully supported via the inventory grid. A dedicated "blackout date range" UI (like OnRes's Blackout tab) is planned but not yet built. For now, use the inventory grid's bulk stop-sell to close a date range quickly.
-				</div>
-				<h2>Current workaround</h2>
+				<h2>Quick Blackout tool</h2>
+				<p>The inventory page has a built-in blackout tool. Click the <strong>🚫 Blackout</strong> button in the toolbar to open it.</p>
 				<ol>
-					<li>Go to <strong>Inventory</strong>.</li>
-					<li>Use the bulk-override mode to select a date range.</li>
-					<li>Set <strong>Stop Sell</strong> for all dates in the range.</li>
+					<li>Choose <strong>Close dates</strong> or <strong>Reopen dates</strong>.</li>
+					<li>Pick a date range.</li>
+					<li>Select a specific room type or <em>All room types</em>.</li>
+					<li>Click <strong>Apply stop-sell</strong> (or <strong>Lift stop-sell</strong>).</li>
 				</ol>
-				<p>This achieves the same result — guests cannot book online for those dates. Staff can still create internal bookings (e.g. for maintenance).</p>
+				<p>Changes are synced to Channex automatically. Guests cannot book online for closed dates; staff can still create internal bookings (e.g. maintenance).</p>
 				<h2>Maintenance blocks</h2>
 				<p>For maintenance periods, the preferred approach is to create a staff booking with status <strong>Blocked</strong> for the room(s) and dates, which removes them from availability at a room level without requiring stop-sell.</p>
 			</div>
