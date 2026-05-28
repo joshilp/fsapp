@@ -20,6 +20,7 @@
 		<nav class="hidden items-center gap-6 text-sm font-medium text-stone-300 md:flex">
 			<a href="/#features" class="hover:text-white transition-colors">Features</a>
 			<a href="/#pricing" class="hover:text-white transition-colors">Pricing</a>
+			<a href="/help" class="hover:text-white transition-colors">Help</a>
 			<a href="/auth/login"
 				class="rounded-full bg-amber-500 px-5 py-2 text-sm font-semibold text-stone-900 hover:bg-amber-400 transition-colors">
 				Sign in
@@ -43,6 +44,7 @@
 		<div class="border-t border-white/10 bg-stone-900 px-4 py-4 space-y-3 md:hidden">
 			<a href="/#features" class="block text-stone-300 hover:text-white" onclick={() => { mobileMenuOpen = false; }}>Features</a>
 			<a href="/#pricing" class="block text-stone-300 hover:text-white" onclick={() => { mobileMenuOpen = false; }}>Pricing</a>
+			<a href="/help" class="block text-stone-300 hover:text-white" onclick={() => { mobileMenuOpen = false; }}>Help</a>
 			<a href="/auth/login" class="block rounded-full bg-amber-500 px-5 py-2 text-center text-sm font-semibold text-stone-900">
 				Sign in
 			</a>
