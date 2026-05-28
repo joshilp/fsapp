@@ -4,6 +4,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import {
 	bookingChannels,
+	bookings,
 	losDiscounts,
 	promoCodes,
 	properties,
@@ -473,6 +474,47 @@ export const actions: Actions = {
 				isActive: true
 			});
 		}
+		return { success: true };
+	},
+
+	// ── Email template customization ──────────────────────────────────────────
+	updateEmailTemplates: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const id = ((fd.get('id') as string) ?? '').trim();
+		const emailNote = ((fd.get('emailNote') as string) ?? '').trim() || null;
+		const emailSignature = ((fd.get('emailSignature') as string) ?? '').trim() || null;
+		if (!id) return fail(400, { error: 'Missing property ID' });
+		await db.update(properties).set({ emailNote, emailSignature }).where(eq(properties.id, id));
+		return { success: true };
+	},
+
+	// ── Property: create / delete ─────────────────────────────────────────────
+	createProperty: async ({ request, locals }) => {
+		const fd = await request.formData();
+		const name = ((fd.get('name') as string) ?? '').trim();
+		if (!name) return fail(400, { error: 'Name is required' });
+		const newId = crypto.randomUUID();
+		await db.insert(properties).values({
+			id: newId,
+			name,
+			address: '—',
+			city: '—',
+			province: '—'
+		});
+		return { success: true, newPropertyId: newId };
+	},
+
+	deleteProperty: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const id = ((await request.formData()).get('id') as string)?.trim();
+		if (!id) return fail(400, { error: 'Missing ID' });
+		const hasBookings = await db.query.bookings.findFirst({
+			where: eq(bookings.propertyId, id),
+			columns: { id: true }
+		});
+		if (hasBookings) return fail(400, { error: 'Cannot delete a property that has bookings' });
+		await db.delete(properties).where(eq(properties.id, id));
 		return { success: true };
 	}
 };

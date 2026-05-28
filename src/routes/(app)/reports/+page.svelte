@@ -26,8 +26,7 @@
 		<div>
 			<h1 class="text-2xl font-bold">Reports</h1>
 			<p class="text-muted-foreground text-sm">{data.rangeLabel}</p>
-		</div>
-		<div class="flex flex-col gap-2 items-end">
+		</div>		<div class="flex flex-col gap-2 items-end">
 			<!-- Month navigation (always visible) -->
 			<div class="flex items-center gap-2">
 				<a href="?month={data.prevMonthParam}"
@@ -60,6 +59,22 @@
 			</div>
 		</div>
 	</div>
+
+	<!-- Property filter tabs (only shown when >1 property) -->
+	{#if data.allProperties.length > 1}
+	<div class="flex flex-wrap gap-1.5">
+		<a href="?{new URLSearchParams({ ...(data.isMonthMode ? { month: `${data.year}-${String(data.month).padStart(2,'0')}` } : { from: data.rangeStart, to: data.rangeEnd }) }).toString()}"
+			class="rounded-full border px-3 py-1 text-xs font-medium transition-colors {!data.propFilter ? 'bg-primary text-primary-foreground border-primary' : 'border-input text-muted-foreground hover:bg-muted'}">
+			All properties
+		</a>
+		{#each data.allProperties as p}
+			<a href="?{new URLSearchParams({ ...(data.isMonthMode ? { month: `${data.year}-${String(data.month).padStart(2,'0')}` } : { from: data.rangeStart, to: data.rangeEnd }), prop: p.id }).toString()}"
+				class="rounded-full border px-3 py-1 text-xs font-medium transition-colors {data.propFilter === p.id ? 'bg-primary text-primary-foreground border-primary' : 'border-input text-muted-foreground hover:bg-muted'}">
+				{p.name}
+			</a>
+		{/each}
+	</div>
+	{/if}
 
 	<!-- Summary cards -->
 	<div class="grid grid-cols-2 gap-4 sm:grid-cols-4">

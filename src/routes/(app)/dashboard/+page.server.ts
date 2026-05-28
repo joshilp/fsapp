@@ -1,8 +1,8 @@
 import { redirect } from '@sveltejs/kit';
-import { and, eq, inArray, isNull, ne, gte } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, gte, lt, gt } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { bookings } from '$lib/server/db/schema';
+import { bookings, rooms } from '$lib/server/db/schema';
 
 export const load: PageServerLoad = async (event) => {
 	if (!event.locals.user) redirect(303, '/auth/login');
@@ -96,6 +96,56 @@ export const load: PageServerLoad = async (event) => {
 		departures: departures.map(b => ({ ...b, balanceCents: balance(b) })),
 		inHouse,
 		unassigned,
-		properties: allProps
+		properties: allProps,
+		occupancyChart: await buildOccupancyChart(today, allProps)
+	};
 	};
 };
+
+// ─── 14-day occupancy chart data ──────────────────────────────────────────────
+
+function addDays(iso: string, n: number): string {
+	const d = new Date(iso + 'T12:00:00');
+	d.setDate(d.getDate() + n);
+	return d.toISOString().slice(0, 10);
+}
+
+async function buildOccupancyChart(
+	today: string,
+	props: { id: string }[]
+): Promise<{ date: string; label: string; occupiedRooms: number; totalRooms: number; pct: number }[]> {
+	const DAYS = 14;
+	const lastDate = addDays(today, DAYS - 1);
+
+	const allRooms = await db.query.rooms.findMany({
+		where: and(inArray(rooms.propertyId, props.map(p => p.id)), eq(rooms.isActive, true)),
+		columns: { id: true }
+	});
+	const totalRooms = allRooms.length;
+	if (totalRooms === 0) return [];
+	const roomIds = allRooms.map(r => r.id);
+
+	const windowBookings = await db
+		.select({ checkInDate: bookings.checkInDate, checkOutDate: bookings.checkOutDate })
+		.from(bookings)
+		.where(and(
+			inArray(bookings.roomId, roomIds),
+			ne(bookings.status, 'cancelled'),
+			ne(bookings.status, 'blocked'),
+			ne(bookings.status, 'checked_out'),
+			lt(bookings.checkInDate, addDays(lastDate, 1)),
+			gt(bookings.checkOutDate, today)
+		));
+
+	return Array.from({ length: DAYS }, (_, i) => {
+		const date = addDays(today, i);
+		const occupied = windowBookings.filter(b => b.checkInDate <= date && b.checkOutDate > date).length;
+		return {
+			date,
+			label: new Date(date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }),
+			occupiedRooms: occupied,
+			totalRooms,
+			pct: Math.round((occupied / totalRooms) * 100)
+		};
+	});
+}

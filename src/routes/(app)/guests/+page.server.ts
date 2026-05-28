@@ -3,7 +3,6 @@ import { like, or, eq } from 'drizzle-orm';
 import type { PageServerLoad, Actions } from './$types';
 import { db } from '$lib/server/db';
 import { bookings, guests } from '$lib/server/db/schema';
-
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!locals.user) redirect(303, '/auth/login');
 
@@ -117,5 +116,43 @@ export const actions: Actions = {
 			email: g('email'),
 		}).returning({ id: guests.id });
 		return { success: true, newGuestId: created.id };
+	},
+
+	/**
+	 * Merge two guest records. All bookings from `sourceId` are reassigned to
+	 * `targetId`, then the source guest record is deleted.
+	 * The target guest's name/email/phone/notes are kept unless blank, in which
+	 * case the source's values are used to fill gaps.
+	 */
+	mergeGuests: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const targetId = ((fd.get('targetId') as string) ?? '').trim();
+		const sourceId = ((fd.get('sourceId') as string) ?? '').trim();
+		if (!targetId || !sourceId || targetId === sourceId)
+			return fail(400, { error: 'Invalid guest IDs' });
+
+		const [target, source] = await Promise.all([
+			db.query.guests.findFirst({ where: eq(guests.id, targetId) }),
+			db.query.guests.findFirst({ where: eq(guests.id, sourceId) })
+		]);
+		if (!target || !source) return fail(404, { error: 'Guest not found' });
+
+		// Fill any blank fields on the target from the source
+		await db.update(guests).set({
+			phone:         target.phone  || source.phone  || null,
+			email:         target.email  || source.email  || null,
+			street:        target.street || source.street || null,
+			city:          target.city   || source.city   || null,
+			notes:         [target.notes, source.notes].filter(Boolean).join(' | ') || null
+		}).where(eq(guests.id, targetId));
+
+		// Reassign all bookings from source → target
+		await db.update(bookings).set({ guestId: targetId }).where(eq(bookings.guestId, sourceId));
+
+		// Delete source guest
+		await db.delete(guests).where(eq(guests.id, sourceId));
+
+		return { success: true, mergedInto: targetId };
 	}
 };

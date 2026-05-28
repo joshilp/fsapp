@@ -49,13 +49,17 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	const allProperties = await db.query.properties.findMany({ columns: { id: true, name: true } });
 
+	// Optional property filter
+	const propFilter = url.searchParams.get('prop') ?? '';
+
 	// All bookings that OVERLAP with this range (for accurate occupancy)
 	const overlappingBookings = await db.query.bookings.findMany({
 		where: and(
 			lt(bookings.checkInDate, rangeEnd),
 			gt(bookings.checkOutDate, rangeStart),
 			ne(bookings.status, 'cancelled'),
-			ne(bookings.status, 'blocked')
+			ne(bookings.status, 'blocked'),
+			...(propFilter ? [eq(bookings.propertyId, propFilter)] : [])
 		),
 		with: { channel: { columns: { name: true } } },
 		columns: { id: true, propertyId: true, status: true, checkInDate: true, checkOutDate: true }
@@ -169,7 +173,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		const ny2 = m === 12 ? y + 1 : y;
 		const me2 = `${ny2}-${String(nm2).padStart(2, '0')}-01`;
 		const cnt = await db.query.bookings.findMany({
-			where: and(gte(bookings.checkInDate, ms), lt(bookings.checkInDate, me2), ne(bookings.status, 'cancelled'), ne(bookings.status, 'blocked')),
+			where: and(
+				gte(bookings.checkInDate, ms),
+				lt(bookings.checkInDate, me2),
+				ne(bookings.status, 'cancelled'),
+				ne(bookings.status, 'blocked'),
+				...(propFilter ? [eq(bookings.propertyId, propFilter)] : [])
+			),
 			columns: { id: true }
 		});
 		trend.push({
@@ -187,12 +197,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	return {
 		year, month,
 		rangeStart,
-		rangeEnd: toParam ?? rangeEnd,  // pass back the human-friendly end (inclusive)
+		rangeEnd: toParam ?? rangeEnd,
 		isMonthMode,
 		rangeLabel,
 		prevMonthParam: `${prevYear}-${String(prevMonth).padStart(2, '0')}`,
 		nextMonthParam: `${nextY}-${String(nextM).padStart(2, '0')}`,
 		monthLabel: rangeLabel,
+		propFilter,
+		allProperties,
 		totalBookings: rangeCheckIns.length,
 		totalRevenueDollars: (totalRevenueCents / 100).toFixed(2),
 		totalTaxDollars: (totalTaxCents / 100).toFixed(2),

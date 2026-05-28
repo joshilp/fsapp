@@ -124,6 +124,36 @@
 		{/each}
 	</div>
 
+	<!-- Occupancy chart — next 14 days -->
+	{#if data.occupancyChart.length > 0}
+	<div class="rounded-xl border border-border bg-card p-4">
+		<p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Occupancy — next 14 days</p>
+		<div class="flex items-end gap-1 h-16">
+			{#each data.occupancyChart as day}
+				<div class="flex flex-col items-center flex-1 min-w-0 group relative">
+					<div
+						class="w-full rounded-sm transition-colors {day.pct >= 80 ? 'bg-red-400' : day.pct >= 50 ? 'bg-amber-400' : 'bg-green-400'} hover:opacity-80"
+						style="height: {Math.max(2, day.pct)}%"
+					></div>
+					<!-- Tooltip -->
+					<div class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-popover border border-border rounded px-2 py-1 text-[10px] whitespace-nowrap shadow-md z-10">
+						{day.label}<br/>{day.occupiedRooms}/{day.totalRooms} rooms · {day.pct}%
+					</div>
+				</div>
+			{/each}
+		</div>
+		<div class="flex justify-between mt-1 text-[9px] text-muted-foreground">
+			<span>Today</span>
+			<span>+14 days</span>
+		</div>
+		<div class="flex gap-4 mt-2 text-[10px] text-muted-foreground">
+			<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-sm bg-green-400"></span>&lt;50%</span>
+			<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-sm bg-amber-400"></span>50–79%</span>
+			<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-sm bg-red-400"></span>80%+</span>
+		</div>
+	</div>
+	{/if}
+
 	<!-- Arrivals + Departures side-by-side -->
 	<div class="grid gap-4 lg:grid-cols-2">
 

@@ -2030,6 +2030,15 @@
 							{/if}
 						{/if}
 					</div>
+
+					<!-- Folio link -->
+					{#if selfCheckinUrl}
+						{@const folioUrl = selfCheckinUrl.replace('/checkin/', '/folio/')}
+						<a href={folioUrl} target="_blank" rel="noopener"
+							class="rounded-md border border-input px-3 py-1.5 text-xs hover:bg-muted inline-block">
+							📄 View folio
+						</a>
+					{/if}
 				{/if}
 
 				{#if status !== 'cancelled' && status !== 'checked_out'}

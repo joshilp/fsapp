@@ -247,9 +247,28 @@
 					<button onclick={() => { step = 1; }} class="text-sm text-stone-400 hover:text-stone-600">← Back</button>
 				</div>
 
-				<div class="rounded-xl bg-stone-50 border border-stone-100 px-4 py-2.5 text-sm text-stone-600 mb-5">
-					{fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights} night{nights === 1 ? '' : 's'}
-				</div>
+		<div class="rounded-xl bg-stone-50 border border-stone-100 px-4 py-2.5 text-sm text-stone-600 mb-5">
+				{fmtDate(checkIn)} → {fmtDate(checkOut)} · {nights} night{nights === 1 ? '' : 's'}
+			</div>
+
+			<!-- LOS discount hint -->
+			{#if data.losDiscountsList.length > 0}
+				{@const bestHint = data.losDiscountsList.find(d => d.minNights > nights)}
+				{#if bestHint}
+					<div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 mb-5 flex items-center gap-2">
+						<span>🏷</span>
+						<span><strong>Save {bestHint.discountPercent}%</strong> when you stay {bestHint.minNights}+ nights ({bestHint.label})</span>
+					</div>
+				{:else}
+					{@const applied = [...data.losDiscountsList].reverse().find(d => d.minNights <= nights)}
+					{#if applied}
+						<div class="rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 text-xs text-green-800 mb-5 flex items-center gap-2">
+							<span>✓</span>
+							<span><strong>{applied.discountPercent}% discount</strong> applied — {applied.label}</span>
+						</div>
+					{/if}
+				{/if}
+			{/if}
 
 				{#if availabilityLoading}
 					<div class="text-center py-10 text-stone-400 text-sm">Checking availability…</div>

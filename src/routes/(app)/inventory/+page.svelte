@@ -41,6 +41,64 @@
 
 	let displayPopoverOpen = $state(false);
 
+	// ─── Quick blackout dialog ─────────────────────────────────────────────────
+	let blackoutOpen = $state(false);
+	let blackoutFrom = $state('');
+	let blackoutTo = $state('');
+	let blackoutRoomTypeId = $state('all');
+	let blackoutSaving = $state(false);
+	let blackoutResult = $state('');
+
+	const activeRoomTypes = $derived(
+		data.propertiesList
+			.find(p => p.id === activeProp)
+			?.roomTypesList ?? []
+	);
+
+	async function applyBlackout() {
+		if (!blackoutFrom || !blackoutTo || blackoutFrom > blackoutTo) {
+			blackoutResult = 'Invalid date range.';
+			return;
+		}
+		blackoutSaving = true;
+		blackoutResult = '';
+		// Build list of dates in range
+		const dates: string[] = [];
+		const cur = new Date(blackoutFrom + 'T12:00:00');
+		const end = new Date(blackoutTo + 'T12:00:00');
+		while (cur <= end) {
+			dates.push(cur.toISOString().slice(0, 10));
+			cur.setDate(cur.getDate() + 1);
+		}
+		const body: Record<string, unknown> = {
+			dates,
+			rateMode: 'none',
+			stopSell: true
+		};
+		if (blackoutRoomTypeId === 'all') {
+			body.propertyId = activeProp;
+		} else {
+			body.roomTypeId = blackoutRoomTypeId;
+		}
+		try {
+			const res = await fetch('/api/ari/bulk-override', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+			const data2 = await res.json();
+			if (res.ok) {
+				blackoutResult = `✓ ${data2.updated} date(s) closed. Synced to Channex.`;
+				await invalidateAll();
+			} else {
+				blackoutResult = data2.error ?? 'Failed.';
+			}
+		} catch {
+			blackoutResult = 'Network error.';
+		}
+		blackoutSaving = false;
+	}
+
 	// Which properties to render based on layout
 	const visibleProps = $derived(
 		layoutMode === 'stacked' ? data.propertiesList : data.propertiesList.filter((p) => p.id === activeProp)
@@ -748,7 +806,13 @@
 			</form>
 
 			<!-- Display popover (right-aligned) -->
-			<div class="ml-auto">
+			<div class="ml-auto flex items-center gap-2">
+				<!-- Quick blackout button -->
+				<button
+					onclick={() => { blackoutOpen = !blackoutOpen; blackoutResult = ''; }}
+					class="flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
+				>🚫 Blackout</button>
+
 				<Popover.Root bind:open={displayPopoverOpen}>
 					<Popover.Trigger
 						class="flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
@@ -825,6 +889,46 @@
 			</div>
 		</div>
 	</div>
+
+	<!-- ── Quick blackout panel ─────────────────────────────────────────────── -->
+	{#if blackoutOpen}
+	<div class="border-b border-border bg-amber-50 px-4 py-3">
+		<div class="flex flex-wrap items-end gap-3 max-w-2xl">
+			<div>
+				<p class="text-xs font-semibold text-amber-900 mb-1">Quick Blackout — close dates to online booking</p>
+				<div class="flex items-center gap-2">
+					<input type="date" bind:value={blackoutFrom}
+						class="rounded border border-amber-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+					<span class="text-xs text-amber-700">to</span>
+					<input type="date" bind:value={blackoutTo}
+						class="rounded border border-amber-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+				</div>
+			</div>
+			<div>
+				<p class="text-xs font-semibold text-amber-900 mb-1">Room type</p>
+				<select bind:value={blackoutRoomTypeId}
+					class="rounded border border-amber-200 bg-white px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400">
+					<option value="all">All room types</option>
+					{#each activeRoomTypes as rt}
+						<option value={rt.id}>{rt.name}</option>
+					{/each}
+				</select>
+			</div>
+			<button onclick={applyBlackout} disabled={blackoutSaving || !blackoutFrom || !blackoutTo}
+				class="rounded bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50 transition-colors">
+				{blackoutSaving ? 'Closing…' : 'Apply stop-sell'}
+			</button>
+			<button onclick={() => { blackoutOpen = false; blackoutResult = ''; }}
+				class="rounded border border-amber-200 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-100 transition-colors">
+				Cancel
+			</button>
+			{#if blackoutResult}
+				<p class="text-xs font-medium {blackoutResult.startsWith('✓') ? 'text-green-700' : 'text-red-600'}">{blackoutResult}</p>
+			{/if}
+		</div>
+		<p class="text-[10px] text-amber-600 mt-1.5">Tip: staff can still create internal bookings on blacked-out dates. Only online/OTA booking is blocked.</p>
+	</div>
+	{/if}
 
 	<!-- ── Grid(s) ───────────────────────────────────────────────────────────── -->
 	<div class="flex-1 overflow-auto">

@@ -104,7 +104,7 @@
 			id: 'channels', label: 'Channels & OTA', icon: '🔗',
 			articles: [
 				{ id: 'channex-setup',   title: 'Channex channel manager',    status: 'partial' },
-				{ id: 'ari-sync',        title: 'ARI sync (rates, inventory)',  status: 'partial' },
+				{ id: 'ari-sync',        title: 'ARI sync (rates, inventory)',  status: 'implemented' },
 				{ id: 'ota-mapping',     title: 'OTA room type mapping',      status: 'partial' }
 			]
 		},

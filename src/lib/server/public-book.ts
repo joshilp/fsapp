@@ -196,14 +196,14 @@ export async function bookAction(request: Request) {
 
 	// Side effects outside the transaction
 	const [propRow, typeRow] = await Promise.all([
-		db.query.properties.findFirst({ where: eq(properties.id, propertyId), columns: { name: true } }),
+		db.query.properties.findFirst({ where: eq(properties.id, propertyId), columns: { name: true, emailNote: true, emailSignature: true } }),
 		db.query.roomTypes.findFirst({ where: eq(roomTypes.id, roomTypeId), columns: { name: true } })
 	]);
 	const nights   = Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
 	const origin   = env.ORIGIN ?? 'http://localhost:5173';
 	const confirmUrl = `${origin}/book/confirmation/${token}`;
 
-	void sendGuestConfirmation({ guestName, guestEmail, propertyName: propRow?.name ?? propertyId, checkInDate: checkIn, checkOutDate: checkOut, nights, requestedRoomType: typeRow?.name ?? null, quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null, publicToken: token, confirmationUrl: confirmUrl });
+	void sendGuestConfirmation({ guestName, guestEmail, propertyName: propRow?.name ?? propertyId, checkInDate: checkIn, checkOutDate: checkOut, nights, requestedRoomType: typeRow?.name ?? null, quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null, publicToken: token, confirmationUrl: confirmUrl, emailNote: propRow?.emailNote ?? null, emailSignature: propRow?.emailSignature ?? null });
 	void sendOperatorAlert({ guestName, guestEmail, propertyName: propRow?.name ?? propertyId, checkInDate: checkIn, checkOutDate: checkOut, nights, requestedRoomType: typeRow?.name ?? null, quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null, confirmationUrl: confirmUrl });
 
 	// Re-sync availability with Channex for every night of the stay

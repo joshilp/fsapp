@@ -70,6 +70,11 @@ export const properties = sqliteTable('properties', {
 	bookingEnabled: integer('booking_enabled', { mode: 'boolean' }).notNull().default(true),
 	// Short blurb shown on the property booking page
 	bookingDescription: text('booking_description'),
+	// ── Email customization ───────────────────────────────────────────────────
+	// Optional note shown near the top of confirmation/pre-arrival emails
+	emailNote: text('email_note'),
+	// Sign-off text at the bottom of every guest email (e.g. "The Team at Lakeside Motel")
+	emailSignature: text('email_signature'),
 	// Hero image URL for the booking page header
 	heroImageUrl: text('hero_image_url'),
 	// Hex accent colour for the booking page (e.g. '#d97706')

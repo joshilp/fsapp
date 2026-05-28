@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import type { PageData, ActionData } from './$types';
 	import { goto } from '$app/navigation';
+	import { toast } from 'svelte-sonner';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -11,6 +13,29 @@
 	let editingGuest = $state(false);
 	let creatingGuest = $state(false);
 	let savingNew = $state(false);
+
+	// Merge state
+	let mergingGuest = $state(false);
+	let mergeSearch = $state('');
+	let mergeResults = $state<{ id: string; name: string; email: string | null; phone: string | null }[]>([]);
+	let mergeSearching = $state(false);
+	let mergeSourceId = $state('');
+	let mergeSaving = $state(false);
+	let mergeError = $state('');
+
+	async function searchForMerge() {
+		if (mergeSearch.trim().length < 2) { mergeResults = []; return; }
+		mergeSearching = true;
+		try {
+			const res = await fetch(`/api/guests?q=${encodeURIComponent(mergeSearch)}`);
+			if (res.ok) {
+				const all = await res.json() as { id: string; name: string; email: string | null; phone: string | null }[];
+				// Exclude current guest
+				mergeResults = all.filter(g => g.id !== data.selectedGuest?.id);
+			}
+		} catch { /* ignore */ }
+		mergeSearching = false;
+	}
 
 	$effect(() => {
 		if (form && 'newGuestId' in form && form.newGuestId) {
@@ -146,12 +171,68 @@
 							{#if guest.city}<span>📍 {guest.city}{guest.provinceState ? `, ${guest.provinceState}` : ''}</span>{/if}
 						</div>
 					</div>
-					<button onclick={() => { editingGuest = !editingGuest; }}
+					<button onclick={() => { editingGuest = !editingGuest; mergingGuest = false; }}
 						class="rounded border px-2 py-1 text-xs hover:bg-muted shrink-0">
 						{editingGuest ? 'Cancel' : 'Edit'}
 					</button>
+					<button onclick={() => { mergingGuest = !mergingGuest; editingGuest = false; mergeSearch = ''; mergeResults = []; mergeSourceId = ''; mergeError = ''; }}
+						class="rounded border border-amber-200 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 shrink-0">
+						{mergingGuest ? 'Cancel' : 'Merge…'}
+					</button>
 					<a href="/booking" class="text-xs text-muted-foreground hover:text-foreground">← Grid</a>
 				</div>
+
+				<!-- Merge duplicate panel -->
+				{#if mergingGuest}
+				<div class="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
+					<p class="font-semibold text-amber-900 mb-1">Merge duplicate guest</p>
+					<p class="text-xs text-amber-700 mb-3">Search for the duplicate record. All bookings will move to <strong>{data.selectedGuest?.name}</strong> and the duplicate will be deleted.</p>
+					<input type="search" bind:value={mergeSearch}
+						oninput={searchForMerge}
+						placeholder="Search by name, email, phone…"
+						class="w-full rounded border border-amber-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400 mb-2" />
+					{#if mergeSearching}
+						<p class="text-xs text-amber-600">Searching…</p>
+					{:else if mergeResults.length > 0}
+						<div class="space-y-1 mb-3">
+							{#each mergeResults as r}
+								<button type="button"
+									onclick={() => { mergeSourceId = r.id; }}
+									class="w-full text-left rounded border px-3 py-2 text-xs transition-colors {mergeSourceId === r.id ? 'border-amber-500 bg-amber-100 font-semibold' : 'border-amber-200 bg-white hover:bg-amber-50'}">
+									{r.name}{r.email ? ` · ${r.email}` : ''}{r.phone ? ` · ${r.phone}` : ''}
+								</button>
+							{/each}
+						</div>
+						{#if mergeSourceId}
+						<form method="POST" action="?/mergeGuests"
+							use:enhance={() => {
+								mergeSaving = true; mergeError = '';
+								return async ({ result, update }) => {
+									mergeSaving = false;
+									if (result.type === 'success') {
+										mergingGuest = false;
+										toast.success('Guests merged successfully.');
+										await update({ reset: false });
+									} else {
+										mergeError = (result as { data?: { error?: string } }).data?.error ?? 'Merge failed';
+									}
+								};
+							}}
+						>
+							<input type="hidden" name="targetId" value={data.selectedGuest?.id} />
+							<input type="hidden" name="sourceId" value={mergeSourceId} />
+							<button type="submit" disabled={mergeSaving}
+								class="rounded bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50">
+								{mergeSaving ? 'Merging…' : 'Confirm merge'}
+							</button>
+							{#if mergeError}<p class="text-xs text-red-600 mt-1">{mergeError}</p>{/if}
+						</form>
+						{/if}
+					{:else if mergeSearch.trim().length >= 2}
+						<p class="text-xs text-amber-600">No other guests found.</p>
+					{/if}
+				</div>
+				{/if}
 
 				<!-- Rating card -->
 				<div class="mb-5 rounded-lg border p-4 {guest.rating ? ratingColour(guest.rating).replace('text-', 'border-').split(' ')[0] : ''}">
