@@ -93,6 +93,11 @@ export const roomTypes = sqliteTable('room_types', {
 	description: text('description'),   // short marketing blurb shown on booking page
 	imageUrl: text('image_url'),        // photo URL (overrides stock category image)
 	maxOccupancy: integer('max_occupancy'), // max guests (shown as "Sleeps N")
+	// ── Parent/child inventory ────────────────────────────────────────────────
+	// If set, this room type has no physical rooms of its own. It borrows the
+	// inventory pool of the referenced parent type (e.g. "1 Bed Room" and
+	// "2 Bed Suite" both draw from the same 4 physical units).
+	parentRoomTypeId: text('parent_room_type_id'),
 	// ── Channex channel manager mapping ──────────────────────────────────────
 	// channexRoomTypeId: UUID of the matching Room Type in Channex
 	// channexRatePlanId: UUID of the default Rate Plan in Channex (one per room type)
@@ -592,6 +597,8 @@ export const propertiesRelations = relations(properties, ({ many }) => ({
 
 export const roomTypesRelations = relations(roomTypes, ({ one, many }) => ({
 	property: one(properties, { fields: [roomTypes.propertyId], references: [properties.id] }),
+	parent: one(roomTypes, { fields: [roomTypes.parentRoomTypeId], references: [roomTypes.id], relationName: 'parentChild' }),
+	children: many(roomTypes, { relationName: 'parentChild' }),
 	rooms: many(rooms),
 	rateTiers: many(rateTiers),
 	losDiscounts: many(losDiscounts)

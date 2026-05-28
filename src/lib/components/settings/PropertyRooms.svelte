@@ -11,6 +11,7 @@
 		id: string; propertyId: string; name: string; category: string;
 		sortOrder: number; defaultRateCents?: number | null;
 		description?: string | null; imageUrl?: string | null; maxOccupancy?: number | null;
+		parentRoomTypeId?: string | null;
 	};
 	type Room = {
 		id: string; roomNumber: string; isActive: boolean; hasKitchen: boolean;
@@ -113,19 +114,34 @@
 							placeholder="Bright corner room with full kitchen and balcony view…"
 							class="border-input bg-background rounded border px-2 py-1 text-sm w-full resize-none">{rt.description ?? ''}</textarea>
 					</div>
+					<div class="flex flex-col gap-1 w-full">
+						<span class="text-xs text-muted-foreground">Uses inventory of <span class="font-normal">(leave blank for own physical rooms)</span></span>
+						<select name="parentRoomTypeId"
+							class="border-input bg-background rounded border px-2 py-1 text-sm w-full">
+							<option value="">— own rooms —</option>
+							{#each roomTypes.filter(p => p.id !== rt.id && !p.parentRoomTypeId) as parent}
+								<option value={parent.id} selected={rt.parentRoomTypeId === parent.id}>
+									{parent.category} · {parent.name}
+								</option>
+							{/each}
+						</select>
+					</div>
 						<Button type="submit" size="sm" class="h-8">Save</Button>
 						<Button type="button" variant="ghost" size="sm" class="h-8"
 							onclick={() => { editingRoomTypeId = null; }}>Cancel</Button>
 					</form>
 				{:else}
-					<div class="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
-						<span class="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{rt.category}</span>
-						<span class="flex-1 font-medium">{rt.name}</span>
-						{#if rt.defaultRateCents}
-							<span class="font-mono text-xs text-muted-foreground">${(rt.defaultRateCents / 100).toFixed(0)}/night</span>
-						{:else}
-							<span class="text-[10px] text-amber-600 font-medium">no default rate</span>
-						{/if}
+				<div class="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
+					<span class="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{rt.category}</span>
+					<span class="flex-1 font-medium">{rt.name}</span>
+					{#if rt.parentRoomTypeId}
+						{@const parent = roomTypes.find(p => p.id === rt.parentRoomTypeId)}
+						<span class="text-[10px] text-blue-600 font-medium">↳ {parent?.category ?? '?'}</span>
+					{:else if rt.defaultRateCents}
+						<span class="font-mono text-xs text-muted-foreground">${(rt.defaultRateCents / 100).toFixed(0)}/night</span>
+					{:else}
+						<span class="text-[10px] text-amber-600 font-medium">no default rate</span>
+					{/if}
 						<Button size="sm" variant="ghost" class="h-7 px-2 text-xs"
 							onclick={() => { editingRoomTypeId = rt.id; }}>Edit</Button>
 						<Button type="button" variant="ghost" size="sm"
@@ -186,7 +202,14 @@
 
 <!-- ── Rooms ──────────────────────────────────────────────────────────────── -->
 <div>
-	<p class="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rooms</p>
+	<p class="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rooms</p>
+	{#if roomTypes.some(rt => rt.parentRoomTypeId)}
+		<p class="mb-3 text-xs text-muted-foreground">
+			Room types marked <span class="text-blue-600 font-medium">↳ parent</span> share that parent's physical rooms — no rooms needed for them.
+		</p>
+	{:else}
+		<div class="mb-3"></div>
+	{/if}
 
 	{#if rooms.length > 0}
 		<div class="mb-5 overflow-x-auto max-w-xl">

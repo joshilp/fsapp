@@ -363,11 +363,12 @@ export const actions: Actions = {
 		const imageUrl = g('imageUrl');
 		const maxOccupancyRaw = g('maxOccupancy');
 		const maxOccupancy = maxOccupancyRaw ? parseInt(maxOccupancyRaw) || null : null;
+		const parentRoomTypeId = g('parentRoomTypeId') || null;
 		if (!propertyId || !name || !category) return fail(400, { error: 'Missing fields' });
 		if (id) {
-			await db.update(roomTypes).set({ name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy }).where(eq(roomTypes.id, id));
+			await db.update(roomTypes).set({ name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy, parentRoomTypeId }).where(eq(roomTypes.id, id));
 		} else {
-			await db.insert(roomTypes).values({ id: crypto.randomUUID(), propertyId, name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy });
+			await db.insert(roomTypes).values({ id: crypto.randomUUID(), propertyId, name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy, parentRoomTypeId });
 		}
 		return { success: true };
 	},

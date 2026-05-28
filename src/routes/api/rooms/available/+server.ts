@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { rooms, bookings } from '$lib/server/db/schema';
+import { rooms, bookings, roomTypes } from '$lib/server/db/schema';
 import { and, eq, lt, gt, ne, inArray } from 'drizzle-orm';
 
 /**
@@ -13,17 +13,29 @@ import { and, eq, lt, gt, ne, inArray } from 'drizzle-orm';
  * Filter by property:    ?propertyId=X&checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD
  *
  * Optional: &excludeRoomId=Y to omit the currently-assigned room from results.
+ *
+ * If the requested roomTypeId is a child type (has parentRoomTypeId), physical
+ * rooms are fetched from the parent's pool instead.
  */
 export const GET: RequestHandler = async ({ url, locals }) => {
 	if (!locals.user) return new Response('Unauthorized', { status: 401 });
 
-	const roomTypeId  = url.searchParams.get('roomTypeId');
+	let roomTypeId    = url.searchParams.get('roomTypeId');
 	const propertyId  = url.searchParams.get('propertyId');
 	const checkIn     = url.searchParams.get('checkIn');
 	const checkOut    = url.searchParams.get('checkOut');
 	const excludeRoom = url.searchParams.get('excludeRoomId');
 
 	if ((!roomTypeId && !propertyId) || !checkIn || !checkOut || checkIn >= checkOut) return json([]);
+
+	// If filtering by a child room type, use the parent's room pool instead
+	if (roomTypeId) {
+		const rt = await db.query.roomTypes.findFirst({
+			where: eq(roomTypes.id, roomTypeId),
+			columns: { parentRoomTypeId: true }
+		});
+		if (rt?.parentRoomTypeId) roomTypeId = rt.parentRoomTypeId;
+	}
 
 	const roomList = await db.query.rooms.findMany({
 		where: and(

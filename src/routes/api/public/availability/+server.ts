@@ -34,7 +34,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		throw error(400, 'Missing or invalid params');
 	}
 
-	// All active rooms for this property, grouped by type
+	// All active rooms for this property
 	const allRooms = await db.query.rooms.findMany({
 		where: and(eq(rooms.propertyId, propertyId), eq(rooms.isActive, true)),
 		columns: { id: true, roomTypeId: true, kingBeds: true, queenBeds: true, doubleBeds: true, hasKitchen: true, hasHideabed: true }
@@ -58,7 +58,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		)
 		: new Set<string>();
 
-	// Unassigned online bookings by room type for this date range
+	// All unassigned bookings in this date range for this property
 	const unassignedConflicts = await db
 		.select({ roomTypeId: bookings.requestedRoomTypeId })
 		.from(bookings)
@@ -92,20 +92,46 @@ export const GET: RequestHandler = async ({ url }) => {
 		if (cur === undefined || t.nightlyRate < cur) minRateByType.set(t.roomTypeId, t.nightlyRate);
 	}
 
-	// Load room types for this property
+	// Load room types for this property (including parentRoomTypeId)
 	const propRoomTypes = await db.query.roomTypes.findMany({
 		where: eq(roomTypes.propertyId, propertyId),
-		columns: { id: true, name: true, category: true, sortOrder: true, description: true, imageUrl: true, maxOccupancy: true },
+		columns: { id: true, name: true, category: true, sortOrder: true, description: true, imageUrl: true, maxOccupancy: true, parentRoomTypeId: true },
 		orderBy: (rt, { asc }) => [asc(rt.sortOrder)]
 	});
 
-	const result: AvailableRoomType[] = propRoomTypes.map((rt) => {
-		const rtRooms     = allRooms.filter((r) => r.roomTypeId === rt.id);
-		const totalCount  = rtRooms.length;
-		const taken       = rtRooms.filter((r) => conflictedRoomIds.has(r.id)).length + (unassignedByType.get(rt.id) ?? 0);
-		const availableCount = Math.max(0, totalCount - taken);
+	// Build a map of parentId → child type IDs for pool-based availability
+	// Each "pool" is rooted at a parent room type. Children share its physical rooms.
+	const childrenOf = new Map<string, string[]>();   // parentId → [childId, ...]
+	for (const rt of propRoomTypes) {
+		if (rt.parentRoomTypeId) {
+			const arr = childrenOf.get(rt.parentRoomTypeId) ?? [];
+			arr.push(rt.id);
+			childrenOf.set(rt.parentRoomTypeId, arr);
+		}
+	}
 
-		const rep = rtRooms[0] ?? null;
+	// For each room type, resolve its pool root and compute availability
+	const result: AvailableRoomType[] = propRoomTypes.map((rt) => {
+		const isChild   = !!rt.parentRoomTypeId;
+		const poolRootId = isChild ? rt.parentRoomTypeId! : rt.id;
+		const siblings  = childrenOf.get(poolRootId) ?? [];
+
+		// Physical rooms belonging to the pool root
+		const poolRooms   = allRooms.filter((r) => r.roomTypeId === poolRootId);
+		const totalCount  = poolRooms.length;
+
+		// Rooms physically blocked (assigned to conflicting bookings)
+		const takenRooms = poolRooms.filter((r) => conflictedRoomIds.has(r.id)).length;
+
+		// Unassigned bookings that consume this pool:
+		// root + all children (siblings for a child, own children for a parent)
+		const poolTypeIds = [poolRootId, ...siblings];
+		const takenUnassigned = poolTypeIds.reduce((sum, tid) => sum + (unassignedByType.get(tid) ?? 0), 0);
+
+		const availableCount = Math.max(0, totalCount - takenRooms - takenUnassigned);
+
+		// Representative room for bed config (always from pool root)
+		const rep = poolRooms[0] ?? null;
 
 		return {
 			id:            rt.id,
@@ -119,14 +145,14 @@ export const GET: RequestHandler = async ({ url }) => {
 			totalCount,
 			minRateCents:  minRateByType.get(rt.id) ?? null,
 			beds: rep ? {
-				kingBeds:   rep.kingBeds,
-				queenBeds:  rep.queenBeds,
-				doubleBeds: rep.doubleBeds,
-				hasKitchen: rep.hasKitchen,
+				kingBeds:    rep.kingBeds,
+				queenBeds:   rep.queenBeds,
+				doubleBeds:  rep.doubleBeds,
+				hasKitchen:  rep.hasKitchen,
 				hasHideabed: rep.hasHideabed
 			} : null
 		};
-	}).filter((rt) => rt.availableCount > 0); // only return types with availability
+	}).filter((rt) => rt.availableCount > 0);
 
 	return json(result);
 };
