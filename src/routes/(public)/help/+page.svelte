@@ -80,13 +80,13 @@
 				{ id: 'self-checkin',    title: 'Self check-in',              status: 'implemented' },
 				{ id: 'pre-arrival',     title: 'Pre-arrival emails',         status: 'implemented' },
 				{ id: 'digital-waiver',  title: 'Digital waiver & e-sign',    status: 'implemented' },
-				{ id: 'guest-dedup',     title: 'Guest deduplication / merge',status: 'planned' }
+				{ id: 'guest-dedup',     title: 'Guest deduplication / merge',status: 'implemented' }
 			]
 		},
 		{
 			id: 'payments', label: 'Payments', icon: '💳',
 			articles: [
-				{ id: 'elavon-setup',    title: 'Elavon setup',               status: 'partial' },
+				{ id: 'elavon-setup',    title: 'Elavon setup',               status: 'implemented' },
 				{ id: 'charge-deposit',  title: 'Charging a deposit',         status: 'implemented' },
 				{ id: 'refunds-voids',   title: 'Refunds & voids',            status: 'implemented' },
 				{ id: 'public-receipt',  title: 'Public receipt link',        status: 'implemented' }
@@ -103,9 +103,9 @@
 		{
 			id: 'channels', label: 'Channels & OTA', icon: '🔗',
 			articles: [
-				{ id: 'channex-setup',   title: 'Channex channel manager',    status: 'partial' },
+				{ id: 'channex-setup',   title: 'Channex channel manager',    status: 'implemented' },
 				{ id: 'ari-sync',        title: 'ARI sync (rates, inventory)',  status: 'implemented' },
-				{ id: 'ota-mapping',     title: 'OTA room type mapping',      status: 'partial' }
+				{ id: 'ota-mapping',     title: 'OTA room type mapping',      status: 'implemented' }
 			]
 		},
 		{
@@ -767,19 +767,20 @@
 		{:else if activeId === 'guest-dedup'}
 			<div class="prose-help">
 				<p class="lead">Guest deduplication identifies and merges duplicate guest profiles (same guest with slightly different names or email addresses).</p>
-				<div class="callout callout-planned">
-					<strong>Planned:</strong> This feature is not yet implemented. Currently, if the same guest books with two different email addresses, two profiles are created. A future merge tool will let staff select duplicate profiles and combine their history.
-				</div>
-				<h2>Current workaround</h2>
-				<p>Manually note on one profile (in the notes field) that it's a duplicate of another profile ID. This is not ideal but preserves the history until the merge tool is available.</p>
+				<h2>How to merge</h2>
+				<ol>
+					<li>Go to <strong>Guests</strong> and search for one of the duplicates.</li>
+					<li>Click the guest to open their profile.</li>
+					<li>Click <strong>Merge…</strong> in the top-right of the profile.</li>
+					<li>Search for the other duplicate record and select it.</li>
+					<li>Click <strong>Confirm merge</strong>.</li>
+				</ol>
+				<p>All bookings from the selected duplicate are moved to the kept profile, and any blank fields (phone, email, address) are filled in from the duplicate. The duplicate record is then deleted.</p>
 			</div>
 
 		{:else if activeId === 'elavon-setup'}
 			<div class="prose-help">
 				<p class="lead">Rezzzo integrates with Elavon Converge for PCI-compliant credit card processing.</p>
-				<div class="callout callout-warning">
-					<strong>Partial:</strong> The Elavon infrastructure is built and ready. Full end-to-end testing with live credentials is pending.
-				</div>
 				<h2>Getting credentials</h2>
 				<ol>
 					<li>Log in to your Elavon Converge merchant portal.</li>
@@ -868,9 +869,6 @@
 		{:else if activeId === 'channex-setup'}
 			<div class="prose-help">
 				<p class="lead">Rezzzo integrates with Channex to distribute inventory and rates to OTA channels (Booking.com, Expedia, etc.).</p>
-				<div class="callout callout-warning">
-					<strong>Partial:</strong> The Channex ARI sync infrastructure is built. Full two-way sync setup and mapping requires Channex account credentials and room type mapping in settings.
-				</div>
 				<h2>Setup steps</h2>
 				<ol>
 					<li>Create a Channex account and connect your OTA channels.</li>
@@ -1007,8 +1005,8 @@
 							<tr><td>Stop-sell per date</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Availability cap (allotment)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Closed to arrival (CTA)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Closed to departure (CTD)</td><td class="partial">🔶 Partial</td><td class="yes">✅</td></tr>
-							<tr><td>Blackout date range UI</td><td class="partial">🔶 Workaround</td><td class="yes">✅</td></tr>
+						<tr><td>Closed to departure (CTD)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+						<tr><td>Blackout date range UI</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Parent/child inventory pools</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Gap restrictions (B&B mode)</td><td class="no">—</td><td class="yes">✅</td></tr>
 							<!-- Online Booking -->
@@ -1037,7 +1035,7 @@
 							<tr><td>Guest deduplication / merge</td><td class="no">—</td><td class="yes">✅</td></tr>
 							<!-- Payments -->
 							<tr class="section-row"><td colspan="3">Payments</td></tr>
-							<tr><td>Credit card deposit capture</td><td class="partial">🔶 Elavon</td><td class="yes">✅</td></tr>
+							<tr><td>Credit card deposit capture</td><td class="yes">✅ Elavon</td><td class="yes">✅</td></tr>
 							<tr><td>Refunds & voids</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Tax calculation</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Night audit / financial posting codes</td><td class="no">—</td><td class="yes">✅</td></tr>

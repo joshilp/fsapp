@@ -60,12 +60,14 @@
 		if (d?.stopSell) return;
 
 		if (phase === 'checkin' || date <= checkIn) {
+			if (d?.closedToArrival) return;
 			checkIn = date;
 			const next = new Date(date + 'T12:00:00');
 			next.setDate(next.getDate() + (d?.minNights ?? 1));
 			if (checkOut <= checkIn) checkOut = next.toISOString().slice(0, 10);
 			phase = 'checkout';
 		} else {
+			if (d?.closedToDeparture) return;
 			checkOut = date;
 			phase = 'checkin';
 		}
@@ -141,36 +143,44 @@
 					<div class="grid grid-cols-7">
 						{#each week as date}
 							{#if date}
-								{@const dd       = getDayData(date)}
-								{@const isPast   = date < today}
-								{@const isStopped = dd?.stopSell ?? false}
-								{@const isCI     = date === checkIn}
-								{@const isCO     = date === checkOut}
-								{@const inRange  = isInRange(date)}
-								{@const disabled = isPast || isStopped}
-								<button
-									type="button"
-									{disabled}
-									onclick={() => handleDay(date)}
-									onmouseenter={() => { if (phase === 'checkout') hoverDate = date; }}
-									onmouseleave={() => { hoverDate = null; }}
-									class={[
-										'flex flex-col items-center justify-center py-1.5 rounded-lg text-xs transition-colors',
-										disabled ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer',
-										inRange && !disabled ? 'bg-amber-50' : '',
-										!isCI && !isCO && !disabled ? 'hover:bg-stone-100' : ''
-									].join(' ')}
-									style={isCI || isCO ? `background-color:${accent}; color:white; border-radius:8px;` : ''}
-								>
-									<span class="font-medium leading-none">{parseInt((date as string).slice(8))}</span>
-									{#if dd?.lowestRateCents && !isStopped}
-										<span class="text-[9px] leading-none mt-0.5 {isCI || isCO ? 'opacity-80' : 'text-stone-400'}">
-											${Math.round(dd.lowestRateCents / 100)}
-										</span>
-									{:else if isStopped}
-										<span class="text-[9px] leading-none mt-0.5 text-stone-300">—</span>
-									{/if}
-								</button>
+							{@const dd       = getDayData(date)}
+							{@const isPast   = date < today}
+							{@const isStopped = dd?.stopSell ?? false}
+							{@const isCTA    = !isStopped && (dd?.closedToArrival ?? false)}
+							{@const isCTD    = !isStopped && (dd?.closedToDeparture ?? false)}
+							{@const isCI     = date === checkIn}
+							{@const isCO     = date === checkOut}
+							{@const inRange  = isInRange(date)}
+							{@const disabledCI = isPast || isStopped || (phase === 'checkin' && isCTA)}
+							{@const disabledCO = isPast || isStopped || (phase === 'checkout' && isCTD)}
+							{@const disabled = disabledCI && disabledCO}
+							<button
+								type="button"
+								disabled={disabled}
+								onclick={() => handleDay(date)}
+								onmouseenter={() => { if (phase === 'checkout') hoverDate = date; }}
+								onmouseleave={() => { hoverDate = null; }}
+								class={[
+									'flex flex-col items-center justify-center py-1.5 rounded-lg text-xs transition-colors',
+									disabled ? 'opacity-25 cursor-not-allowed' : 'cursor-pointer',
+									inRange && !disabled ? 'bg-amber-50' : '',
+									!isCI && !isCO && !disabled ? 'hover:bg-stone-100' : ''
+								].join(' ')}
+								style={isCI || isCO ? `background-color:${accent}; color:white; border-radius:8px;` : ''}
+							>
+								<span class="font-medium leading-none">{parseInt((date as string).slice(8))}</span>
+								{#if dd?.lowestRateCents && !isStopped}
+									<span class="text-[9px] leading-none mt-0.5 {isCI || isCO ? 'opacity-80' : 'text-stone-400'}">
+										${Math.round(dd.lowestRateCents / 100)}
+									</span>
+								{:else if isStopped}
+									<span class="text-[9px] leading-none mt-0.5 text-stone-300">—</span>
+								{:else if isCTA && phase === 'checkin'}
+									<span class="text-[9px] leading-none mt-0.5 text-stone-300" title="No arrivals">→</span>
+								{:else if isCTD && phase === 'checkout'}
+									<span class="text-[9px] leading-none mt-0.5 text-stone-300" title="No departures">←</span>
+								{/if}
+							</button>
 							{:else}
 								<div></div>
 							{/if}

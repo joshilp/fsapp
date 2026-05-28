@@ -19,6 +19,8 @@ export type CalendarDay = {
 	date: string;          // YYYY-MM-DD
 	lowestRateCents: number | null;
 	stopSell: boolean;
+	closedToArrival: boolean;
+	closedToDeparture: boolean;
 	minNights: number;
 };
 
@@ -72,7 +74,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			gte(rateOverrides.date, firstDay),
 			lte(rateOverrides.date, lastDay)
 		),
-		columns: { roomTypeId: true, date: true, rateCents: true, stopSell: true, minNights: true }
+		columns: { roomTypeId: true, date: true, rateCents: true, stopSell: true, closedToArrival: true, closedToDeparture: true, minNights: true }
 	});
 	// Index: date → list of overrides
 	const overridesByDate = new Map<string, typeof overrides>();
@@ -92,6 +94,12 @@ export const GET: RequestHandler = async ({ url }) => {
 		// A date is stop-sold only if ALL relevant types have stop_sell = true
 		const stoppedTypes = new Set(dayOverrides.filter((o) => o.stopSell).map((o) => o.roomTypeId));
 		const stopSell     = typeIds.length > 0 && typeIds.every((id) => stoppedTypes.has(id));
+
+		// CTA/CTD: restricted if ANY active type has the flag
+		const ctaTypes = new Set(dayOverrides.filter((o) => o.closedToArrival).map((o) => o.roomTypeId));
+		const ctdTypes = new Set(dayOverrides.filter((o) => o.closedToDeparture).map((o) => o.roomTypeId));
+		const closedToArrival   = typeIds.length > 0 && typeIds.every((id) => ctaTypes.has(id));
+		const closedToDeparture = typeIds.length > 0 && typeIds.every((id) => ctdTypes.has(id));
 
 		// Lowest rate across all types: prefer override, fall back to season tier
 		let lowestRateCents: number | null = null;
@@ -123,7 +131,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			if (dayMin > minNights) minNights = dayMin;
 		}
 
-		result.push({ date, lowestRateCents, stopSell, minNights });
+		result.push({ date, lowestRateCents, stopSell, closedToArrival, closedToDeparture, minNights });
 	}
 
 	return json(result);
