@@ -3,6 +3,7 @@ import { and, eq, gte, lte } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { rateSeasons, rateTiers, roomTypes } from '$lib/server/db/schema';
+import { syncARIForDateRange } from '$lib/server/ari-sync';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!locals.user) redirect(303, '/auth/login');
@@ -54,6 +55,16 @@ export const actions: Actions = {
 				.update(rateSeasons)
 				.set({ name, colour, startDate, endDate, minNights, sortOrder, baseRateCents, isManualOnly })
 				.where(eq(rateSeasons.id, id));
+			// Push updated minNights + dates to Channex for all room types in this season
+			const tiers = await db.query.rateTiers.findMany({
+				where: eq(rateTiers.seasonId, id),
+				columns: { roomTypeId: true }
+			});
+			for (const t of tiers) {
+				void syncARIForDateRange(t.roomTypeId, startDate!, endDate!).catch((e) =>
+					console.error('[ari-sync] upsertSeason update:', e)
+				);
+			}
 		} else {
 			const newId = crypto.randomUUID();
 			await db.insert(rateSeasons).values({
@@ -117,6 +128,16 @@ export const actions: Actions = {
 			await db.insert(rateTiers).values({
 				id: crypto.randomUUID(), seasonId, roomTypeId, nightlyRate, baseOccupancy, extraGuestFeeCents
 			});
+		}
+		// Push updated rate to Channex for this room type over the season's date range
+		const season = await db.query.rateSeasons.findFirst({
+			where: eq(rateSeasons.id, seasonId!),
+			columns: { startDate: true, endDate: true }
+		});
+		if (season) {
+			void syncARIForDateRange(roomTypeId, season.startDate, season.endDate).catch((e) =>
+				console.error('[ari-sync] upsertRateTier:', e)
+			);
 		}
 		return { success: true };
 	},
@@ -230,6 +251,9 @@ export const actions: Actions = {
 					id: crypto.randomUUID(), seasonId, roomTypeId: rt.id, nightlyRate: season.baseRateCents
 				});
 			}
+			void syncARIForDateRange(rt.id, season.startDate, season.endDate).catch((e) =>
+				console.error('[ari-sync] upsertAllTiersAtBase:', e)
+			);
 		}
 		return { success: true };
 	}

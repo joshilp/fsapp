@@ -13,6 +13,28 @@
 
 	let { prop, roomTypes }: { prop: Prop; roomTypes: RoomType[] } = $props();
 	let savingProp = $state(false);
+	let syncing = $state(false);
+
+	async function syncNow() {
+		syncing = true;
+		try {
+			const res = await fetch('/api/ari/sync-all', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ propertyId: prop.id })
+			});
+			const data = await res.json();
+			if (data.ok) {
+				toast.success(`Sync complete — ${data.synced} room type(s) pushed, ${data.skipped} skipped (no Channex ID), ${data.errors} error(s)`);
+			} else {
+				toast.error(data.error ?? 'Sync failed');
+			}
+		} catch {
+			toast.error('Sync request failed');
+		} finally {
+			syncing = false;
+		}
+	}
 </script>
 
 <h2 class="mb-2 text-lg font-semibold">Channex</h2>
@@ -95,3 +117,15 @@
 		</div>
 	</div>
 {/if}
+
+<!-- Bulk sync -->
+<div class="border-t border-border pt-5 mt-5">
+	<p class="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Force re-sync</p>
+	<p class="mb-3 text-xs text-muted-foreground max-w-md">
+		Pushes today + 365 days of availability, rates, and restrictions to Channex for all configured room types.
+		Use after initial setup or if you suspect Channex is out of date.
+	</p>
+	<Button variant="outline" size="sm" onclick={syncNow} disabled={syncing}>
+		{syncing ? 'Syncing…' : 'Sync now →'}
+	</Button>
+</div>
