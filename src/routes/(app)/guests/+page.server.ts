@@ -1,9 +1,8 @@
-import { redirect } from '@sveltejs/kit';
-import { like, or, desc, eq } from 'drizzle-orm';
+import { redirect, fail } from '@sveltejs/kit';
+import { like, or, eq } from 'drizzle-orm';
 import type { PageServerLoad, Actions } from './$types';
 import { db } from '$lib/server/db';
 import { bookings, guests } from '$lib/server/db/schema';
-import { fail } from '@sveltejs/kit';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!locals.user) redirect(303, '/auth/login');
@@ -103,5 +102,20 @@ export const actions: Actions = {
 			country: g('country')
 		}).where(eq(guests.id, id));
 		return { success: true };
+	},
+
+	createGuest: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const name = g('name');
+		if (!name) return fail(400, { error: 'Name is required' });
+		const [created] = await db.insert(guests).values({
+			id: crypto.randomUUID(),
+			name,
+			phone: g('phone'),
+			email: g('email'),
+		}).returning({ id: guests.id });
+		return { success: true, newGuestId: created.id };
 	}
 };

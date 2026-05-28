@@ -1,14 +1,26 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import type { PageData } from './$types';
+	import type { PageData, ActionData } from './$types';
 	import { goto } from '$app/navigation';
 
-	let { data }: { data: PageData } = $props();
+	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	let q = $state(data.q);
 	let savingRating = $state(false);
 	let savingGuest = $state(false);
 	let editingGuest = $state(false);
+	let creatingGuest = $state(false);
+	let savingNew = $state(false);
+
+	$effect(() => {
+		if (form && 'newGuestId' in form && form.newGuestId) {
+			creatingGuest = false;
+			const p = new URLSearchParams();
+			if (q) p.set('q', q);
+			p.set('id', form.newGuestId as string);
+			goto(`/guests?${p}`);
+		}
+	});
 
 	function ratingLabel(r: number | null) {
 		if (!r) return null;
@@ -47,7 +59,36 @@
 	<!-- ── Left: search + list ──────────────────────────────────────────────── -->
 	<div class="w-72 shrink-0 border-r flex flex-col">
 		<div class="p-3 border-b">
-			<h1 class="font-bold text-sm mb-2">Guests</h1>
+			<div class="flex items-center justify-between mb-2">
+				<h1 class="font-bold text-sm">Guests</h1>
+				<button onclick={() => { creatingGuest = !creatingGuest; editingGuest = false; }}
+					class="text-xs rounded border border-input px-2 py-1 hover:bg-muted transition-colors">
+					{creatingGuest ? '✕ Cancel' : '+ New'}
+				</button>
+			</div>
+
+			<!-- New guest form -->
+			{#if creatingGuest}
+				<form method="POST" action="?/createGuest"
+					use:enhance={() => {
+						savingNew = true;
+						return async ({ update }) => { savingNew = false; await update({ reset: true }); };
+					}}
+					class="mb-3 space-y-1.5 rounded-md border border-input bg-muted/30 p-2"
+				>
+					<input name="name" placeholder="Full name *" required
+						class="w-full rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
+					<input name="phone" placeholder="Phone"
+						class="w-full rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
+					<input name="email" type="email" placeholder="Email"
+						class="w-full rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
+					<button type="submit" disabled={savingNew}
+						class="w-full rounded-md bg-primary text-primary-foreground px-2 py-1 text-xs font-medium hover:bg-primary/90 disabled:opacity-50">
+						{savingNew ? 'Creating…' : 'Create guest'}
+					</button>
+				</form>
+			{/if}
+
 			<form method="GET" action="/guests" class="flex gap-1">
 				{#if data.selectedId}
 					<input type="hidden" name="id" value={data.selectedId} />

@@ -17,7 +17,7 @@ export const POST: RequestHandler = async ({ params, locals, url }) => {
 
 	const booking = await db.query.bookings.findFirst({
 		where: eq(bookings.id, id),
-		columns: { id: true, status: true, checkedOutAt: true, roomId: true, checkInDate: true, checkOutDate: true },
+		columns: { id: true, status: true, checkedOutAt: true, roomId: true, checkInDate: true, checkOutDate: true, publicToken: true },
 		with: {
 			guest: { columns: { name: true, email: true } },
 			room: {
@@ -93,7 +93,9 @@ export const POST: RequestHandler = async ({ params, locals, url }) => {
 						type: p.type, paymentMethod: p.paymentMethod,
 						amount: p.amount, receiptNumber: p.receiptNumber ?? null
 					})),
-				receiptUrl: `${origin}/booking/${id}/receipt`,
+				receiptUrl: booking.publicToken
+					? `${origin}/receipt/${booking.publicToken}`
+					: `${origin}/booking/${id}/receipt`,
 			}).catch(err => console.error('[checkout] receipt email failed:', err));
 		}
 	}
