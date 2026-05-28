@@ -37,7 +37,7 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 			property: {
 				columns: { elavonMerchantId: true, elavonUserId: true, elavonPin: true }
 			},
-			guest: { columns: { firstName: true, lastName: true } }
+			guest: { columns: { name: true } }
 		}
 	});
 
@@ -56,7 +56,7 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 	};
 
 	const guest = (booking as any).guest;
-	const guestName = guest ? `${guest.firstName ?? ''} ${guest.lastName ?? ''}`.trim() : undefined;
+	const guestName = guest?.name?.trim() || undefined;
 
 	const result = await elavonSale({
 		creds,
