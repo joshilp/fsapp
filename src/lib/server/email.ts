@@ -53,6 +53,8 @@ export type PreArrivalParams = {
 	nights: number;
 	checkinTime: string;
 	selfCheckinUrl: string;
+	emailNote?: string | null;
+	emailSignature?: string | null;
 };
 
 function fmtDate(iso: string) {
@@ -281,6 +283,7 @@ export async function sendPreArrival(p: PreArrivalParams): Promise<void> {
 
   <p>Hi ${p.guestName},</p>
   <p>We're looking forward to welcoming you tomorrow! You can skip the front desk by completing your check-in online right now.</p>
+  ${p.emailNote ? `<p style="background:#f9f7f4;border-left:3px solid #d97706;padding:10px 14px;border-radius:4px;font-size:14px">${p.emailNote}</p>` : ''}
 
   <table style="width:100%;border-collapse:collapse;margin:16px 0">
     <tr style="background:#f9f9f9">
@@ -319,7 +322,7 @@ export async function sendPreArrival(p: PreArrivalParams): Promise<void> {
   </p>
 
   <p style="color:#555;font-size:14px">See you soon!</p>
-  <p style="color:#555;font-size:14px">— ${(p as { emailSignature?: string | null }).emailSignature || `The team at ${p.propertyName}`}</p>
+  <p style="color:#555;font-size:14px">— ${p.emailSignature || `The team at ${p.propertyName}`}</p>
 
   <hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
   <p style="color:#aaa;font-size:11px">

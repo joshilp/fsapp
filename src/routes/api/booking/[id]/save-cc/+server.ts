@@ -12,6 +12,7 @@ import { eq } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { bookings, ccStaging } from '$lib/server/db/schema';
+import { encryptJson } from '$lib/server/cc';
 
 export const POST: RequestHandler = async ({ params, request, locals }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
@@ -29,13 +30,12 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 	});
 	if (!booking) return json({ error: 'Booking not found' }, { status: 404 });
 
-	// Store reference info (non-sensitive) as a JSON string.
-	// TODO: replace with AES-256-GCM using env.CC_ENCRYPTION_KEY
-	const encryptedData = Buffer.from(JSON.stringify({
+	// Store reference info encrypted with AES-256-GCM (requires CC_ENCRYPTION_KEY in .env)
+	const encryptedData = encryptJson({
 		cardholderName: cardholderName ?? '',
 		expiryMonth: expiryMonth ?? '',
 		expiryYear: expiryYear ?? ''
-	})).toString('base64');
+	});
 
 	// Build expiry date for the record
 	const expYear = parseInt(expiryYear ?? new Date().getFullYear() + 3);

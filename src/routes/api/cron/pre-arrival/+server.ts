@@ -62,6 +62,8 @@ export const POST: RequestHandler = async ({ request, url }) => {
 					address: true,
 					city: true,
 					checkinTime: true,
+					emailNote: true,
+					emailSignature: true,
 				}
 			}
 		}
@@ -97,6 +99,8 @@ export const POST: RequestHandler = async ({ request, url }) => {
 				nights,
 				checkinTime:     prop?.checkinTime ?? '2:00 PM',
 				selfCheckinUrl:  `${origin}/checkin/${booking.selfCheckinToken}`,
+				emailNote:       prop?.emailNote ?? null,
+				emailSignature:  prop?.emailSignature ?? null,
 			});
 
 			// Stamp sent timestamp — prevents double-fire even if cron runs twice

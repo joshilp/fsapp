@@ -31,6 +31,35 @@ function loadKey(): Buffer {
 	return Buffer.from(hex, 'hex');
 }
 
+/**
+ * Encrypts any JSON-serializable value using the same AES-256-GCM key.
+ * Use this for non-PAN reference data (cardholder name, expiry, etc.).
+ */
+export function encryptJson<T>(value: T): string {
+	const key = loadKey();
+	const iv = randomBytes(IV_BYTES);
+	const cipher = createCipheriv(ALGORITHM, key, iv);
+	const json = JSON.stringify(value);
+	const encrypted = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
+	const tag = cipher.getAuthTag();
+	return Buffer.concat([iv, tag, encrypted]).toString('base64');
+}
+
+/**
+ * Decrypts a value previously encrypted with encryptJson().
+ */
+export function decryptJson<T>(encryptedData: string): T {
+	const key = loadKey();
+	const combined = Buffer.from(encryptedData, 'base64');
+	const iv = combined.subarray(0, IV_BYTES);
+	const tag = combined.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
+	const ciphertext = combined.subarray(IV_BYTES + TAG_BYTES);
+	const decipher = createDecipheriv(ALGORITHM, key, iv);
+	decipher.setAuthTag(tag);
+	const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+	return JSON.parse(decrypted.toString('utf8')) as T;
+}
+
 export type CcPayload = {
 	number: string;
 	expiry: string; // "MM/YY"
