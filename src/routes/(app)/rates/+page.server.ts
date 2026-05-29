@@ -4,6 +4,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { rateSeasons, rateTiers, roomTypes } from '$lib/server/db/schema';
 import { syncARIForDateRange } from '$lib/server/ari-sync';
+import { serializeDowRates } from '$lib/server/rates';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!locals.user) redirect(303, '/auth/login');
@@ -108,6 +109,16 @@ export const actions: Actions = {
 		const baseOccupancy = baseOccupancyRaw ? parseInt(baseOccupancyRaw) || 2 : 2;
 		const extraGuestFeeCents = extraGuestFeeRaw ? Math.round(parseFloat(extraGuestFeeRaw) * 100) || 0 : 0;
 		if (!seasonId || !roomTypeId) return fail(400, { error: 'Missing fields' });
+
+		// Parse day-of-week rate overrides (7 values Sun-Sat, empty = null = use base)
+		const dowArr: (number | null)[] = [0,1,2,3,4,5,6].map((d) => {
+			const raw = (fd.get(`dowRate${d}`) as string | null)?.trim();
+			if (!raw) return null;
+			const cents = Math.round(parseFloat(raw) * 100);
+			return isNaN(cents) || cents <= 0 ? null : cents;
+		});
+		const dowRates = serializeDowRates(dowArr);
+
 		let nightlyRate: number;
 		if (upchargeStr !== null && baseCentsStr !== null) {
 			const baseCents = parseInt(baseCentsStr) || 0;
@@ -123,10 +134,10 @@ export const actions: Actions = {
 			where: and(eq(rateTiers.seasonId, seasonId), eq(rateTiers.roomTypeId, roomTypeId))
 		});
 		if (existing) {
-			await db.update(rateTiers).set({ nightlyRate, baseOccupancy, extraGuestFeeCents }).where(eq(rateTiers.id, existing.id));
+			await db.update(rateTiers).set({ nightlyRate, baseOccupancy, extraGuestFeeCents, dowRates }).where(eq(rateTiers.id, existing.id));
 		} else {
 			await db.insert(rateTiers).values({
-				id: crypto.randomUUID(), seasonId, roomTypeId, nightlyRate, baseOccupancy, extraGuestFeeCents
+				id: crypto.randomUUID(), seasonId, roomTypeId, nightlyRate, baseOccupancy, extraGuestFeeCents, dowRates
 			});
 		}
 		// Push updated rate to Channex for this room type over the season's date range

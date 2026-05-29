@@ -55,6 +55,10 @@
 		if (typeof localStorage !== 'undefined') localStorage.setItem(SIZE_MODE_KEY, s);
 	}
 
+	// ─── DOW rates panel state ────────────────────────────────────────────────
+	let dowOpen  = $state<Record<string, boolean>>({});
+	let dowEdits = $state<Record<string, (number|null)[]>>({});
+
 	// ─── Year action dialogs ───────────────────────────────────────────────────
 	let copyDialogOpen   = $state(false);
 	let clearDialogOpen  = $state(false);
@@ -955,19 +959,26 @@
 						{/if}
 					</div>
 				{:else}
-					<!-- Direct rate mode -->
-					<div class="space-y-2">
-						{#each roomTypes as rt}
-							{@const tier = s.tiers.find(t => t.roomTypeId === rt.id)}
-							<form method="POST" action="?/upsertRateTier"
-								use:enhance={() => {
-									saving = true;
-									return async ({ update }) => { saving = false; await update({ reset: false }); };
-								}}
-								class="flex items-center gap-2 flex-wrap"
-							>
-								<input type="hidden" name="seasonId" value={s.id} />
-								<input type="hidden" name="roomTypeId" value={rt.id} />
+				<!-- Direct rate mode -->
+				<div class="space-y-2">
+					{#each roomTypes as rt}
+						{@const tier = s.tiers.find(t => t.roomTypeId === rt.id)}
+						{@const dowParsed = tier?.dowRates ? (() => { try { return JSON.parse(tier.dowRates); } catch { return null; } })() : null}
+						{@const dowState = dowEdits[s.id + ':' + rt.id] ?? dowParsed ?? [null,null,null,null,null,null,null]}
+						<form method="POST" action="?/upsertRateTier"
+							use:enhance={() => {
+								saving = true;
+								return async ({ update }) => { saving = false; await update({ reset: false }); };
+							}}
+							class="border rounded-md p-2 space-y-1.5"
+						>
+							<input type="hidden" name="seasonId" value={s.id} />
+							<input type="hidden" name="roomTypeId" value={rt.id} />
+							<!-- DOW hidden inputs — always submitted -->
+							{#each [0,1,2,3,4,5,6] as d}
+								<input type="hidden" name={`dowRate${d}`} value={dowState[d] != null ? (dowState[d] / 100).toFixed(0) : ''} />
+							{/each}
+							<div class="flex items-center gap-2 flex-wrap">
 								<div class="flex-1 min-w-0">
 									<span class="text-xs font-medium">{rt.category}: {rt.name}</span>
 								</div>
@@ -984,7 +995,7 @@
 									/>
 								</div>
 								<div class="flex items-center gap-1" title="Base occupancy (guests included in rate)">
-									<span class="text-xs text-muted-foreground">Base occ</span>
+									<span class="text-xs text-muted-foreground">Occ</span>
 									<input name="baseOccupancy" type="number" min="1" max="10"
 										value={tier?.baseOccupancy ?? 2}
 										class="border-input bg-background w-12 rounded border px-1 py-1 text-xs font-mono text-right" />
@@ -997,12 +1008,48 @@
 										class="border-input bg-background w-16 rounded border px-1 py-1 text-xs font-mono text-right" />
 								</div>
 								<button type="submit" class="rounded border px-2 py-1 text-xs hover:bg-muted" disabled={saving}>✓</button>
-							</form>
-						{/each}
-						{#if roomTypes.length === 0}
-							<p class="text-xs text-muted-foreground">No room types configured for this property.</p>
-						{/if}
-					</div>
+							</div>
+							<!-- DOW rate editor (toggle) -->
+							<div>
+								<button type="button"
+									onclick={() => { dowOpen = { ...dowOpen, [s.id+':'+rt.id]: !dowOpen[s.id+':'+rt.id] }; }}
+									class="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1">
+									{dowOpen[s.id+':'+rt.id] ? '▲' : '▼'}
+									{#if dowParsed?.some((v: number|null) => v != null)}
+										<span class="text-amber-600 font-medium">Weekday rates set</span>
+									{:else}
+										Weekday rates
+									{/if}
+								</button>
+								{#if dowOpen[s.id+':'+rt.id]}
+									<div class="mt-1.5 grid grid-cols-7 gap-1">
+										{#each ['Su','Mo','Tu','We','Th','Fr','Sa'] as label, d}
+											<div class="flex flex-col items-center gap-0.5">
+												<span class="text-[9px] text-muted-foreground font-medium">{label}</span>
+												<input
+													type="number" min="0" step="1" placeholder="—"
+													value={dowState[d] != null ? (dowState[d] / 100).toFixed(0) : ''}
+													oninput={(e) => {
+														const v = (e.target as HTMLInputElement).value;
+														const cents = v ? Math.round(parseFloat(v) * 100) : null;
+														const next = [...(dowEdits[s.id+':'+rt.id] ?? dowParsed ?? [null,null,null,null,null,null,null])];
+														next[d] = cents && cents > 0 ? cents : null;
+														dowEdits = { ...dowEdits, [s.id+':'+rt.id]: next };
+													}}
+													class="border-input bg-background w-full rounded border px-1 py-0.5 text-[10px] font-mono text-right"
+												/>
+											</div>
+										{/each}
+									</div>
+									<p class="text-[9px] text-muted-foreground mt-1">Empty = use base rate. Fri/Sat overrides are common for weekend pricing.</p>
+								{/if}
+							</div>
+						</form>
+					{/each}
+					{#if roomTypes.length === 0}
+						<p class="text-xs text-muted-foreground">No room types configured for this property.</p>
+					{/if}
+				</div>
 				{/if}
 			{/if}
 

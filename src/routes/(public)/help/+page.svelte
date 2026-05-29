@@ -994,12 +994,12 @@
 							<tr><td>LOS (length-of-stay) discounts</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Occupancy-based / extra guest pricing</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Staff-only (manual) rates</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Promo / coupon codes</td><td class="yes">✅</td><td class="no">—</td></tr>
-							<tr><td>Min stay (season level)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Min stay (per-date override)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Max stay restriction</td><td class="no">—</td><td class="yes">✅</td></tr>
-							<tr><td>Weekday-based rate variations</td><td class="no">—</td><td class="yes">✅</td></tr>
-							<tr><td>Copy rates from prior year</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+						<tr><td>Promo / coupon codes</td><td class="yes">✅</td><td class="no">—</td></tr>
+						<tr><td>Min stay (season level)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+						<tr><td>Min stay (per-date override)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+						<tr><td>Max stay restriction</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+						<tr><td>Weekday-based rate variations</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+						<tr><td>Copy rates from prior year</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<!-- Inventory -->
 							<tr class="section-row"><td colspan="3">Inventory & Availability</td></tr>
 							<tr><td>Stop-sell per date</td><td class="yes">✅</td><td class="yes">✅</td></tr>
@@ -1008,7 +1008,7 @@
 						<tr><td>Closed to departure (CTD)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 						<tr><td>Blackout date range UI</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Parent/child inventory pools</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Gap restrictions (B&B mode)</td><td class="no">—</td><td class="yes">✅</td></tr>
+							<tr><td>Gap restrictions (B&B mode)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<!-- Online Booking -->
 							<tr class="section-row"><td colspan="3">Online Booking</td></tr>
 							<tr><td>Branded public booking page</td><td class="yes">✅</td><td class="yes">✅</td></tr>
@@ -1032,13 +1032,13 @@
 							<tr><td>Self check-in with digital waiver</td><td class="yes">✅</td><td class="partial">🔶</td></tr>
 							<tr><td>Pre-arrival email with door code</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Post-checkout receipt email</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Guest deduplication / merge</td><td class="no">—</td><td class="yes">✅</td></tr>
-							<!-- Payments -->
-							<tr class="section-row"><td colspan="3">Payments</td></tr>
-							<tr><td>Credit card deposit capture</td><td class="yes">✅ Elavon</td><td class="yes">✅</td></tr>
-							<tr><td>Refunds & voids</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Tax calculation</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Night audit / financial posting codes</td><td class="no">—</td><td class="yes">✅</td></tr>
+						<tr><td>Guest deduplication / merge</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+						<!-- Payments -->
+						<tr class="section-row"><td colspan="3">Payments</td></tr>
+						<tr><td>Credit card deposit capture</td><td class="yes">✅ Elavon</td><td class="yes">✅</td></tr>
+						<tr><td>Refunds & voids</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+						<tr><td>Tax calculation</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+						<tr><td>Night audit</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<!-- Channels -->
 							<tr class="section-row"><td colspan="3">Channels & OTA</td></tr>
 							<tr><td>Two-way OTA/GDS sync</td><td class="partial">🔶 Channex</td><td class="yes">✅</td></tr>

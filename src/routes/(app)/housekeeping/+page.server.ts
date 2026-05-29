@@ -24,7 +24,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 			queenBeds: true,
 			doubleBeds: true,
 			hasHideabed: true,
-			hasKitchen: true
+			hasKitchen: true,
+			quarantineUntil: true
 		},
 		orderBy: (r, { asc }) => [asc(r.propertyId), sql`CAST(${r.roomNumber} AS INTEGER)`]
 	});

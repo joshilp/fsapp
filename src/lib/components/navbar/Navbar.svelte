@@ -22,6 +22,7 @@
 			<Button href="/booking" variant="ghost" size="sm">Grid</Button>
 			<Button href="/inventory" variant="ghost" size="sm">Inventory</Button>
 			<Button href="/housekeeping" variant="ghost" size="sm">HK</Button>
+			<Button href="/night-audit" variant="ghost" size="sm">Audit</Button>
 			<Button href="/rates" variant="ghost" size="sm">Rates</Button>
 			<Button href="/guests" variant="ghost" size="sm">Guests</Button>
 			<Button href="/reports" variant="ghost" size="sm">Reports</Button>

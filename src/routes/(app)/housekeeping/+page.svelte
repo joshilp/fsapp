@@ -77,6 +77,9 @@
 				{#each prop.rooms as room}
 					{@const status = (hkStatuses.get(room.id) ?? room.housekeepingStatus) as HkStatus}
 					{@const cfg = STATUS_CONFIG[status]}
+					{@const nowMs = Date.now()}
+					{@const quarantineActive = room.quarantineUntil && new Date(room.quarantineUntil).getTime() > nowMs}
+					{@const quarantineMinsLeft = quarantineActive ? Math.ceil((new Date(room.quarantineUntil!).getTime() - nowMs) / 60000) : 0}
 					<button
 						onclick={() => cycleStatus(room.id, status)}
 						class="relative rounded-lg border-2 p-3 text-left transition-all active:scale-95 {cfg.bg} {cfg.text} hover:brightness-95"
@@ -88,6 +91,13 @@
 								{cfg.icon} {cfg.label}
 							</span>
 						</div>
+
+						<!-- Quarantine badge -->
+						{#if quarantineActive}
+							<div class="mt-1 rounded bg-purple-100 border border-purple-300 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800 flex items-center gap-1">
+								🔒 Quarantine · {quarantineMinsLeft < 60 ? quarantineMinsLeft + 'm' : Math.ceil(quarantineMinsLeft / 60) + 'h'}
+							</div>
+						{/if}
 
 						<!-- Room type -->
 						{#if room.roomType}

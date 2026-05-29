@@ -155,6 +155,24 @@ export const actions: Actions = {
 		return { success: true };
 	},
 
+	// Update restriction settings: max stay, gap fill, quarantine
+	updatePropertyRestrictions: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('id');
+		if (!id) return fail(400, { error: 'Missing property ID' });
+		const defaultMaxNightsRaw = g('defaultMaxNights');
+		const gapFillNightsRaw    = g('gapFillNights');
+		const quarantineHoursRaw  = g('quarantineHours');
+		await db.update(properties).set({
+			defaultMaxNights: defaultMaxNightsRaw ? parseInt(defaultMaxNightsRaw) || null : null,
+			gapFillNights:    gapFillNightsRaw    ? Math.max(0, parseInt(gapFillNightsRaw) || 0) : 0,
+			quarantineHours:  quarantineHoursRaw  ? Math.max(0, parseInt(quarantineHoursRaw) || 0) : 0,
+		}).where(eq(properties.id, id));
+		return { success: true };
+	},
+
 	// Update Elavon Converge payment credentials for a property
 	updatePropertyPayments: async ({ request, locals }) => {
 		if (!locals.user) return fail(401, { error: 'Unauthorized' });
@@ -364,12 +382,14 @@ export const actions: Actions = {
 		const imageUrl = g('imageUrl');
 		const maxOccupancyRaw = g('maxOccupancy');
 		const maxOccupancy = maxOccupancyRaw ? parseInt(maxOccupancyRaw) || null : null;
+		const maxNightsRaw = g('maxNights');
+		const maxNights = maxNightsRaw ? parseInt(maxNightsRaw) || null : null;
 		const parentRoomTypeId = g('parentRoomTypeId') || null;
 		if (!propertyId || !name || !category) return fail(400, { error: 'Missing fields' });
 		if (id) {
-			await db.update(roomTypes).set({ name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy, parentRoomTypeId }).where(eq(roomTypes.id, id));
+			await db.update(roomTypes).set({ name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy, maxNights, parentRoomTypeId }).where(eq(roomTypes.id, id));
 		} else {
-			await db.insert(roomTypes).values({ id: crypto.randomUUID(), propertyId, name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy, parentRoomTypeId });
+			await db.insert(roomTypes).values({ id: crypto.randomUUID(), propertyId, name, category, sortOrder, defaultRateCents, description, imageUrl, maxOccupancy, maxNights, parentRoomTypeId });
 		}
 		return { success: true };
 	},

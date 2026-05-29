@@ -11,6 +11,7 @@
 		id: string; propertyId: string; name: string; category: string;
 		sortOrder: number; defaultRateCents?: number | null;
 		description?: string | null; imageUrl?: string | null; maxOccupancy?: number | null;
+		maxNights?: number | null;
 		parentRoomTypeId?: string | null;
 	};
 	type Room = {
@@ -101,6 +102,14 @@
 							value={rt.maxOccupancy ?? ''}
 							placeholder="2"
 							class="border-input bg-background rounded border px-2 py-1 text-sm w-16" />
+					</div>
+					<div class="flex flex-col gap-1">
+						<span class="text-xs text-muted-foreground">Max stay (nights)</span>
+						<input name="maxNights" type="number" min="1" max="365"
+							value={rt.maxNights ?? ''}
+							placeholder="prop. default"
+							title="Override property-level max stay for this room type only"
+							class="border-input bg-background rounded border px-2 py-1 text-sm w-24 font-mono" />
 					</div>
 					<div class="flex flex-col gap-1 w-full">
 						<span class="text-xs text-muted-foreground">Photo URL</span>

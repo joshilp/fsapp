@@ -85,6 +85,13 @@
       "when": 1779833100000,
       "tag": "0011_avail_override",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1748534800000,
+      "tag": "0012_weekday_max_gap_quarantine",
+      "breakpoints": true
     }
   ]
 }

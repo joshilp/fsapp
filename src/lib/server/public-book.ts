@@ -5,7 +5,7 @@
 import { fail } from '@sveltejs/kit';
 import { eq, and, lt, gt, ne, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { bookings, bookingChannels, bookingLineItems, guests, promoCodes, properties, roomTypes, rooms, rateOverrides } from '$lib/server/db/schema';
+import { bookings, bookingChannels, bookingLineItems, guests, promoCodes, properties, roomTypes, rooms, rateOverrides, rateSeasons, rateTiers } from '$lib/server/db/schema';
 import { sendGuestConfirmation, sendOperatorAlert } from '$lib/server/email';
 import { env } from '$env/dynamic/private';
 import { syncARIForStay } from '$lib/server/ari-sync';
@@ -45,13 +45,24 @@ export async function bookAction(request: Request) {
 
 	const rt = await db.query.roomTypes.findFirst({
 		where: and(eq(roomTypes.id, roomTypeId), eq(roomTypes.propertyId, propertyId)),
-		columns: { id: true, name: true, parentRoomTypeId: true }
+		columns: { id: true, name: true, parentRoomTypeId: true, maxNights: true }
 	});
 	if (!rt) return fail(400, { error: 'Invalid room type selection.' });
 
 	const stayNights = Math.round(
 		(new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000
 	);
+
+	// ── Max stay enforcement ──────────────────────────────────────────────────
+	// Check room-type-level override first, then property-level default
+	const propRow = await db.query.properties.findFirst({
+		where: eq(properties.id, propertyId),
+		columns: { defaultMaxNights: true, gapFillNights: true }
+	});
+	const effectiveMaxNights = rt.maxNights ?? propRow?.defaultMaxNights ?? null;
+	if (effectiveMaxNights !== null && stayNights > effectiveMaxNights) {
+		return fail(400, { error: `Maximum stay is ${effectiveMaxNights} nights for this room type.` });
+	}
 
 	// Pool root: child types borrow inventory from the parent
 	const poolRootId = rt.parentRoomTypeId ?? roomTypeId;
@@ -107,7 +118,6 @@ export async function bookAction(request: Request) {
 	}
 
 	// ── Min-night enforcement (season level) ─────────────────────────────────
-	const { rateSeasons, rateTiers } = await import('$lib/server/db/schema');
 	const overlappingSeasons = await db.query.rateSeasons.findMany({
 		where: and(
 			eq(rateSeasons.propertyId, propertyId),
@@ -167,6 +177,48 @@ export async function bookAction(request: Request) {
 		return fail(400, { error: 'Sorry, no rooms of that type are available for those dates. Please try different dates or another room type.' });
 	}
 
+	// ── Gap fill check ────────────────────────────────────────────────────────
+	// Block bookings that would leave a gap shorter than gapFillNights nights
+	// between this booking and an adjacent booking for the same pool.
+	const gapFillNights = propRow?.gapFillNights ?? 0;
+	if (gapFillNights > 0) {
+		// Compute checkIn - gapFillNights and checkOut + gapFillNights windows
+		const gapCheckStart = new Date(checkIn + 'T12:00:00');
+		gapCheckStart.setDate(gapCheckStart.getDate() - gapFillNights);
+		const gapWindowStart = gapCheckStart.toISOString().slice(0, 10);
+		const gapCheckEnd = new Date(checkOut + 'T12:00:00');
+		gapCheckEnd.setDate(gapCheckEnd.getDate() + gapFillNights);
+		const gapWindowEnd = gapCheckEnd.toISOString().slice(0, 10);
+
+		// Find adjacent bookings within the gap window
+		const adjacentBookings = await db.select({
+			checkInDate: bookings.checkInDate,
+			checkOutDate: bookings.checkOutDate
+		}).from(bookings).where(and(
+			ne(bookings.status, 'cancelled'), ne(bookings.status, 'blocked'),
+			lt(bookings.checkInDate, gapWindowEnd),
+			gt(bookings.checkOutDate, gapWindowStart),
+			inArray(bookings.roomId, roomIds)
+		));
+
+		for (const adj of adjacentBookings) {
+			// Gap BEFORE: existing booking ends just before our checkIn
+			if (adj.checkOutDate <= checkIn && adj.checkOutDate > gapWindowStart) {
+				const gapDays = Math.round((new Date(checkIn + 'T12:00:00').getTime() - new Date(adj.checkOutDate + 'T12:00:00').getTime()) / 86400000);
+				if (gapDays > 0 && gapDays < gapFillNights) {
+					return fail(400, { error: `Those dates would leave a ${gapDays}-night gap before this booking. Minimum gap is ${gapFillNights} nights.` });
+				}
+			}
+			// Gap AFTER: existing booking starts just after our checkOut
+			if (adj.checkInDate >= checkOut && adj.checkInDate < gapWindowEnd) {
+				const gapDays = Math.round((new Date(adj.checkInDate + 'T12:00:00').getTime() - new Date(checkOut + 'T12:00:00').getTime()) / 86400000);
+				if (gapDays > 0 && gapDays < gapFillNights) {
+					return fail(400, { error: `Those dates would leave a ${gapDays}-night gap after this booking. Minimum gap is ${gapFillNights} nights.` });
+				}
+			}
+		}
+	}
+
 	// ── Create guest (find-or-create) and booking ─────────────────────────────
 	let guest = await db.query.guests.findFirst({ where: eq(guests.email, guestEmail), columns: { id: true } });
 	if (!guest) {
@@ -211,16 +263,16 @@ export async function bookAction(request: Request) {
 	const token = booking.publicToken!;
 
 	// Side effects outside the transaction
-	const [propRow, typeRow] = await Promise.all([
-		db.query.properties.findFirst({ where: eq(properties.id, propertyId), columns: { name: true, emailNote: true, emailSignature: true } }),
+	const [typeRow] = await Promise.all([
 		db.query.roomTypes.findFirst({ where: eq(roomTypes.id, roomTypeId), columns: { name: true } })
 	]);
+	const propData = await db.query.properties.findFirst({ where: eq(properties.id, propertyId), columns: { name: true, emailNote: true, emailSignature: true } });
 	const nights   = Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
 	const origin   = env.ORIGIN ?? 'http://localhost:5173';
 	const confirmUrl = `${origin}/book/confirmation/${token}`;
 
-	void sendGuestConfirmation({ guestName, guestEmail, propertyName: propRow?.name ?? propertyId, checkInDate: checkIn, checkOutDate: checkOut, nights, requestedRoomType: typeRow?.name ?? null, quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null, publicToken: token, confirmationUrl: confirmUrl, emailNote: propRow?.emailNote ?? null, emailSignature: propRow?.emailSignature ?? null });
-	void sendOperatorAlert({ guestName, guestEmail, propertyName: propRow?.name ?? propertyId, checkInDate: checkIn, checkOutDate: checkOut, nights, requestedRoomType: typeRow?.name ?? null, quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null, confirmationUrl: confirmUrl });
+	void sendGuestConfirmation({ guestName, guestEmail, propertyName: propData?.name ?? propertyId, checkInDate: checkIn, checkOutDate: checkOut, nights, requestedRoomType: typeRow?.name ?? null, quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null, publicToken: token, confirmationUrl: confirmUrl, emailNote: propData?.emailNote ?? null, emailSignature: propData?.emailSignature ?? null });
+	void sendOperatorAlert({ guestName, guestEmail, propertyName: propData?.name ?? propertyId, checkInDate: checkIn, checkOutDate: checkOut, nights, requestedRoomType: typeRow?.name ?? null, quotedTotalCents: quotedTotalCents > 0 ? quotedTotalCents : null, confirmationUrl: confirmUrl });
 
 	// Re-sync availability with Channex for every night of the stay
 	void syncARIForStay(roomTypeId, checkIn, checkOut).catch((e) => console.error('[ari-sync] public-book:', e));

@@ -79,6 +79,15 @@ export const properties = sqliteTable('properties', {
 	heroImageUrl: text('hero_image_url'),
 	// Hex accent colour for the booking page (e.g. '#d97706')
 	accentColour: text('accent_colour'),
+	// ── Gap fill (B&B mode) ───────────────────────────────────────────────────
+	// Block dates that form a gap shorter than N nights between bookings. 0 = disabled.
+	gapFillNights: integer('gap_fill_nights').notNull().default(0),
+	// ── Room quarantine after checkout ────────────────────────────────────────
+	// Automatically set room quarantine_until = checkout + quarantineHours. 0 = disabled.
+	quarantineHours: integer('quarantine_hours').notNull().default(0),
+	// ── Max stay restriction ──────────────────────────────────────────────────
+	// Property-wide default maximum stay in nights. null = no limit. Industry typical: 21.
+	defaultMaxNights: integer('default_max_nights'),
 	...timestamps
 });
 
@@ -110,6 +119,9 @@ export const roomTypes = sqliteTable('room_types', {
 	channexRatePlanId: text('channex_rate_plan_id'),
 	// Floor rate used when no season covers a date — pushed to Channex as the fallback rate
 	defaultRateCents: integer('default_rate_cents'),
+	// ── Max stay override ─────────────────────────────────────────────────────
+	// null = use property-level defaultMaxNights; set to override for this room type only.
+	maxNights: integer('max_nights'),
 	createdAt: integer('created_at', { mode: 'timestamp_ms' })
 		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
 		.notNull()
@@ -137,17 +149,20 @@ export const rooms = sqliteTable(
 		// JSON array of config names, e.g. '["1Q Sleeping","1Q+1D Sleeping"]'
 		// null = single fixed config; operators pick at booking time when set
 		configs: text('configs'),
-		// Housekeeping status: clean | dirty | in_progress | out_of_order
-		housekeepingStatus: text('housekeeping_status').notNull().default('clean'),
-		// 1 (low) → 10 (high). Suggestions only — operator always has final say.
-		desirabilityWeight: integer('desirability_weight').notNull().default(5),
-		cleaningEaseWeight: integer('cleaning_ease_weight').notNull().default(5),
-		notes: text('notes'),
-		isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
-		// Door access code shown to guest at self check-in
-		doorCode: text('door_code'),
-		// Free-text arrival instructions (parking, key lockbox, Wi-Fi, etc.)
-		checkinInstructions: text('checkin_instructions'),
+	// Housekeeping status: clean | dirty | in_progress | out_of_order
+	housekeepingStatus: text('housekeeping_status').notNull().default('clean'),
+	// 1 (low) → 10 (high). Suggestions only — operator always has final say.
+	desirabilityWeight: integer('desirability_weight').notNull().default(5),
+	cleaningEaseWeight: integer('cleaning_ease_weight').notNull().default(5),
+	notes: text('notes'),
+	isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+	// Door access code shown to guest at self check-in
+	doorCode: text('door_code'),
+	// Free-text arrival instructions (parking, key lockbox, Wi-Fi, etc.)
+	checkinInstructions: text('checkin_instructions'),
+	// Timestamp (ms) until which this room is quarantined post-checkout (cleaning buffer).
+	// null or past timestamp = not quarantined.
+	quarantineUntil: integer('quarantine_until', { mode: 'timestamp_ms' }),
 		...timestamps
 	},
 	(t) => [
@@ -197,10 +212,14 @@ export const rateTiers = sqliteTable(
 		roomTypeId: text('room_type_id')
 			.notNull()
 			.references(() => roomTypes.id, { onDelete: 'cascade' }),
-		nightlyRate: integer('nightly_rate').notNull(), // cents e.g. 18900 = $189.00
-		// Occupancy-based pricing: guests above baseOccupancy are charged extraGuestFeeCents/night each
-		baseOccupancy: integer('base_occupancy').notNull().default(2),
-		extraGuestFeeCents: integer('extra_guest_fee_cents').notNull().default(0)
+	nightlyRate: integer('nightly_rate').notNull(), // cents e.g. 18900 = $189.00
+	// Day-of-week rate overrides: JSON 7-element array indexed 0=Sun…6=Sat.
+	// null element = use nightlyRate for that day.
+	// Example: '[null,null,null,null,null,18900,18900]' = Fri+Sat at $189, other days use base.
+	dowRates: text('dow_rates'),
+	// Occupancy-based pricing: guests above baseOccupancy are charged extraGuestFeeCents/night each
+	baseOccupancy: integer('base_occupancy').notNull().default(2),
+	extraGuestFeeCents: integer('extra_guest_fee_cents').notNull().default(0)
 	},
 	(t) => [unique('rate_tiers_season_type_uq').on(t.seasonId, t.roomTypeId)]
 );
@@ -690,4 +709,33 @@ export const paymentEventsRelations = relations(paymentEvents, ({ one }) => ({
 
 export const ccStagingRelations = relations(ccStaging, ({ one }) => ({
 	booking: one(bookings, { fields: [ccStaging.bookingId], references: [bookings.id] })
+}));
+
+// ─── Night Audit Runs ─────────────────────────────────────────────────────────
+// Records each time a night audit was completed for a property.
+// Unique constraint prevents double-auditing a night.
+
+export const nightAuditRuns = sqliteTable(
+	'night_audit_runs',
+	{
+		id: id(),
+		propertyId: text('property_id')
+			.notNull()
+			.references(() => properties.id, { onDelete: 'cascade' }),
+		auditDate: text('audit_date').notNull(), // ISO "YYYY-MM-DD" — the night being audited
+		ranBy: text('ran_by').references(() => user.id, { onDelete: 'set null' }),
+		notes: text('notes'),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' })
+			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+			.notNull()
+	},
+	(t) => [
+		index('nar_property_idx').on(t.propertyId),
+		unique('nar_property_date_uq').on(t.propertyId, t.auditDate)
+	]
+);
+
+export const nightAuditRunsRelations = relations(nightAuditRuns, ({ one }) => ({
+	property: one(properties, { fields: [nightAuditRuns.propertyId], references: [properties.id] }),
+	user: one(user, { fields: [nightAuditRuns.ranBy], references: [user.id] })
 }));

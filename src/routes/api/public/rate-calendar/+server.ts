@@ -13,7 +13,8 @@ import { json, error } from '@sveltejs/kit';
 import { and, eq, lte, gte, inArray } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { roomTypes, rateSeasons, rateTiers, rateOverrides } from '$lib/server/db/schema';
+import { roomTypes, rateSeasons, rateTiers, rateOverrides, properties } from '$lib/server/db/schema';
+import { resolveNightlyRate } from '$lib/server/rates';
 
 export type CalendarDay = {
 	date: string;          // YYYY-MM-DD
@@ -22,6 +23,7 @@ export type CalendarDay = {
 	closedToArrival: boolean;
 	closedToDeparture: boolean;
 	minNights: number;
+	maxNights: number | null;
 };
 
 export const GET: RequestHandler = async ({ url }) => {
@@ -46,10 +48,23 @@ export const GET: RequestHandler = async ({ url }) => {
 			eq(roomTypes.propertyId, propertyId),
 			roomTypeId ? eq(roomTypes.id, roomTypeId) : undefined
 		),
-		columns: { id: true }
+		columns: { id: true, maxNights: true }
 	});
 	const typeIds = propRoomTypes.map((rt) => rt.id);
 	if (typeIds.length === 0) return json([]);
+
+	// Property-level defaultMaxNights for fallback
+	const prop = await db.query.properties.findFirst({
+		where: eq(properties.id, propertyId),
+		columns: { defaultMaxNights: true }
+	});
+	const propMaxNights = prop?.defaultMaxNights ?? null;
+
+	// Effective max nights per type (room-type override → property default → null)
+	function effectiveMaxNights(typeId: string): number | null {
+		const rt = propRoomTypes.find((r) => r.id === typeId);
+		return rt?.maxNights ?? propMaxNights;
+	}
 
 	// Get seasons overlapping this month (non-manual-only)
 	const seasons = await db.query.rateSeasons.findMany({
@@ -62,7 +77,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		with: {
 			tiers: {
 				where: inArray(rateTiers.roomTypeId, typeIds),
-				columns: { roomTypeId: true, nightlyRate: true }
+				columns: { roomTypeId: true, nightlyRate: true, dowRates: true }
 			}
 		}
 	});
@@ -101,9 +116,10 @@ export const GET: RequestHandler = async ({ url }) => {
 		const closedToArrival   = typeIds.length > 0 && typeIds.every((id) => ctaTypes.has(id));
 		const closedToDeparture = typeIds.length > 0 && typeIds.every((id) => ctdTypes.has(id));
 
-		// Lowest rate across all types: prefer override, fall back to season tier
+		// Lowest rate across all types: prefer override, fall back to season tier (with DOW)
 		let lowestRateCents: number | null = null;
 		let minNights = 1;
+		let maxNightsForDay: number | null = null;
 
 		for (const tid of typeIds) {
 			const typeOverride = dayOverrides.find((o) => o.roomTypeId === tid);
@@ -114,12 +130,13 @@ export const GET: RequestHandler = async ({ url }) => {
 					lowestRateCents = typeOverride.rateCents;
 				}
 			} else {
-				// Find the season covering this date and get the tier rate
+				// Find the season covering this date and get the tier rate (with DOW adjustment)
 				const season = seasons.find((s) => s.startDate <= date && s.endDate >= date);
 				const tier   = season?.tiers.find((t) => t.roomTypeId === tid);
 				if (tier) {
-					if (lowestRateCents === null || tier.nightlyRate < lowestRateCents) {
-						lowestRateCents = tier.nightlyRate;
+					const effectiveRate = resolveNightlyRate(tier.nightlyRate, tier.dowRates, date);
+					if (lowestRateCents === null || effectiveRate < lowestRateCents) {
+						lowestRateCents = effectiveRate;
 					}
 				}
 			}
@@ -129,9 +146,15 @@ export const GET: RequestHandler = async ({ url }) => {
 				?? seasons.find((s) => s.startDate <= date && s.endDate >= date)?.minNights
 				?? 1;
 			if (dayMin > minNights) minNights = dayMin;
+
+			// maxNights: take the minimum (most restrictive) across types
+			const typeMax = effectiveMaxNights(tid);
+			if (typeMax !== null) {
+				if (maxNightsForDay === null || typeMax < maxNightsForDay) maxNightsForDay = typeMax;
+			}
 		}
 
-		result.push({ date, lowestRateCents, stopSell, closedToArrival, closedToDeparture, minNights });
+		result.push({ date, lowestRateCents, stopSell, closedToArrival, closedToDeparture, minNights, maxNights: maxNightsForDay });
 	}
 
 	return json(result);

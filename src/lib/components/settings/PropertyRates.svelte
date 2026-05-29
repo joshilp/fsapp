@@ -2,7 +2,12 @@
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 
-	type Prop = { id: string; name: string };
+	type Prop = {
+		id: string; name: string;
+		defaultMaxNights?: number | null;
+		gapFillNights?: number;
+		quarantineHours?: number;
+	};
 	type RoomType = { id: string; name: string; category: string };
 	type LosDiscount = {
 		id: string; propertyId: string; label: string; minNights: number;
@@ -26,6 +31,7 @@
 
 	let deletingLos = $state<string | null>(null);
 	let deletingPromo = $state<string | null>(null);
+	let savingRestrictions = $state(false);
 
 	function fmtExpiry(d: Date | null | undefined) {
 		if (!d) return null;
@@ -34,6 +40,58 @@
 </script>
 
 <h2 class="mb-6 text-lg font-semibold">Rates &amp; Promotions</h2>
+
+<!-- ── Stay Restrictions ───────────────────────────────────────────────────── -->
+<section class="mb-10">
+	<p class="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stay Restrictions</p>
+	<p class="mb-4 text-xs text-muted-foreground">
+		Control maximum stay length, booking gaps, and post-checkout room quarantine.
+	</p>
+	<form method="POST" action="?/updatePropertyRestrictions"
+		use:enhance={() => {
+			savingRestrictions = true;
+			return async ({ result, update }) => {
+				savingRestrictions = false;
+				if (result.type === 'success') toast.success('Restrictions saved');
+				else toast.error('Save failed');
+				await update({ reset: false });
+			};
+		}}
+		class="max-w-xl space-y-4 border rounded-lg p-4 bg-muted/20"
+	>
+		<input type="hidden" name="id" value={prop.id} />
+
+		<div class="grid grid-cols-3 gap-4">
+			<div class="flex flex-col gap-1.5">
+				<label class="text-xs font-medium">Max stay (nights)</label>
+				<input name="defaultMaxNights" type="number" min="1" max="365"
+					value={prop.defaultMaxNights ?? ''}
+					placeholder="∞ (no limit)"
+					class="border-input bg-background rounded border px-2 py-1.5 text-sm font-mono" />
+				<p class="text-[10px] text-muted-foreground">Property-wide default. Industry standard: 21. Can be overridden per room type.</p>
+			</div>
+			<div class="flex flex-col gap-1.5">
+				<label class="text-xs font-medium">Gap fill (nights)</label>
+				<input name="gapFillNights" type="number" min="0" max="7"
+					value={prop.gapFillNights ?? 0}
+					class="border-input bg-background rounded border px-2 py-1.5 text-sm font-mono" />
+				<p class="text-[10px] text-muted-foreground">Block stranded gaps shorter than this between bookings (B&B mode). 0 = disabled.</p>
+			</div>
+			<div class="flex flex-col gap-1.5">
+				<label class="text-xs font-medium">Quarantine (hours)</label>
+				<input name="quarantineHours" type="number" min="0" max="72"
+					value={prop.quarantineHours ?? 0}
+					class="border-input bg-background rounded border px-2 py-1.5 text-sm font-mono" />
+				<p class="text-[10px] text-muted-foreground">Auto-block room for cleaning after checkout. 0 = disabled. 4–12 hrs typical.</p>
+			</div>
+		</div>
+
+		<button type="submit" disabled={savingRestrictions}
+			class="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
+			{savingRestrictions ? 'Saving…' : 'Save Restrictions'}
+		</button>
+	</form>
+</section>
 
 <!-- ── LOS Discounts ──────────────────────────────────────────────────────── -->
 <section class="mb-10">

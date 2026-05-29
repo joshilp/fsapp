@@ -10,6 +10,7 @@ import {
 	ccStaging,
 	guests,
 	paymentEvents,
+	properties,
 	rooms
 } from '$lib/server/db/schema';
 import { user } from '$lib/server/db/auth.schema';
@@ -254,7 +255,7 @@ export const actions: Actions = {
 
 		const booking = await db.query.bookings.findFirst({
 			where: eq(bookings.id, bookingId),
-			columns: { roomId: true }
+			columns: { roomId: true, propertyId: true }
 		});
 
 		await db
@@ -263,9 +264,19 @@ export const actions: Actions = {
 			.where(eq(bookings.id, bookingId));
 
 		if (booking?.roomId) {
+			// Fetch quarantine setting
+			const prop = booking.propertyId
+				? await db.query.properties.findFirst({
+					where: eq(properties.id, booking.propertyId),
+					columns: { quarantineHours: true }
+				})
+				: null;
+			const quarantineMs = (prop?.quarantineHours ?? 0) * 3600 * 1000;
+			const quarantineUntil = quarantineMs > 0 ? new Date(Date.now() + quarantineMs) : null;
+
 			await db
 				.update(rooms)
-				.set({ housekeepingStatus: 'dirty' })
+				.set({ housekeepingStatus: 'dirty', quarantineUntil })
 				.where(eq(rooms.id, booking.roomId));
 		}
 
