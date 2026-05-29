@@ -112,15 +112,16 @@ export const GET: RequestHandler = async ({ url }) => {
 	}
 
 	// Fetch rate overrides for all relevant room types in the date range
+	// Include the checkout date for CTD checks (use lte instead of lt)
 	const allTypeIds = propRoomTypes.map((rt) => rt.id);
 	const stayOverrides = allTypeIds.length > 0
 		? await db.query.rateOverrides.findMany({
 			where: and(
 				inArray(rateOverrides.roomTypeId, allTypeIds),
 				gte(rateOverrides.date, checkIn),
-				lt(rateOverrides.date, checkOut)
+				lte(rateOverrides.date, checkOut)
 			),
-			columns: { roomTypeId: true, date: true, stopSell: true, availabilityOverride: true }
+			columns: { roomTypeId: true, date: true, stopSell: true, closedToArrival: true, closedToDeparture: true, availabilityOverride: true }
 		})
 		: [];
 
@@ -141,6 +142,16 @@ export const GET: RequestHandler = async ({ url }) => {
 		const myOvr     = overridesByType.get(rt.id) ?? [];
 		const parentOvr = isChild ? (overridesByType.get(rt.parentRoomTypeId!) ?? []) : [];
 		if (myOvr.some((o) => o.stopSell) || parentOvr.some((o) => o.stopSell)) return null;
+
+		// CTA: blocked if check-in date has closedToArrival on this type or parent
+		const myCtaOnCheckIn = myOvr.find((o) => o.date === checkIn)?.closedToArrival ?? false;
+		const parentCtaOnCheckIn = isChild ? (parentOvr.find((o) => o.date === checkIn)?.closedToArrival ?? false) : false;
+		if (myCtaOnCheckIn || parentCtaOnCheckIn) return null;
+
+		// CTD: blocked if check-out date has closedToDeparture on this type or parent
+		const myCtdOnCheckOut = myOvr.find((o) => o.date === checkOut)?.closedToDeparture ?? false;
+		const parentCtdOnCheckOut = isChild ? (parentOvr.find((o) => o.date === checkOut)?.closedToDeparture ?? false) : false;
+		if (myCtdOnCheckOut || parentCtdOnCheckOut) return null;
 
 		// Physical rooms belong to the pool root
 		const poolRooms  = allRooms.filter((r) => r.roomTypeId === poolRootId);

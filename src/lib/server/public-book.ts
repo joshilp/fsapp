@@ -56,7 +56,7 @@ export async function bookAction(request: Request) {
 	// Pool root: child types borrow inventory from the parent
 	const poolRootId = rt.parentRoomTypeId ?? roomTypeId;
 
-	// ── Rate-override enforcement (stop-sell, closed-to-arrival, per-date min nights) ──
+	// ── Rate-override enforcement (stop-sell, closed-to-arrival, CTD, per-date min nights) ──
 	const stayOverrides = await db.query.rateOverrides.findMany({
 		where: and(
 			eq(rateOverrides.roomTypeId, roomTypeId),
@@ -85,6 +85,22 @@ export async function bookAction(request: Request) {
 	if (checkInOverride?.closedToArrival) {
 		return fail(400, { error: 'Check-in is not available on that date. Please choose a different arrival date.' });
 	}
+
+	// CTD: check the checkout date itself (not included in the stay range above)
+	const checkOutOverride = await db.query.rateOverrides.findFirst({
+		where: and(eq(rateOverrides.roomTypeId, roomTypeId), eq(rateOverrides.date, checkOut)),
+		columns: { closedToDeparture: true }
+	});
+	const parentCheckOutOverride = rt.parentRoomTypeId
+		? await db.query.rateOverrides.findFirst({
+			where: and(eq(rateOverrides.roomTypeId, rt.parentRoomTypeId), eq(rateOverrides.date, checkOut)),
+			columns: { closedToDeparture: true }
+		})
+		: null;
+	if (checkOutOverride?.closedToDeparture || parentCheckOutOverride?.closedToDeparture) {
+		return fail(400, { error: 'Check-out is not available on that date. Please choose a different departure date.' });
+	}
+
 	const maxOverrideMin = allOverrides.reduce((m, o) => Math.max(m, o.minNights ?? 1), 1);
 	if (stayNights < maxOverrideMin) {
 		return fail(400, { error: `A minimum ${maxOverrideMin}-night stay is required for those dates.` });
