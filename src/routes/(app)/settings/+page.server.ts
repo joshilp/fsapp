@@ -276,11 +276,15 @@ export const actions: Actions = {
 		const unitStr = g('defaultUnitCents');
 		const defaultUnitCents = unitStr ? Math.round(parseFloat(unitStr) * 100) : null;
 		const isTaxable = fd.get('isTaxable') === '1';
+		const postingFactor = (g('postingFactor') ?? 'per_stay') as string;
+		// taxPresetIds: checkboxes named taxPresetId[] or comma-separated from hidden input
+		const rawIds = fd.getAll('taxPresetIds[]') as string[];
+		const taxPresetIds = rawIds.length > 0 ? JSON.stringify(rawIds) : null;
 		const sortOrder = parseInt(g('sortOrder') ?? '0') || 0;
 		if (id) {
-			await db.update(addonPresets).set({ name, defaultUnitCents, isTaxable, sortOrder }).where(eq(addonPresets.id, id));
+			await db.update(addonPresets).set({ name, defaultUnitCents, isTaxable, postingFactor, taxPresetIds, sortOrder }).where(eq(addonPresets.id, id));
 		} else {
-			await db.insert(addonPresets).values({ id: crypto.randomUUID(), propertyId, name, defaultUnitCents, isTaxable, sortOrder });
+			await db.insert(addonPresets).values({ id: crypto.randomUUID(), propertyId, name, defaultUnitCents, isTaxable, postingFactor, taxPresetIds, sortOrder });
 		}
 		return { success: true };
 	},

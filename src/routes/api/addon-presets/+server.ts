@@ -11,7 +11,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 	const presets = await db.query.addonPresets.findMany({
 		where: and(eq(addonPresets.propertyId, propertyId), eq(addonPresets.isActive, true)),
-		columns: { id: true, name: true, defaultUnitCents: true, isTaxable: true, sortOrder: true },
+		columns: { id: true, name: true, defaultUnitCents: true, isTaxable: true, taxPresetIds: true, postingFactor: true, sortOrder: true },
 		orderBy: (t, { asc }) => [asc(t.sortOrder), asc(t.name)]
 	});
 

@@ -27,6 +27,13 @@
 
 	const today = new Date().toISOString().slice(0, 10);
 	const isToday = data.auditDate === today;
+
+	function prevDate(iso: string) {
+		const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10);
+	}
+	function nextDate(iso: string) {
+		const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10);
+	}
 </script>
 
 <svelte:head>
@@ -52,12 +59,10 @@
 
 		<!-- Date nav -->
 		<div class="flex items-center gap-1 rounded-lg border px-1">
-			{@const prevDate = (() => { const d = new Date(data.auditDate + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0,10); })()}
-			{@const nextDate = (() => { const d = new Date(data.auditDate + 'T12:00:00'); d.setDate(d.getDate() + 1); return d.toISOString().slice(0,10); })()}
-			<a href={navUrl(data.propId, prevDate)} class="px-2 py-1 text-sm hover:bg-muted rounded">‹</a>
+			<a href={navUrl(data.propId, prevDate(data.auditDate))} class="px-2 py-1 text-sm hover:bg-muted rounded">‹</a>
 			<span class="px-2 text-sm font-semibold">{fmtDate(data.auditDate)}</span>
 			{#if data.auditDate < today}
-				<a href={navUrl(data.propId, nextDate)} class="px-2 py-1 text-sm hover:bg-muted rounded">›</a>
+				<a href={navUrl(data.propId, nextDate(data.auditDate))} class="px-2 py-1 text-sm hover:bg-muted rounded">›</a>
 			{/if}
 		</div>
 

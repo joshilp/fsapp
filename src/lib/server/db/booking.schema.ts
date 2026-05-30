@@ -292,9 +292,13 @@ export const addonPresets = sqliteTable('addon_presets', {
 	propertyId: text('property_id')
 		.notNull()
 		.references(() => properties.id, { onDelete: 'cascade' }),
-	name: text('name').notNull(),             // e.g. "Pet fee", "Extra person"
-	defaultUnitCents: integer('default_unit_cents'), // null = ask each time
+	name: text('name').notNull(),
+	defaultUnitCents: integer('default_unit_cents'),
 	isTaxable: integer('is_taxable', { mode: 'boolean' }).notNull().default(true),
+	// JSON array of taxPreset IDs that apply to this addon (null = use isTaxable fallback)
+	taxPresetIds: text('tax_preset_ids'),
+	// per_stay | per_night | per_adult | per_adult_per_night
+	postingFactor: text('posting_factor').notNull().default('per_stay'),
 	isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
 	sortOrder: integer('sort_order').notNull().default(0),
 	createdAt: integer('created_at', { mode: 'timestamp_ms' })

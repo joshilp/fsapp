@@ -197,7 +197,7 @@
 			{:else if prop && activeSection === 'taxes'}
 				<PropertyTaxes {prop} presets={propTaxes} />
 		{:else if prop && activeSection === 'addons'}
-			<PropertyAddons {prop} presets={propAddons} />
+			<PropertyAddons {prop} presets={propAddons} taxPresets={propTaxes} />
 		{:else if prop && activeSection === 'rates'}
 			<PropertyRates {prop} roomTypes={propRoomTypes} losDiscounts={propLosDiscounts} promoCodes={propPromoCodes} />
 		{:else if prop && activeSection === 'payments'}

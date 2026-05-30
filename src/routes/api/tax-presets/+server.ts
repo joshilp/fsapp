@@ -14,7 +14,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		where: propertyId
 			? and(eq(taxPresets.propertyId, propertyId), eq(taxPresets.isActive, true))
 			: eq(taxPresets.isActive, true),
-		columns: { id: true, label: true, ratePercent: true },
+		columns: { id: true, label: true, ratePercent: true, appliesToRoom: true, appliesToAddon: true },
 		orderBy: (t, { asc }) => [asc(t.label)]
 	});
 
