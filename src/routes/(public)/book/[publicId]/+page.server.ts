@@ -4,7 +4,7 @@ import type { PageServerLoad, Actions } from './$types';
 import { db } from '$lib/server/db';
 import { losDiscounts, properties } from '$lib/server/db/schema';
 // Re-use the shared book action logic
-import { bookAction } from '$lib/server/public-book';
+import { bookAction, bookGroupAction } from '$lib/server/public-book';
 
 export const load: PageServerLoad = async ({ params, url }) => {
 	const property = await db.query.properties.findFirst({
@@ -34,5 +34,6 @@ export const load: PageServerLoad = async ({ params, url }) => {
 };
 
 export const actions: Actions = {
-	book: ({ request }) => bookAction(request)
+	book:      ({ request }) => bookAction(request),
+	bookGroup: ({ request }) => bookGroupAction(request)
 };

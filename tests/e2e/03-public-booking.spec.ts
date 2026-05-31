@@ -27,9 +27,18 @@ test.describe('Guest-facing booking flow (/book/[publicId])', () => {
 		await page.goto(`/book/${bookingFixture.publicId}`);
 		await page.waitForLoadState('networkidle');
 
-		// Fill in check-in and check-out using the date input ids
-		await page.locator('#ci').fill(bookingFixture.checkIn);
-		await page.locator('#co').fill(bookingFixture.checkOut);
+		// BookingCalendar is click-based; click the correct day buttons.
+		// Past-month days are disabled so .first() on a :not([disabled]) filter
+		// finds the right (future) occurrence when two months are shown.
+		const dayButton = (n: string) =>
+			page.locator('button:not([disabled])').filter({
+				has: page.locator('span.font-medium.leading-none', { hasText: new RegExp(`^${n}$`) })
+			}).first();
+
+		const ciDay = String(parseInt(bookingFixture.checkIn.slice(8)));
+		const coDay = String(parseInt(bookingFixture.checkOut.slice(8)));
+		await dayButton(ciDay).click();
+		await dayButton(coDay).click();
 
 		// Step 1 → Step 2: "See Available Rooms →" button
 		await page.getByRole('button', { name: /See Available Rooms/i }).click();

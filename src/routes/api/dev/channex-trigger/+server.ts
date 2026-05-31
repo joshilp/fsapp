@@ -1,6 +1,6 @@
 /**
  * POST /api/dev/channex-trigger
- * Fires a simulated Channex webhook (booking_new / booking_cancel) at the
+ * Fires a simulated Channex webhook (booking_new / booking_update / booking_cancel) at the
  * app's own webhook handler, allowing end-to-end testing without a real
  * Channex account or any Channex IDs configured.
  *
@@ -43,9 +43,12 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 		notes: body.notes ?? null
 	};
 
-	const webhookPayload = body.event === 'booking_cancel'
-		? { event: 'booking_cancel', booking: { ...shared, status: 'cancelled' } }
-		: { event: 'booking_new',    booking: { ...shared, status: 'new' } };
+	const webhookPayload =
+		body.event === 'booking_cancel'
+			? { event: 'booking_cancel', booking: { ...shared, status: 'cancelled' } }
+		: body.event === 'booking_update'
+			? { event: 'booking_update', booking: { ...shared, status: 'modified' } }
+			: { event: 'booking_new',    booking: { ...shared, status: 'new' } };
 
 	const res = await fetch('/api/channex/webhook', {
 		method: 'POST',

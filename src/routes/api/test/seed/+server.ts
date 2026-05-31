@@ -16,6 +16,7 @@ import { db } from '$lib/server/db';
 import {
 	properties, roomTypes, rooms, rateSeasons, rateTiers, bookings
 } from '$lib/server/db/schema';
+import { serializeDowRates } from '$lib/server/rates';
 
 function devOnly(locals: App.Locals) {
 	if (process.env.NODE_ENV === 'production') throw error(403, 'Not available in production');
@@ -36,6 +37,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const body = await request.json().catch(() => ({}));
 	const tag  = (body.tag as string | undefined) ?? `test-${Date.now()}`;
 
+	// Optional test-scenario params
+	const maxNights:      number | null = body.maxNights       ?? null;
+	const gapFillNights:  number        = body.gapFillNights   ?? 0;
+	const quarantineHours:number        = body.quarantineHours ?? 0;
+	// dowRates: 7-element array [sun,mon,tue,wed,thu,fri,sat] in cents, null = use base rate
+	const dowRatesArr: (number | null)[] | null = body.dowRates ?? null;
+	// secondRoom: create a second physical room of the same type
+	const secondRoom: boolean = body.secondRoom ?? false;
+
 	const publicId = `test-${Date.now().toString(36)}`;
 
 	// Property
@@ -49,8 +59,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		publicId,
 		bookingEnabled: true,
 		bookingDescription: 'Automated test property — safe to delete',
-		// Fake Channex property ID so ARI sync fires in mock mode
-		channexPropertyId: `DEV:prop-test-${Date.now()}`,
+		channexPropertyId:  `DEV:prop-test-${Date.now()}`,
+		// Restriction fields
+		defaultMaxNights: maxNights,
+		gapFillNights,
+		quarantineHours,
 	}).returning({ id: properties.id, name: properties.name, publicId: properties.publicId });
 
 	// Room type
@@ -59,7 +72,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		name:       'Standard',
 		category:   'A',
 		sortOrder:  0,
-		// Fake Channex IDs so ARI sync fires in mock mode
 		channexRoomTypeId: `DEV:rt-test-${Date.now()}`,
 		channexRatePlanId: `DEV:rp-test-${Date.now()}`,
 	}).returning({ id: roomTypes.id, name: roomTypes.name });
@@ -73,6 +85,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		isActive:    true,
 	}).returning({ id: rooms.id, roomNumber: rooms.roomNumber });
 
+	// Optional second room (same type)
+	let room2Id: string | null = null;
+	let room2Number: string | null = null;
+	if (secondRoom) {
+		const [r2] = await db.insert(rooms).values({
+			propertyId: prop.id,
+			roomTypeId: roomType.id,
+			roomNumber: '102',
+			queenBeds:  1,
+			isActive:   true,
+		}).returning({ id: rooms.id, roomNumber: rooms.roomNumber });
+		room2Id     = r2.id;
+		room2Number = r2.roomNumber;
+	}
+
 	// Rate season covering the next 90 days
 	const [season] = await db.insert(rateSeasons).values({
 		propertyId: prop.id,
@@ -83,11 +110,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		minNights:  1,
 	}).returning({ id: rateSeasons.id });
 
-	// Rate tier: $149 / night
+	// Rate tier: $149/night, optional DOW rates
+	const dowRates = dowRatesArr ? serializeDowRates(dowRatesArr) : null;
 	await db.insert(rateTiers).values({
 		seasonId:    season.id,
 		roomTypeId:  roomType.id,
 		nightlyRate: 14900,
+		dowRates,
 	});
 
 	return json({
@@ -98,6 +127,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		roomTypeName: roomType.name,
 		roomId:       room.id,
 		roomNumber:   room.roomNumber,
+		room2Id,
+		room2Number,
 		seasonId:     season.id,
 		nightlyRate:  149,
 		checkIn:      addDays(14),

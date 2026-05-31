@@ -8,8 +8,10 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
-	const property = data.property;
-	const accent = property.accentColour ?? '#d97706'; // amber-600 fallback
+	const property   = data.property;
+	const propertyId = property.id;
+	const today      = data.today;
+	const accent     = property.accentColour ?? '#d97706'; // amber-600 fallback
 
 	type Step = 1 | 2 | 3;
 	let step = $state<Step>(1);
@@ -36,13 +38,31 @@
 		return new Date(iso + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
 	}
 
-	// ─── Step 2: Room Type ─────────────────────────────────────────────────────
+	// ─── Step 2: Room Type (cart) ─────────────────────────────────────────────
 	let selectedTypeId      = $state(data.preselectedRoomTypeId ?? '');
 	let availableTypes      = $state<AvailableRoomType[]>([]);
 	let availabilityLoading = $state(false);
 	let availabilityError   = $state('');
 
 	const selectedType = $derived(availableTypes.find(rt => rt.id === selectedTypeId) ?? null);
+
+	// Cart: typeId → qty (for multi-room selection)
+	let cart = $state(new Map<string, number>());
+	const cartTotal   = $derived([...cart.values()].reduce((s, v) => s + v, 0));
+	const cartEntries = $derived(
+		[...cart.entries()].filter(([, q]) => q > 0)
+			.map(([typeId, qty]) => ({ typeId, qty, type: availableTypes.find(t => t.id === typeId) }))
+	);
+
+	function cartAdd(typeId: string, max: number) {
+		const cur = cart.get(typeId) ?? 0;
+		if (cur < max) cart = new Map(cart.set(typeId, cur + 1));
+	}
+	function cartRemove(typeId: string) {
+		const cur = cart.get(typeId) ?? 0;
+		if (cur > 1) cart = new Map(cart.set(typeId, cur - 1));
+		else { cart.delete(typeId); cart = new Map(cart); }
+	}
 
 	async function loadAvailability() {
 		availabilityLoading = true;
@@ -108,6 +128,12 @@
 	let promoInput   = $state('');
 	let promoChecking = $state(false);
 
+	// Multi-room quotes
+	type CartQuote = { typeId: string; qty: number; quote: PublicPricing | null; loading: boolean };
+	let cartQuotes = $state<CartQuote[]>([]);
+	const totalGroupCents = $derived(cartQuotes.reduce((s, cq) => s + (cq.quote?.totalAfterDiscountsCents ?? 0) * cq.qty, 0));
+	const isMultiRoom = $derived(!deepLinked && cartEntries.length > 1 || cartTotal > 1);
+
 	async function fetchRate() {
 		if (!selectedTypeId) return;
 		rateLoading = true;
@@ -119,6 +145,19 @@
 			if (res.ok) rateQuote = await res.json();
 		} catch { /* ignore */ }
 		rateLoading = false;
+	}
+
+	async function fetchGroupRates() {
+		cartQuotes = cartEntries.map(e => ({ typeId: e.typeId, qty: e.qty, quote: null, loading: true }));
+		await Promise.all(cartQuotes.map(async (cq, idx) => {
+			try {
+				const pp = promoInput.trim() ? `&promo=${encodeURIComponent(promoInput.trim())}` : '';
+				const gp = `&numGuests=${numAdults + numChildren}`;
+				const res = await fetch(`/api/public/pricing?roomTypeId=${cq.typeId}&checkIn=${checkIn}&checkOut=${checkOut}${pp}${gp}`);
+				if (res.ok) cartQuotes[idx] = { ...cartQuotes[idx], quote: await res.json(), loading: false };
+				else cartQuotes[idx] = { ...cartQuotes[idx], loading: false };
+			} catch { cartQuotes[idx] = { ...cartQuotes[idx], loading: false }; }
+		}));
 	}
 
 	// Re-fetch rate when guest count changes (extra guest fee may apply)
@@ -135,9 +174,16 @@
 	}
 
 	function goToStep3() {
-		if (!selectedTypeId) return;
+		if (!selectedTypeId && cartTotal === 0) return;
 		step = 3;
-		fetchRate();
+		if (deepLinked || (cartEntries.length === 1 && cartEntries[0].qty === 1)) {
+			// Single room — use existing single-room flow
+			selectedTypeId = deepLinked ? selectedTypeId : cartEntries[0].typeId;
+			fetchRate();
+		} else {
+			// Multi-room — fetch group rates
+			fetchGroupRates();
+		}
 	}
 
 	function fmt(cents: number) { return '$' + (cents / 100).toFixed(2); }
@@ -287,18 +333,14 @@
 						{@const totalNights = nights}
 						{@const totalPrice = rt.minRateCents ? rt.minRateCents * totalNights : null}
 						{@const photo = rt.imageUrl ?? categoryImages[rt.category] ?? categoryImages['A']}
-						<button
-							type="button"
-							onclick={() => { selectedTypeId = rt.id; }}
-							class="w-full rounded-xl border-2 overflow-hidden text-left transition-all flex"
-							style={selectedTypeId === rt.id ? `border-color:${accent}; background-color:${accent}18` : 'border-color:#e7e5e4'}
-						>
+						{@const qty = cart.get(rt.id) ?? 0}
+						<div class="w-full rounded-xl border-2 overflow-hidden flex"
+							style={qty > 0 ? `border-color:${accent}; background-color:${accent}18` : 'border-color:#e7e5e4'}>
 							<img src={photo} alt={rt.name} class="w-28 sm:w-36 object-cover shrink-0" />
-							<div class="p-4 flex-1 min-w-0">
+							<div class="p-4 flex-1 min-w-0 flex flex-col justify-between">
 								<div class="flex items-start justify-between gap-2">
 									<div class="min-w-0 flex-1">
 										<p class="font-semibold text-stone-900">{rt.name}</p>
-										<!-- Bed config + amenities row -->
 										<div class="flex flex-wrap items-center gap-1.5 mt-1">
 											{#if bedLabel(rt)}
 												<span class="text-stone-500 text-xs">{bedLabel(rt)}</span>
@@ -326,16 +368,35 @@
 										<p class="text-xs text-stone-400 mt-1">{rt.availableCount} avail.</p>
 									</div>
 								</div>
+								<!-- Qty selector -->
+								<div class="flex items-center justify-between mt-3">
+									<div class="flex items-center gap-2">
+										<button type="button" onclick={() => cartRemove(rt.id)}
+											disabled={qty === 0}
+											class="h-7 w-7 rounded-full border border-stone-300 text-stone-600 text-base leading-none flex items-center justify-center hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed">−</button>
+										<span class="w-5 text-center text-sm font-semibold text-stone-800">{qty}</span>
+										<button type="button" onclick={() => cartAdd(rt.id, rt.availableCount)}
+											disabled={qty >= rt.availableCount}
+											class="h-7 w-7 rounded-full border border-stone-300 text-stone-600 text-base leading-none flex items-center justify-center hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed">+</button>
+									</div>
+									{#if qty > 0}
+										<span class="text-xs font-semibold" style="color:{accent}">{qty} selected</span>
+									{/if}
+								</div>
 							</div>
-						</button>
+						</div>
 					{/each}
 				</div>
 
-					<button type="button" onclick={goToStep3} disabled={!selectedTypeId}
-						class="mt-5 w-full rounded-xl py-3 text-sm font-bold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-						style="background-color:{accent}">
-						Continue →
-					</button>
+				{#if cartTotal > 0}
+					<div class="mt-3 text-xs text-center text-stone-500">{cartTotal} room{cartTotal > 1 ? 's' : ''} selected</div>
+				{/if}
+
+				<button type="button" onclick={goToStep3} disabled={cartTotal === 0}
+					class="mt-5 w-full rounded-xl py-3 text-sm font-bold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+					style="background-color:{accent}">
+					{cartTotal > 1 ? `Continue with ${cartTotal} rooms →` : 'Continue →'}
+				</button>
 				{/if}
 
 		<!-- ── Step 3: Guest Details + Confirm ────────────────────────────── -->
@@ -345,8 +406,8 @@
 				<button onclick={() => { step = deepLinked ? 1 : 2; }} class="text-sm text-stone-400 hover:text-stone-600">← Back</button>
 			</div>
 
-			<!-- Mini summary -->
-			{#if selectedType}
+			<!-- Mini summary — single room (deep link or single cart entry) -->
+			{#if selectedType && !isMultiRoom}
 				{@const photo = selectedType.imageUrl ?? categoryImages[selectedType.category] ?? categoryImages['A']}
 				<div class="rounded-xl border px-4 py-3 text-sm mb-5 flex items-center gap-3" style="border-color:{accent}40; background-color:{accent}0D">
 					<img src={photo} alt="" class="h-12 w-16 rounded-lg object-cover shrink-0" />
@@ -359,6 +420,30 @@
 							<p class="text-stone-400 text-xs">Calculating rate…</p>
 						{/if}
 					</div>
+				</div>
+			{/if}
+
+			<!-- Mini summary — multi-room cart -->
+			{#if isMultiRoom}
+				<div class="rounded-xl border px-4 py-3 text-sm mb-5 space-y-2" style="border-color:{accent}40; background-color:{accent}0D">
+					<p class="font-semibold text-stone-900">{cartTotal} rooms · {fmtDate(checkIn)} → {fmtDate(checkOut)}</p>
+					{#each cartQuotes as cq, i}
+						{@const typeName = cartEntries[i]?.type?.name ?? cq.typeId}
+						<div class="flex justify-between items-center text-xs text-stone-600">
+							<span>{cq.qty}× {typeName}</span>
+							{#if cq.loading}
+								<span class="text-stone-400">…</span>
+							{:else if cq.quote}
+								<span class="font-medium">{fmt(cq.quote.totalAfterDiscountsCents * cq.qty)}</span>
+							{/if}
+						</div>
+					{/each}
+					{#if totalGroupCents > 0}
+						<div class="flex justify-between items-center text-sm font-semibold text-stone-900 border-t border-stone-100 pt-2 mt-1">
+							<span>Total (before tax)</span>
+							<span style="color:{accent}">{fmt(totalGroupCents)}</span>
+						</div>
+					{/if}
 				</div>
 			{/if}
 
@@ -478,39 +563,73 @@
 					{/if}
 				</div>
 
-				{#if form?.error}
-					<p class="text-red-600 text-sm mb-3 rounded-lg bg-red-50 border border-red-100 px-4 py-2">{form.error}</p>
-				{/if}
+			{#if form?.error}
+				<p class="text-red-600 text-sm mb-3 rounded-lg bg-red-50 border border-red-100 px-4 py-2">{form.error}</p>
+			{/if}
 
-				<form method="POST" action="?/book" use:enhance={() => {
-					submitting = true;
-					formSubmittedThisSession = true;
-					return async ({ update }) => { await update(); submitting = false; };
-				}}>
-					<input type="hidden" name="propertyId" value={property.id} />
-					<input type="hidden" name="roomTypeId" value={selectedTypeId} />
-					<input type="hidden" name="checkIn"    value={checkIn} />
-					<input type="hidden" name="checkOut"   value={checkOut} />
-					<input type="hidden" name="guestName"  value={guestName} />
-					<input type="hidden" name="guestEmail" value={guestEmail} />
-					<input type="hidden" name="guestPhone" value={guestPhone} />
-					<input type="hidden" name="numAdults"   value={numAdults} />
-					<input type="hidden" name="numChildren" value={numChildren} />
-					<input type="hidden" name="notes"       value={guestNotes} />
+			<!-- Single-room form (?/book) -->
+			{#if !isMultiRoom}
+			<form method="POST" action="?/book" use:enhance={() => {
+				submitting = true;
+				formSubmittedThisSession = true;
+				return async ({ update }) => { await update(); submitting = false; };
+			}}>
+				<input type="hidden" name="propertyId" value={property.id} />
+				<input type="hidden" name="roomTypeId" value={selectedTypeId} />
+				<input type="hidden" name="checkIn"    value={checkIn} />
+				<input type="hidden" name="checkOut"   value={checkOut} />
+				<input type="hidden" name="guestName"  value={guestName} />
+				<input type="hidden" name="guestEmail" value={guestEmail} />
+				<input type="hidden" name="guestPhone" value={guestPhone} />
+				<input type="hidden" name="numAdults"   value={numAdults} />
+				<input type="hidden" name="numChildren" value={numChildren} />
+				<input type="hidden" name="notes"       value={guestNotes} />
 				{#if rateQuote && rateQuote.totalAfterDiscountsCents > 0}
 					<input type="hidden" name="quotedTotalCents" value={rateQuote.totalAfterDiscountsCents} />
 					<input type="hidden" name="quotedNights"     value={nights} />
 					{#if rateQuote.promo}
 						<input type="hidden" name="promoCodeId" value={rateQuote.promo.id} />
 					{/if}
-					{/if}
+				{/if}
+				<button type="submit" disabled={submitting || !guestName.trim() || !guestEmail.trim()}
+					class="w-full rounded-xl py-4 text-sm font-bold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+					style="background-color:{accent}">
+					{submitting ? 'Submitting…' : '✓ Confirm Reservation'}
+				</button>
+			</form>
+			{/if}
 
-					<button type="submit" disabled={submitting || !guestName.trim() || !guestEmail.trim()}
-						class="w-full rounded-xl py-4 text-sm font-bold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-						style="background-color:{accent}">
-						{submitting ? 'Submitting…' : '✓ Confirm Reservation'}
-					</button>
-				</form>
+			<!-- Multi-room group form (?/bookGroup) -->
+			{#if isMultiRoom}
+			<form method="POST" action="?/bookGroup" use:enhance={() => {
+				submitting = true;
+				formSubmittedThisSession = true;
+				return async ({ update }) => { await update(); submitting = false; };
+			}}>
+				<input type="hidden" name="propertyId" value={property.id} />
+				<input type="hidden" name="checkIn"    value={checkIn} />
+				<input type="hidden" name="checkOut"   value={checkOut} />
+				<input type="hidden" name="guestName"  value={guestName} />
+				<input type="hidden" name="guestEmail" value={guestEmail} />
+				<input type="hidden" name="guestPhone" value={guestPhone} />
+				<input type="hidden" name="numAdults"   value={numAdults} />
+				<input type="hidden" name="numChildren" value={numChildren} />
+				<input type="hidden" name="notes"       value={guestNotes} />
+				{#each cartEntries as entry, i}
+					<input type="hidden" name={`roomTypeId[${i}]`} value={entry.typeId} />
+					<input type="hidden" name={`qty[${i}]`}        value={entry.qty} />
+					{#if cartQuotes[i]?.quote}
+						<input type="hidden" name={`quotedTotalCents[${i}]`} value={cartQuotes[i].quote!.totalAfterDiscountsCents * entry.qty} />
+						<input type="hidden" name={`quotedNights[${i}]`}     value={nights} />
+					{/if}
+				{/each}
+				<button type="submit" disabled={submitting || !guestName.trim() || !guestEmail.trim()}
+					class="w-full rounded-xl py-4 text-sm font-bold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+					style="background-color:{accent}">
+					{submitting ? 'Submitting…' : `✓ Confirm ${cartTotal} Rooms`}
+				</button>
+			</form>
+			{/if}
 			{/if}
 		</div>
 

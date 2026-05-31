@@ -209,6 +209,7 @@ If you see auth-related test failures, check that `TEST_EMAIL` and
 | App loads / navigation | ✅ smoke test |
 | Channex webhook → booking_new | ✅ (set TEST_PROPERTY_ID in .env) |
 | Channex webhook → booking_cancel | ✅ (set TEST_PROPERTY_ID in .env) |
+| **Channex webhook → booking_update** | ✅ (set TEST_PROPERTY_ID in .env) |
 | Webhook guest data saved correctly | ✅ |
 | ARI payload format (rate in dollars) | ✅ (requires TEST_ROOM_TYPE_ID) |
 | ARI payload format (date format) | ✅ (requires TEST_ROOM_TYPE_ID) |
@@ -228,9 +229,17 @@ If you see auth-related test failures, check that `TEST_EMAIL` and
 | Cancelled booking restores availability | ✅ bookingFixture |
 | Unassigned OTA booking reduces availability | ✅ bookingFixture |
 | Overbooking via public booking rejected | ✅ bookingFixture |
-| Check-in / check-out UI flow | 🔲 not yet |
-| Group booking workflow | 🔲 not yet |
-| Deposit pending → received | 🔲 not yet |
+| **Max stay restriction (public booking)** | ✅ 07-public-restrictions |
+| **Gap restriction (public booking)** | ✅ 07-public-restrictions |
+| **Room quarantine blocks availability** | ✅ 07-public-restrictions |
+| **DOW rate applied in pricing API** | ✅ 07-public-restrictions |
+| **Night audit creates run record** | ✅ 08-night-audit |
+| **Duplicate audit date rejected** | ✅ 08-night-audit |
+| **Group booking (staff API)** | ✅ 09-group-booking |
+| **Group booking (public ?/bookGroup)** | ✅ 09-group-booking |
+| **Group booking overbooking rejected** | ✅ 09-group-booking |
+| **Check-in status transition** | ✅ 10-checkin-checkout |
+| **Cancel restores availability** | ✅ 10-checkin-checkout |
 
 ---
 

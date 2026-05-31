@@ -3,6 +3,7 @@ import { and, eq, gt, lt, ne, sql } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { bookings, rooms } from '$lib/server/db/schema';
+import { syncARIForStay } from '$lib/server/ari-sync';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
 	if (!locals.user) redirect(303, '/auth/login');
@@ -136,6 +137,17 @@ export const actions: Actions = {
 			otaConfirmationNumber: booking.otaConfirmationNumber,
 			movedFromBookingId: bookingId
 		});
+
+		// Sync ARI for both the old room type (dates freed) and the new room type (dates consumed).
+		// Look up room types for both rooms in one query batch.
+		const [oldRoomRow, newRoomRow] = await Promise.all([
+			db.query.rooms.findFirst({ where: eq(rooms.id, booking.roomId!), columns: { roomTypeId: true } }),
+			db.query.rooms.findFirst({ where: eq(rooms.id, newRoomId),       columns: { roomTypeId: true } })
+		]);
+		if (oldRoomRow?.roomTypeId)
+			void syncARIForStay(oldRoomRow.roomTypeId, booking.checkInDate, booking.checkOutDate).catch((e) => console.error('[ari-sync] booking move old:', e));
+		if (newRoomRow?.roomTypeId)
+			void syncARIForStay(newRoomRow.roomTypeId, moveDate, booking.checkOutDate).catch((e) => console.error('[ari-sync] booking move new:', e));
 
 		// Redirect to the new booking's registration card so operator can set rates
 		redirect(303, `/booking/${newBookingId}/checkin`);

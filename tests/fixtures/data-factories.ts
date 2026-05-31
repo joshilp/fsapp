@@ -22,7 +22,7 @@ export function isoDate(offsetDays = 0): string {
 // ─── Channex webhook trigger payload ─────────────────────────────────────────
 
 export type WebhookTriggerPayload = {
-	event: 'booking_new' | 'booking_cancel';
+	event: 'booking_new' | 'booking_update' | 'booking_cancel';
 	// Real Channex IDs — set in .env as TEST_CHANNEX_* (optional)
 	channexPropertyId?: string | null;
 	channexRoomTypeId?: string | null;

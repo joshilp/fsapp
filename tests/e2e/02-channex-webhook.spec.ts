@@ -91,32 +91,46 @@ test.describe('Channex webhook → booking creation', () => {
 		expect(after[0].status, 'booking should be cancelled').toBe('cancelled');
 	});
 
-	test('webhook booking has correct guest data', async ({ apiContext }) => {
+	test('booking_update webhook updates dates on an existing booking', async ({ apiContext }) => {
 		if (skipIfNoIds()) return;
 
-		const otaRef    = `PLAY-GUEST-${Date.now()}`;
-		const guestName = `Test Guest ${Date.now()}`;
-		const guestEmail = `playwright+guest+${Date.now()}@test.local`;
+		// First create the booking via booking_new
+		const otaRef = `PLAY-UPDATE-${Date.now()}`;
+		const originalCheckIn  = isoDate(35);
+		const originalCheckOut = isoDate(38);
 
 		await apiContext.post('/api/dev/channex-trigger', {
 			data: createWebhookTrigger({
-				otaRef, guestName, guestEmail,
-				checkIn:  isoDate(45),
-				checkOut: isoDate(48),
-				adults: 2, children: 1
+				otaRef, checkIn: originalCheckIn, checkOut: originalCheckOut,
+				guestEmail: `playwright+update+${Date.now()}@test.local`
 			})
 		});
 
-		const results = await (await apiContext.get('/api/booking/search', { params: { otaRef } })).json();
-		expect(results.length).toBeGreaterThan(0);
+		const before = await (await apiContext.get('/api/booking/search', { params: { otaRef } })).json();
+		expect(before.length, 'booking should exist before update').toBeGreaterThan(0);
+		expect(before[0].checkInDate, 'initial check-in should match').toBe(originalCheckIn);
 
-		const b = results[0];
-		expect(b.guestName,  'guest name should match what was sent').toBe(guestName);
-		expect(b.guestEmail, 'guest email should match').toBe(guestEmail);
-		expect(b.numAdults,  'adults should match').toBe(2);
-		expect(b.numChildren,'children should match').toBe(1);
-		expect(b.checkInDate, 'check-in date should match').toBe(isoDate(45));
-		expect(b.checkOutDate,'check-out date should match').toBe(isoDate(48));
+		// Fire booking_update with new dates
+		const newCheckIn  = isoDate(36);
+		const newCheckOut = isoDate(39);
+		const updateRes = await apiContext.post('/api/dev/channex-trigger', {
+			data: createWebhookTrigger({
+				event:    'booking_update',
+				otaRef,
+				checkIn:  newCheckIn,
+				checkOut: newCheckOut,
+				adults:   3
+			})
+		});
+		expect(updateRes.ok(), 'booking_update trigger should succeed').toBe(true);
+
+		// Verify the booking was updated
+		const after = await (await apiContext.get('/api/booking/search', { params: { otaRef } })).json();
+		expect(after.length, 'booking should still exist after update').toBeGreaterThan(0);
+		expect(after[0].checkInDate,  'check-in should be updated').toBe(newCheckIn);
+		expect(after[0].checkOutDate, 'check-out should be updated').toBe(newCheckOut);
+		expect(after[0].numAdults,    'adults should be updated').toBe(3);
+		expect(after[0].status,       'booking should remain confirmed').toBe('confirmed');
 	});
 
 });

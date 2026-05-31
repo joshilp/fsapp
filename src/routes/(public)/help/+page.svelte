@@ -1016,7 +1016,7 @@
 							<tr><td>Room photos & descriptions</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Deep-link to specific room type</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Booking confirmation email</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Group booking (public-facing)</td><td class="no">—</td><td class="yes">✅</td></tr>
+							<tr><td>Group booking (public-facing)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<!-- Reservations -->
 							<tr class="section-row"><td colspan="3">Reservations</td></tr>
 							<tr><td>Visual booking grid</td><td class="yes">✅</td><td class="yes">✅</td></tr>
@@ -1041,8 +1041,8 @@
 						<tr><td>Night audit</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<!-- Channels -->
 							<tr class="section-row"><td colspan="3">Channels & OTA</td></tr>
-							<tr><td>Two-way OTA/GDS sync</td><td class="partial">🔶 Channex</td><td class="yes">✅</td></tr>
-							<tr><td>ARI push (rates, availability)</td><td class="partial">🔶</td><td class="yes">✅</td></tr>
+						<tr><td>Two-way OTA/GDS sync</td><td class="yes">✅ Channex</td><td class="yes">✅</td></tr>
+						<tr><td>ARI push (rates, availability)</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<!-- Reports -->
 							<tr class="section-row"><td colspan="3">Reports</td></tr>
 							<tr><td>Occupancy report</td><td class="yes">✅</td><td class="yes">✅</td></tr>

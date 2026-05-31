@@ -10,9 +10,10 @@
  */
 import { and, eq, gt, inArray, isNull, lt, ne, or } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { bookings, rateOverrides, rateSeasons, rateTiers, rooms, roomTypes } from '$lib/server/db/schema';
+import { bookings, rateOverrides, rateSeasons, rooms, roomTypes } from '$lib/server/db/schema';
 import { pushARI } from '$lib/server/channex';
 import type { ARIUpdate } from '$lib/server/channex';
+import { resolveNightlyRate } from '$lib/server/rates';
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -290,7 +291,7 @@ function getRateForDate(
 		startDate: string;
 		endDate: string;
 		minNights: number;
-		tiers: Array<{ roomTypeId: string; nightlyRate: number }>;
+		tiers: Array<{ roomTypeId: string; nightlyRate: number; dowRates: string | null }>;
 	}>,
 	roomTypeId: string,
 	date: string,
@@ -303,7 +304,10 @@ function getRateForDate(
 
 	for (const s of matching) {
 		const tier = s.tiers.find((t) => t.roomTypeId === roomTypeId);
-		if (tier) return { rate: tier.nightlyRate, minNights: s.minNights };
+		if (tier) {
+			const rate = resolveNightlyRate(tier.nightlyRate, tier.dowRates, date);
+			return { rate, minNights: s.minNights };
+		}
 	}
 	return { rate: defaultRateCents ?? null, minNights: 1 };
 }

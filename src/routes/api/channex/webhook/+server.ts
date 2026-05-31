@@ -149,10 +149,13 @@ async function handleBookingUpsert(chbk: ChannexBooking, isUpdate: boolean) {
 				numAdults: chbk.adults,
 				numChildren: chbk.children,
 				notes: chbk.notes ?? existing.notes,
+				// Update room type if the OTA moved the booking to a different room type
+				...(rt?.id ? { requestedRoomTypeId: rt.id } : {}),
 				updatedAt: new Date()
 			}).where(eq(bookings.id, existing.id));
 			return;
 		}
+		// Booking not found for update — fall through and create it
 	}
 
 	// Create new booking (unassigned — room to be assigned by operator)

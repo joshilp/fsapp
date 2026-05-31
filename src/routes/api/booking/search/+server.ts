@@ -62,6 +62,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			status: true, checkInDate: true, checkOutDate: true,
 			numAdults: true, numChildren: true, notes: true,
 			publicToken: true, otaConfirmationNumber: true,
+			groupId: true, guestId: true,
 			createdAt: true
 		},
 		orderBy: (b, { desc }) => [desc(b.createdAt)],
@@ -83,6 +84,8 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		notes:                 r.notes,
 		publicToken:           r.publicToken,
 		otaConfirmationNumber: r.otaConfirmationNumber,
+		groupId:               r.groupId ?? null,
+		guestId:               r.guestId ?? null,
 		guestName:             r.guest?.name ?? null,
 		guestEmail:            r.guest?.email ?? null,
 		guestPhone:            r.guest?.phone ?? null,

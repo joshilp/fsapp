@@ -14,16 +14,26 @@ export const load: PageServerLoad = async ({ params }) => {
 			guest: { columns: { name: true, email: true, phone: true } },
 			requestedRoomType: { columns: { name: true, category: true } }
 		},
-		columns: { id: true, publicToken: true, status: true, checkInDate: true, checkOutDate: true, numAdults: true, numChildren: true, notes: true }
+		columns: { id: true, publicToken: true, status: true, checkInDate: true, checkOutDate: true, numAdults: true, numChildren: true, notes: true, groupId: true }
 	});
 
 	if (!booking || booking.publicToken !== token) {
 		error(404, 'Reservation not found. Please check your confirmation link.');
 	}
 
+	// If this booking is part of a group, load all sibling bookings
+	let groupBookings: Array<{ id: string; publicToken: string | null; requestedRoomType: { name: string } | null }> = [];
+	if (booking.groupId) {
+		groupBookings = await db.query.bookings.findMany({
+			where: eq(bookings.groupId, booking.groupId),
+			with: { requestedRoomType: { columns: { name: true } } },
+			columns: { id: true, publicToken: true }
+		});
+	}
+
 	const nights = Math.max(0, Math.round(
 		(new Date(booking.checkOutDate).getTime() - new Date(booking.checkInDate).getTime()) / 86400000
 	));
 
-	return { booking, nights };
+	return { booking, nights, groupBookings };
 };

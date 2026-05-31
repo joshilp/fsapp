@@ -3,6 +3,7 @@ import { and, eq, lte, gte, lt, isNull, or } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { losDiscounts, promoCodes, rateSeasons, rateTiers, roomTypes, rateOverrides } from '$lib/server/db/schema';
+import { resolveNightlyRate } from '$lib/server/rates';
 
 export type PublicRateLine = {
 	seasonName: string;
@@ -79,7 +80,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		with: {
 			tiers: {
 				where: eq(rateTiers.roomTypeId, roomTypeId),
-				columns: { nightlyRate: true, baseOccupancy: true, extraGuestFeeCents: true }
+				columns: { nightlyRate: true, baseOccupancy: true, extraGuestFeeCents: true, dowRates: true }
 			}
 		},
 		orderBy: (s, { asc }) => [asc(s.startDate)]
@@ -110,7 +111,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		const season   = seasons.find((s) => s.startDate <= night && s.endDate >= night);
 		const tier     = season?.tiers?.[0];
 
-		const rate         = override?.rateCents ?? tier?.nightlyRate ?? 0;
+		const rate         = override?.rateCents ?? (tier ? resolveNightlyRate(tier.nightlyRate, tier.dowRates ?? null, night) : 0);
 		const minNights    = override?.minNights ?? season?.minNights ?? 1;
 		const baseOcc      = tier?.baseOccupancy ?? 2;
 		const extraFee     = tier?.extraGuestFeeCents ?? 0;

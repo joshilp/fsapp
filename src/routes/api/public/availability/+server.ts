@@ -33,11 +33,18 @@ export const GET: RequestHandler = async ({ url }) => {
 		throw error(400, 'Missing or invalid params');
 	}
 
-	// All active rooms for this property
+	// All active rooms for this property, including quarantine status
 	const allRooms = await db.query.rooms.findMany({
 		where: and(eq(rooms.propertyId, propertyId), eq(rooms.isActive, true)),
-		columns: { id: true, roomTypeId: true, kingBeds: true, queenBeds: true, doubleBeds: true, hasKitchen: true, hasHideabed: true }
+		columns: { id: true, roomTypeId: true, quarantineUntil: true, kingBeds: true, queenBeds: true, doubleBeds: true, hasKitchen: true, hasHideabed: true }
 	});
+
+	// Rooms under quarantine during the requested check-in date are treated as unavailable
+	const quarantinedRoomIds = new Set(
+		allRooms
+			.filter((r) => r.quarantineUntil && r.quarantineUntil > checkIn)
+			.map((r) => r.id)
+	);
 
 	// Rooms already taken by concrete-assigned bookings
 	const allRoomIds = allRooms.map((r) => r.id);
@@ -163,8 +170,8 @@ export const GET: RequestHandler = async ({ url }) => {
 		const overrideCap  = avOvrs.length > 0 ? Math.min(...avOvrs.map((o) => o.availabilityOverride!)) : totalCount;
 		const effectiveTotal = Math.min(totalCount, overrideCap);
 
-		// Taken: rooms assigned to conflicting bookings + unassigned bookings across the whole pool
-		const takenRooms      = poolRooms.filter((r) => conflictedRoomIds.has(r.id)).length;
+		// Taken: rooms assigned to conflicting bookings + quarantined rooms + unassigned bookings across the whole pool
+		const takenRooms      = poolRooms.filter((r) => conflictedRoomIds.has(r.id) || quarantinedRoomIds.has(r.id)).length;
 		const poolTypeIds     = [poolRootId, ...siblings];
 		const takenUnassigned = poolTypeIds.reduce((s, tid) => s + (unassignedByType.get(tid) ?? 0), 0);
 

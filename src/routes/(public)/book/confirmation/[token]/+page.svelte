@@ -79,13 +79,22 @@
 						</div>
 					</div>
 
-					<!-- Room + guests -->
-					<div class="px-6 py-4 grid grid-cols-2 gap-4 text-sm">
-						<div>
-							<p class="text-stone-400 text-xs mb-1">Room type</p>
+				<!-- Room + guests (single booking or first of group) -->
+				<div class="px-6 py-4 grid grid-cols-2 gap-4 text-sm">
+					<div>
+						<p class="text-stone-400 text-xs mb-1">Room type</p>
+						{#if data.groupBookings.length > 1}
+							<p class="font-semibold text-stone-900">{data.groupBookings.length} rooms</p>
+							<div class="text-xs text-stone-500 space-y-0.5 mt-0.5">
+								{#each data.groupBookings as gb}
+									<p>{gb.requestedRoomType?.name ?? 'TBD'} <span class="font-mono text-stone-400">#{gb.publicToken}</span></p>
+								{/each}
+							</div>
+						{:else}
 							<p class="font-semibold text-stone-900">{b.requestedRoomType?.name ?? 'To be assigned'}</p>
 							<p class="text-stone-400 text-xs">Room number assigned before arrival</p>
-						</div>
+						{/if}
+					</div>
 						<div>
 							<p class="text-stone-400 text-xs mb-1">Duration</p>
 							<p class="font-semibold text-stone-900">{data.nights} night{data.nights === 1 ? '' : 's'}</p>
