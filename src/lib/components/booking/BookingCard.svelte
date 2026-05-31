@@ -179,7 +179,7 @@
 	let legendOpen = $state(false);
 
 	// ── Left-panel tab ─────────────────────────────────────────────────────────
-	let leftTab = $state<'guest' | 'stay' | 'notes' | 'history'>('guest');
+	let leftTab = $state<'folio' | 'guest' | 'notes' | 'history'>('folio');
 
 	// ── Payment row ⋮ menu ─────────────────────────────────────────────────────
 	let openPayMenu = $state<string | null>(null);
@@ -627,7 +627,7 @@
 		confirmBusy = false; confirmSentAt = null;
 		selfCheckinUrl = ''; selfCheckinAt_ = null; selfCheckinLinkBusy = false; selfCheckinCopied = false;
 		propLogoUrl = null; propAddress = null; propPhone = null;
-		leftTab = 'guest'; openPayMenu = null;
+		leftTab = 'folio'; openPayMenu = null;
 		legendOpen = false;
 		bookingCreatedAt = null; bookingClerkName = ''; bookingCheckedInAt = null;
 		bookingCheckedOutAt = null; bookingCancelledAt = null; priorStay_ = null;
@@ -1169,31 +1169,33 @@
 		<input type="hidden" name="addonCount"  value={addonLines.length} />
 		<input type="hidden" name="taxCount"    value={computedTaxLines.length} />
 
-			<div class="flex flex-col">
-		<div class="grid gap-4 px-4 pb-4 pt-3 lg:grid-cols-2 order-2">
+		<div class={['grid gap-4 px-4 pb-4 pt-3', leftTab === 'folio' ? '' : 'lg:grid-cols-2'].join(' ')}>
 
-			<!-- ── LEFT: tabs(Guest | Stay | Notes) ─────────────────────────────── -->
-			<div class="flex flex-col gap-3">
+		<!-- ── Tab bar ─────────────────────────────────────────────────── -->
+		<div class={leftTab === 'folio' ? 'col-span-full' : ''}>
+		<div class="flex border-b border-border mb-3">
+			{#each (['folio', 'guest', 'notes', 'history'] as const) as tab}
+				<button type="button" onclick={() => leftTab = tab}
+					class={['relative px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors',
+						leftTab === tab
+							? 'border-foreground text-foreground'
+							: 'border-transparent text-muted-foreground hover:text-foreground'
+					].join(' ')}>
+					{tab === 'folio' ? 'Folio' : tab === 'guest' ? 'Guest' : tab === 'notes' ? 'Notes' : 'History'}
+					{#if tab === 'notes' && notes.trim()}
+						<span class="absolute top-1.5 right-1 h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+					{/if}
+				</button>
+			{/each}
+		</div>
 
-				<!-- Tab bar -->
-				<div class="flex border-b border-border">
-					{#each (['guest', 'stay', 'notes', 'history'] as const) as tab}
-						<button type="button" onclick={() => leftTab = tab}
-							class={['relative px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors',
-								leftTab === tab
-									? 'border-foreground text-foreground'
-									: 'border-transparent text-muted-foreground hover:text-foreground'
-							].join(' ')}>
-							{tab === 'guest' ? 'Guest' : tab === 'stay' ? 'Stay' : tab === 'notes' ? 'Notes' : 'History'}
-							{#if tab === 'notes' && notes.trim()}
-								<span class="absolute top-1.5 right-1 h-1.5 w-1.5 rounded-full bg-blue-500"></span>
-							{/if}
-						</button>
-					{/each}
-				</div>
+		<!-- Folio tab -->
+			{#if leftTab === 'folio'}
+			{@render folioContent()}
+			{/if}
 
-					<!-- Guest tab -->
-					{#if leftTab === 'guest'}
+			<!-- Guest tab -->
+				{#if leftTab === 'guest'}
 					<section class="rounded-lg border border-border bg-card p-3">
 						<div class="space-y-2">
 							<div class="relative">
@@ -1263,48 +1265,7 @@
 					{/if}
 
 					<!-- Stay tab -->
-					{#if leftTab === 'stay'}
-					<section class="rounded-lg border border-border bg-card p-3">
-						<div class="grid grid-cols-2 gap-3">
-							<div>
-								<label class="mb-1 block text-xs text-muted-foreground" for="bc-ci">Check-in</label>
-						<input id="bc-ci" type="date" bind:value={checkIn}
-								oninput={() => {
-									if (checkOut <= checkIn) checkOut = nextDay(checkIn);
-									if (requestedRoomTypeId_) loadAvailableRooms();
-								}}
-									class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" required />
-							</div>
-							<div>
-								<label class="mb-1 block text-xs text-muted-foreground" for="bc-co">Check-out</label>
-						<input id="bc-co" type="date" bind:value={checkOut}
-								oninput={() => { if (requestedRoomTypeId_) loadAvailableRooms(); }}
-									class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" required />
-							</div>
-						</div>
-						{#if roomConfigs_.length > 1}
-							<div class="mt-2">
-								<label class="mb-1 block text-xs text-muted-foreground">Room config</label>
-								<select name="roomConfig" bind:value={selConfig} class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-									{#each roomConfigs_ as c}<option value={c}>{c}</option>{/each}
-								</select>
-							</div>
-						{:else}
-							<input type="hidden" name="roomConfig" value={selConfig} />
-						{/if}
-						{#if isOta}
-							<div class="mt-2">
-								<label class="mb-1 block text-xs text-muted-foreground">OTA confirmation #</label>
-								<Input name="otaConfirmationNumber" placeholder="e.g. BDC-12345" bind:value={otaRef} class="h-8 text-sm" />
-							</div>
-						{:else}
-							<input type="hidden" name="otaConfirmationNumber" value="" />
-						{/if}
-				</section>
-
-				{/if}
-
-				<!-- Notes tab -->
+			<!-- Notes tab -->
 				{#if leftTab === 'notes'}
 				<section class="rounded-lg border border-border bg-card p-3">
 					<textarea name="notes" bind:value={notes} rows="5" placeholder="Special requests, info…"
@@ -1363,11 +1324,11 @@
 				{/if}
 				{/if}
 
-			</div><!-- /left -->
+			</div><!-- /left-col or folio -->
 
-			<!-- ── RIGHT: Room picker (inventory new booking) OR Folio ──────────── -->
+			<!-- ── RIGHT: Room picker (new bookings only) ──────────────── -->
+			{#if leftTab !== 'folio'}
 			<div class="flex flex-col gap-4">
-
 			{#if requestedRoomTypeId_ && isNew && !roomId_ && !roomPickerDismissed}
 				<!-- ── Room assignment panel ───────────────────────────────────── -->
 				<section class="rounded-lg border-2 border-teal-400 bg-teal-50/60 dark:bg-teal-950/20 p-4 flex flex-col gap-4">
@@ -1407,16 +1368,53 @@
 					{/if}
 				</section>
 		{:else}
-			<!-- right column is empty when not assigning a room; folio is full-width below -->
-		{/if}<!-- end room picker / folio swap -->
-
+			<!-- right column empty when not assigning a room -->
+		{/if}<!-- end room picker -->
 			</div><!-- /right -->
+			{/if}<!-- end right col when not folio tab -->
 
-			</div><!-- /grid -->
+		</div><!-- /grid -->
 
-	<!-- ── Folio — full-width above the guest/stay columns ──────────────── -->
-		{#if !(requestedRoomTypeId_ && isNew && !roomId_ && !roomPickerDismissed)}
-		<section class="mx-4 mt-0 mb-2 rounded-lg border border-border bg-card p-3 order-1">
+	<!-- ── Folio snippet (rendered inside the Folio tab) ────────────────── -->
+	{#snippet folioContent()}
+		<section class="rounded-lg border border-border bg-card p-3">
+			<!-- ── Stay strip ─────────────────────────────────────────────────── -->
+			<div class="grid grid-cols-2 gap-x-3 gap-y-2 pb-3 mb-3 border-b border-border sm:grid-cols-4">
+				<div>
+					<label class="mb-1 block text-xs text-muted-foreground" for="bc-ci">Check-in</label>
+					<input id="bc-ci" type="date" bind:value={checkIn}
+						oninput={() => {
+							if (checkOut <= checkIn) checkOut = nextDay(checkIn);
+							if (requestedRoomTypeId_) loadAvailableRooms();
+						}}
+						class="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm" required />
+				</div>
+				<div>
+					<label class="mb-1 block text-xs text-muted-foreground" for="bc-co">Check-out</label>
+					<input id="bc-co" type="date" bind:value={checkOut}
+						oninput={() => { if (requestedRoomTypeId_) loadAvailableRooms(); }}
+						class="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm" required />
+				</div>
+				{#if roomConfigs_.length > 1}
+					<div>
+						<label class="mb-1 block text-xs text-muted-foreground">Room config</label>
+						<select name="roomConfig" bind:value={selConfig} class="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm">
+							{#each roomConfigs_ as c}<option value={c}>{c}</option>{/each}
+						</select>
+					</div>
+				{:else}
+					<input type="hidden" name="roomConfig" value={selConfig} />
+				{/if}
+				{#if isOta}
+					<div>
+						<label class="mb-1 block text-xs text-muted-foreground">OTA confirmation #</label>
+						<Input name="otaConfirmationNumber" placeholder="e.g. BDC-12345" bind:value={otaRef} class="h-7 text-sm" />
+					</div>
+				{:else}
+					<input type="hidden" name="otaConfirmationNumber" value="" />
+				{/if}
+			</div>
+
 			<div class="mb-3 flex items-center justify-between">
 				<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Folio</h3>
 				<button type="button" onclick={suggestRate} disabled={rateLoading}
@@ -1920,10 +1918,10 @@
 							</div>
 						</div>
 			{/if}
-				</div><!-- /payments section -->
+			</div><!-- /payments section -->
 		</section>
-		{/if}<!-- end folio full-width -->
-		</div><!-- /flex-col-wrapper -->
+	{/snippet}<!-- end folioContent snippet -->
+
 
 			{#if showCheckoutBar && status === 'checked_in'}
 					<div class="border-t border-border bg-muted/30 px-4 py-3 space-y-2">
