@@ -1,0 +1,158 @@
+import { redirect, fail } from '@sveltejs/kit';
+import { like, or, eq } from 'drizzle-orm';
+import type { PageServerLoad, Actions } from './$types';
+import { db } from '$lib/server/db';
+import { bookings, guests } from '$lib/server/db/schema';
+export const load: PageServerLoad = async ({ locals, url }) => {
+	if (!locals.user) redirect(303, '/auth/login');
+
+	const q = url.searchParams.get('q')?.trim() ?? '';
+	const selectedId = url.searchParams.get('id') ?? null;
+
+	let guestList: { id: string; name: string; phone: string | null; email: string | null; rating: number | null; ratingNotes: string | null }[] = [];
+
+	if (q.length >= 2) {
+		const pattern = `%${q}%`;
+		guestList = await db.query.guests.findMany({
+			where: or(
+				like(guests.name, pattern),
+				like(guests.phone, pattern),
+				like(guests.email, pattern)
+			),
+			columns: { id: true, name: true, phone: true, email: true, rating: true, ratingNotes: true },
+			orderBy: (g, { asc }) => [asc(g.name)],
+			limit: 40
+		});
+	}
+
+	// If a guest is selected, load their full profile + history
+	let selectedGuest: {
+		id: string; name: string; phone: string | null; email: string | null;
+		street: string | null; city: string | null; provinceState: string | null; country: string | null;
+		notes: string | null; rating: number | null; ratingNotes: string | null;
+	} | null = null;
+
+	let guestBookings: {
+		id: string; status: string; checkInDate: string; checkOutDate: string;
+		propertyName: string | null; roomNumber: string | null; nights: number;
+		totalCents: number;
+	}[] = [];
+
+	if (selectedId) {
+		selectedGuest = await db.query.guests.findFirst({
+			where: eq(guests.id, selectedId),
+			columns: { id: true, name: true, phone: true, email: true, street: true, city: true, provinceState: true, country: true, notes: true, rating: true, ratingNotes: true }
+		}) ?? null;
+
+		if (selectedGuest) {
+			const rawBookings = await db.query.bookings.findMany({
+				where: eq(bookings.guestId, selectedId),
+				with: {
+					room: { with: { property: { columns: { name: true } } }, columns: { roomNumber: true } },
+					lineItems: { columns: { type: true, totalAmount: true } }
+				},
+				columns: { id: true, status: true, checkInDate: true, checkOutDate: true },
+				orderBy: (b, { desc }) => [desc(b.checkInDate)],
+				limit: 50
+			});
+
+			guestBookings = rawBookings.map((b) => ({
+				id: b.id,
+				status: b.status,
+				checkInDate: b.checkInDate,
+				checkOutDate: b.checkOutDate,
+				propertyName: b.room?.property?.name ?? null,
+				roomNumber: b.room?.roomNumber ?? null,
+				nights: Math.round((new Date(b.checkOutDate).getTime() - new Date(b.checkInDate).getTime()) / 86400000),
+				totalCents: b.lineItems.filter(li => li.type !== 'deposit').reduce((s, li) => s + li.totalAmount, 0)
+			}));
+		}
+	}
+
+	return { q, selectedId, guestList, selectedGuest, guestBookings };
+};
+
+export const actions: Actions = {
+	rateGuest: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const id = (fd.get('guestId') as string)?.trim();
+		const rating = parseInt(fd.get('rating') as string);
+		const ratingNotes = ((fd.get('ratingNotes') as string) ?? '').trim() || null;
+		if (!id || isNaN(rating) || rating < 1 || rating > 5) return fail(400, { error: 'Invalid' });
+		await db.update(guests).set({ rating, ratingNotes }).where(eq(guests.id, id));
+		return { success: true };
+	},
+
+	updateGuest: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const id = g('guestId');
+		if (!id) return fail(400, { error: 'Missing ID' });
+		await db.update(guests).set({
+			name: g('name') ?? undefined,
+			phone: g('phone'),
+			email: g('email'),
+			notes: g('notes'),
+			street: g('street'),
+			city: g('city'),
+			provinceState: g('province'),
+			country: g('country')
+		}).where(eq(guests.id, id));
+		return { success: true };
+	},
+
+	createGuest: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const g = (k: string) => (fd.get(k) as string | null)?.trim() || null;
+		const name = g('name');
+		if (!name) return fail(400, { error: 'Name is required' });
+		const [created] = await db.insert(guests).values({
+			id: crypto.randomUUID(),
+			name,
+			phone: g('phone'),
+			email: g('email'),
+		}).returning({ id: guests.id });
+		return { success: true, newGuestId: created.id };
+	},
+
+	/**
+	 * Merge two guest records. All bookings from `sourceId` are reassigned to
+	 * `targetId`, then the source guest record is deleted.
+	 * The target guest's name/email/phone/notes are kept unless blank, in which
+	 * case the source's values are used to fill gaps.
+	 */
+	mergeGuests: async ({ request, locals }) => {
+		if (!locals.user) return fail(401, { error: 'Unauthorized' });
+		const fd = await request.formData();
+		const targetId = ((fd.get('targetId') as string) ?? '').trim();
+		const sourceId = ((fd.get('sourceId') as string) ?? '').trim();
+		if (!targetId || !sourceId || targetId === sourceId)
+			return fail(400, { error: 'Invalid guest IDs' });
+
+		const [target, source] = await Promise.all([
+			db.query.guests.findFirst({ where: eq(guests.id, targetId) }),
+			db.query.guests.findFirst({ where: eq(guests.id, sourceId) })
+		]);
+		if (!target || !source) return fail(404, { error: 'Guest not found' });
+
+		// Fill any blank fields on the target from the source
+		await db.update(guests).set({
+			phone:         target.phone  || source.phone  || null,
+			email:         target.email  || source.email  || null,
+			street:        target.street || source.street || null,
+			city:          target.city   || source.city   || null,
+			notes:         [target.notes, source.notes].filter(Boolean).join(' | ') || null
+		}).where(eq(guests.id, targetId));
+
+		// Reassign all bookings from source → target
+		await db.update(bookings).set({ guestId: targetId }).where(eq(bookings.guestId, sourceId));
+
+		// Delete source guest
+		await db.delete(guests).where(eq(guests.id, sourceId));
+
+		return { success: true, mergedInto: targetId };
+	}
+};

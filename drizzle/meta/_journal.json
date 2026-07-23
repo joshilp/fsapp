@@ -15,6 +15,90 @@
       "when": 1776955595526,
       "tag": "0001_windy_triton",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776977817958,
+      "tag": "0002_late_ozymandias",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1776980090185,
+      "tag": "0003_gray_ben_urich",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1777053729061,
+      "tag": "0004_dry_nebula",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1777126989624,
+      "tag": "0005_wooden_abomination",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1777910734330,
+      "tag": "0006_fancy_stardust",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1777927131448,
+      "tag": "0007_bizarre_daimon_hellstrom",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1778083708729,
+      "tag": "0008_fantastic_thor_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1779832597475,
+      "tag": "0009_sparkling_sumo",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779833000000,
+      "tag": "0010_booking_public",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1779833100000,
+      "tag": "0011_avail_override",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1748534800000,
+      "tag": "0012_weekday_max_gap_quarantine",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1748620000000,
+      "tag": "0013_addon_tax_posting",
+      "breakpoints": true
     }
   ]
 }

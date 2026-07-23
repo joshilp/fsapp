@@ -1,0 +1,1 @@
+ALTER TABLE `bookings` ADD `clerk_name` text;

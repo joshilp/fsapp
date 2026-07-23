@@ -9,6 +9,10 @@ export const user = sqliteTable("user", {
     .default(false)
     .notNull(),
   image: text("image"),
+  // Approval system: new users default approved=true so existing users aren't locked out.
+  // Admin can toggle per-user. Set isAdmin=true via DB for the first operator account.
+  isApproved: integer("is_approved", { mode: "boolean" }).notNull().default(true),
+  isAdmin: integer("is_admin", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),

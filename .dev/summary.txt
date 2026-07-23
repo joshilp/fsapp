@@ -1,0 +1,18 @@
+Falcon Resort
+Room Types=
+1 Queen $110 - 30, 31, 32, 33 (these rooms have a back bedroom that can be locked to make it one bedroom)
+1 Queen + 1 Double $129 - 30, 31, 32, 33 (same as above, but the back bedroom is open)
+1 Queen + Kitchen $110 - 21, 22, 23, 24
+2 Queens + Kitchen + Hide-a-Bed $149 - 1, 8, 19, 35, 36
+1 Queen + 2 Doubles + Kitchen $149 - 3, 20, 29
+2 Doubles + Kitchen + Hide-a-Bed $149 - Room number 34
+2 Doubles + Kitchen $149 - 2, 4, 5, 6, 7, 9, 10, 11, 25, 26, 27, 28
+
+Spanish Fiesta Resort
+Room Types=
+1 Queen + Kitchen + Hide-a-Bed $110 - 1, 7, 8, 18, 19, 20
+1 Queen + Hide-a-Bed $110 - 17, 21, 22, 24, 25, 26, 31
+2 Queens $129 - 23, 28, 29, 30, 34
+2 Queens + Hide-a-Bed $129 - Room number 36
+2 Queens + Kitchen $149 - 2, 3, 4, 5, 6, 9, 10, 11, 14, 15, 33
+2 Queens + Kitchen + Hide-a-Bed $149 - 12, 16, 27, 32, 35
