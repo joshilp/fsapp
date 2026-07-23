@@ -210,6 +210,48 @@
 		</div>
 	</div>
 
+	<!-- Room type revenue breakdown -->
+	{#if data.roomTypeRevenue.length > 0}
+	<div class="rounded-lg border border-border bg-card p-5">
+		<h2 class="font-semibold mb-4 text-sm">Revenue by Room Type</h2>
+		{@const maxRev = Math.max(...data.roomTypeRevenue.map(r => r.revenueCents), 1)}
+		<div class="space-y-3">
+			{#each data.roomTypeRevenue as rt}
+				{@const pct = Math.round((rt.revenueCents / maxRev) * 100)}
+				<div>
+					<div class="flex justify-between text-sm mb-1">
+						<span class="font-medium">{rt.name}</span>
+						<span class="text-muted-foreground">${(rt.revenueCents / 100).toFixed(2)} · {rt.bookings} booking{rt.bookings === 1 ? '' : 's'}</span>
+					</div>
+					<div class="h-2 bg-muted rounded-full overflow-hidden">
+						<div class="h-full bg-teal-500 rounded-full" style="width:{pct}%"></div>
+					</div>
+				</div>
+			{/each}
+		</div>
+	</div>
+	{/if}
+
+	<!-- Top guests -->
+	{#if data.topGuests.length > 0}
+	<div class="rounded-lg border border-border bg-card p-5">
+		<h2 class="font-semibold mb-4 text-sm">Top Guests (by bookings)</h2>
+		<div class="space-y-2">
+			{#each data.topGuests as g, i}
+				<div class="flex items-center justify-between text-sm">
+					<div class="flex items-center gap-2">
+						<span class="w-5 text-center text-xs text-muted-foreground font-medium">{i + 1}</span>
+						<span class="font-medium">{g.name}</span>
+					</div>
+					<span class="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+						{g.count} stay{g.count === 1 ? '' : 's'}
+					</span>
+				</div>
+			{/each}
+		</div>
+	</div>
+	{/if}
+
 	<p class="text-xs text-muted-foreground text-center">
 		Revenue reflects accommodation rate lines for bookings that <em>checked in</em> during this period.
 		ADR = accommodation revenue ÷ room-nights sold. RevPAR = ADR × occupancy rate.

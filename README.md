@@ -8,6 +8,7 @@ Built with SvelteKit 5, Drizzle ORM, SQLite (better-sqlite3), and Tailwind CSS.
 ## Features
 
 - **Booking Grid** — drag-to-select rooms and dates; side-by-side or focus layout per property
+- **Availability Calendar** — Gantt-style 28-day room timeline; click any booking block to open it; prev/next navigation
 - **BookingCard** — full booking lifecycle: reserve → confirm → check-in → check-out → cancel
 - **Group Bookings** — multi-room group card with master date range, shared folio, payment transfers
 - **Inventory / ARI Calendar** — availability, rates, and restrictions grid with inline editing
@@ -17,11 +18,11 @@ Built with SvelteKit 5, Drizzle ORM, SQLite (better-sqlite3), and Tailwind CSS.
 - **Folio / Ledger** — line-item charges, taxes, add-ons, payments, balance-due display
 - **Add-Ons** — pre-configured extras (taxable / non-taxable) with per-booking picker
 - **Tax Presets** — per-property tax rates with room/add-on applicability flags
-- **Self Check-in** — unique guest link shows booking summary, policy waiver, door code, and arrival instructions
+- **Self Check-in** — unique guest link; guest reviews stay, enters vehicle info, agrees to policy, booking advances to `checked_in`; door code revealed; operator email notification sent automatically
 - **Pre-arrival Emails** — automated day-before email with self check-in link (cron-triggered)
 - **Guest Profiles** — auto-complete, address, vehicle, waiver, behaviour rating
 - **Housekeeping View** — room status board (clean / dirty / in progress / out of order), auto-marks dirty on checkout
-- **Reports** — occupancy and revenue summaries
+- **Reports** — occupancy, revenue, tax collected, ADR, RevPAR, 6-month trend, channel breakdown, status breakdown, **revenue by room type**, **top guests**, CSV export; custom date range
 - **Email Confirmations** — mailto deep-link or Resend API integration
 - **Elavon Converge** — per-property payment processing via hosted Checkout.js fields
 - **Roles** — admin approval required; admin sees Users page
@@ -407,6 +408,7 @@ src/
       elavon.ts         Elavon Converge payment API client
   routes/
     (app)/              All authenticated pages (booking, inventory, settings…)
+      availability/     Gantt-style 28-day room availability calendar
       dev/channex/      Channex mock simulator (only visible in mock mode)
     api/                API endpoints (booking CRUD, ARI override, webhooks…)
       booking/[id]/     charge, refund, void, checkout-token, self-checkin-link…

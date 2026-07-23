@@ -76,9 +76,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	let totalCollectedCents = 0;
 	let totalRefundedCents = 0;
 	let totalRateNights = 0; // for ADR
+	const roomTypeRevMap: Record<string, { name: string; bookings: number; revenueCents: number }> = {};
+	const guestCountMap:  Record<string, { name: string; count: number }> = {};
 
 	if (bookingIds.length > 0) {
-		const [lineItems, payments] = await Promise.all([
+		const [lineItems, payments, bookingsWithMeta] = await Promise.all([
 			db.query.bookingLineItems.findMany({
 				where: and(
 					sql`${bookingLineItems.bookingId} IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})`,
@@ -89,12 +91,37 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			db.query.paymentEvents.findMany({
 				where: sql`${paymentEvents.bookingId} IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})`,
 				columns: { bookingId: true, type: true, amount: true }
+			}),
+			db.query.bookings.findMany({
+				where: sql`${bookings.id} IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})`,
+				columns: { id: true },
+				with: {
+					guest: { columns: { id: true, name: true } },
+					room: { columns: {}, with: { roomType: { columns: { name: true } } } }
+				}
 			})
 		]);
+
+		// Build lookup maps
+		const bookingRoomType: Record<string, string> = {};
+		for (const b of bookingsWithMeta) {
+			const rtName = b.room?.roomType?.name ?? 'Unknown';
+			bookingRoomType[b.id] = rtName;
+			if (!roomTypeRevMap[rtName]) roomTypeRevMap[rtName] = { name: rtName, bookings: 0, revenueCents: 0 };
+			roomTypeRevMap[rtName].bookings++;
+			if (b.guest?.id) {
+				const gk = b.guest.id;
+				if (!guestCountMap[gk]) guestCountMap[gk] = { name: b.guest.name ?? 'Guest', count: 0 };
+				guestCountMap[gk].count++;
+			}
+		}
+
 		for (const li of lineItems) {
 			if (li.type === 'rate') {
 				totalRevenueCents += li.totalAmount;
 				totalRateNights += li.quantity ?? 0;
+				const rtName = bookingRoomType[li.bookingId];
+				if (rtName && roomTypeRevMap[rtName]) roomTypeRevMap[rtName].revenueCents += li.totalAmount;
 			} else if (li.type === 'extra') {
 				totalRevenueCents += li.totalAmount;
 			} else if (li.type === 'tax') {
@@ -215,6 +242,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		channelCounts,
 		statusCounts,
 		propertyStats,
-		trend
+		trend,
+		roomTypeRevenue: Object.values(roomTypeRevMap).sort((a, b) => b.revenueCents - a.revenueCents),
+		topGuests: Object.values(guestCountMap).sort((a, b) => b.count - a.count).slice(0, 5),
 	};
 };

@@ -339,6 +339,56 @@ export async function sendPreArrival(p: PreArrivalParams): Promise<void> {
 	});
 }
 
+export async function sendSelfCheckinAlert(p: {
+	guestName: string;
+	propertyName: string;
+	roomNumber: string | null;
+	checkInDate: string;
+	checkOutDate: string;
+	dashboardUrl: string;
+}): Promise<void> {
+	const from = env.RESEND_FROM_EMAIL || 'noreply@example.com';
+	const operatorEmail = env.RESEND_OPERATOR_EMAIL;
+	if (!operatorEmail) return;
+
+	const html = `
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px;color:#1a1a1a">
+  <h2 style="color:#059669">✅ Online Check-In Completed</h2>
+  <hr style="border:none;border-top:1px solid #ddd;margin:16px 0">
+  <p><strong>${p.guestName}</strong> has completed online check-in at ${p.propertyName}.</p>
+  <table style="width:100%;border-collapse:collapse;margin:16px 0">
+    <tr style="background:#f9f9f9">
+      <td style="padding:6px 12px 6px 0;color:#666;width:40%">Property</td>
+      <td style="padding:6px 0"><strong>${p.propertyName}</strong></td>
+    </tr>
+    ${p.roomNumber ? `<tr><td style="padding:6px 12px 6px 0;color:#666">Room</td><td style="padding:6px 0"><strong>${p.roomNumber}</strong></td></tr>` : ''}
+    <tr style="background:#f9f9f9">
+      <td style="padding:6px 12px 6px 0;color:#666">Check-in</td>
+      <td style="padding:6px 0">${fmtDate(p.checkInDate)}</td>
+    </tr>
+    <tr>
+      <td style="padding:6px 12px 6px 0;color:#666">Check-out</td>
+      <td style="padding:6px 0">${fmtDate(p.checkOutDate)}</td>
+    </tr>
+  </table>
+  <p>The guest has agreed to the property policies and their waiver is signed.</p>
+  <a href="${p.dashboardUrl}"
+     style="display:inline-block;background:#1d1d1d;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;margin:8px 0">
+    View Booking →
+  </a>
+</body>
+</html>`;
+
+	await send({
+		from,
+		to: [operatorEmail],
+		subject: `${p.guestName} checked in online — ${p.propertyName}`,
+		html
+	});
+}
+
 export type CheckoutReceiptParams = {
 	guestName: string;
 	guestEmail: string;

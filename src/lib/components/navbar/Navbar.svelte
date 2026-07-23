@@ -20,6 +20,7 @@
 		{#if user}
 			<Button href="/dashboard" variant="ghost" size="sm">Dashboard</Button>
 			<Button href="/booking" variant="ghost" size="sm">Grid</Button>
+			<Button href="/availability" variant="ghost" size="sm">Calendar</Button>
 			<Button href="/inventory" variant="ghost" size="sm">Inventory</Button>
 			<Button href="/housekeeping" variant="ghost" size="sm">HK</Button>
 			<Button href="/night-audit" variant="ghost" size="sm">Audit</Button>

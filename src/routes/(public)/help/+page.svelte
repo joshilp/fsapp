@@ -725,17 +725,25 @@
 				<h2>Generating a self check-in link</h2>
 				<ol>
 					<li>Open the booking card.</li>
-					<li>Click <strong>Send Self Check-in Link</strong>. A unique URL is generated and emailed to the guest.</li>
+					<li>Click <strong>Self check-in link</strong>. A unique URL is generated and can be emailed to the guest or sent via the pre-arrival cron.</li>
 				</ol>
 				<h2>What the guest does</h2>
 				<ol>
-					<li>Opens the link on their phone.</li>
-					<li>Reviews their booking details.</li>
-					<li>Signs the digital waiver (e-signature via canvas).</li>
-					<li>Receives the door code and check-in instructions.</li>
+					<li>Opens the link on their phone (no login required).</li>
+					<li>Reviews booking details — property, room type, dates, check-in/out times.</li>
+					<li>Optionally enters vehicle information (make/model, colour, license plate).</li>
+					<li>Checks the policy agreement checkbox and taps <strong>Complete Check-In</strong>.</li>
+					<li>The door code and arrival instructions are revealed immediately on screen.</li>
 				</ol>
+				<h2>What happens automatically</h2>
+				<ul>
+					<li>Booking status advances from <code>confirmed</code> → <code>checked_in</code>.</li>
+					<li><code>waiverSigned</code> is set to <code>true</code> and the timestamp is recorded.</li>
+					<li>Vehicle details are saved to the booking record.</li>
+					<li>An operator alert email is sent so staff know the guest has arrived.</li>
+				</ul>
 				<h2>Status in the booking card</h2>
-				<p>Once the guest completes self check-in, the booking card shows a green "Self checked in" badge with timestamp.</p>
+				<p>Once the guest completes self check-in, the booking shows a green "Self checked in" badge with timestamp, and the status badge reads <strong>Checked In</strong>.</p>
 			</div>
 
 		{:else if activeId === 'pre-arrival'}
@@ -757,11 +765,18 @@
 
 		{:else if activeId === 'digital-waiver'}
 			<div class="prose-help">
-				<p class="lead">Guests sign a digital waiver during self check-in using a touch/mouse signature canvas.</p>
+				<p class="lead">Guests agree to your property policies during self check-in by ticking a checkbox — no separate signature pad is required.</p>
 				<h2>Waiver content</h2>
-				<p>The waiver text is defined per property. It's displayed above the signature canvas on the self check-in page. Contact support to customize your waiver text.</p>
-				<h2>Signature storage</h2>
-				<p>The signature is recorded as a timestamp and the check-in is logged on the booking record. The signature image itself is stored with the booking data.</p>
+				<p>The policy text displayed to the guest is set per property in <strong>Settings → Property → Policy Text</strong>. Use this field for house rules, cancellation terms, liability waivers, and any other required disclosures.</p>
+				<h2>What gets recorded</h2>
+				<ul>
+					<li><code>waiverSigned: true</code> is stored on the booking record.</li>
+					<li><code>selfCheckinAt</code> is set to the exact timestamp of completion.</li>
+					<li>Both are visible in the booking card and available in reports.</li>
+				</ul>
+				<div class="callout callout-tip">
+					For operations that legally require a handwritten or captured signature, print the registration card from the booking card (<strong>Print reg. card</strong>) and have the guest sign on arrival.
+				</div>
 			</div>
 
 		{:else if activeId === 'guest-dedup'}
@@ -835,11 +850,28 @@
 
 		{:else if activeId === 'occupancy-report'}
 			<div class="prose-help">
-				<p class="lead">The occupancy report shows rooms sold, occupancy percentage, and revenue for any date range.</p>
+				<p class="lead">The Reports page shows occupancy, revenue, taxes, and key metrics for any date range.</p>
 				<h2>Accessing reports</h2>
-				<p>Go to <strong>Reports</strong>. By default it shows the current month. Use the custom date range inputs to change the period.</p>
-				<h2>Per-property cards</h2>
-				<p>Each property gets its own card showing: total bookings, rooms sold, revenue, and occupancy percentage. A trend bar shows how occupancy compares month-over-month.</p>
+				<p>Go to <strong>Reports</strong>. By default it shows the current month. Use the month navigation arrows or the custom date range inputs to change the period.</p>
+				<h2>Summary cards</h2>
+				<ul>
+					<li><strong>Check-ins</strong> — number of arrivals in the period</li>
+					<li><strong>Accommodation</strong> — rate revenue before tax</li>
+					<li><strong>Tax collected</strong> — sum of all tax lines</li>
+					<li><strong>Payments in</strong> — recorded payments (with refunds broken out)</li>
+					<li><strong>ADR</strong> — Average Daily Rate</li>
+					<li><strong>RevPAR</strong> — Revenue per Available Room</li>
+				</ul>
+				<h2>Per-property occupancy</h2>
+				<p>Each property gets its own card showing booked nights vs available nights, occupancy %, and RevPAR.</p>
+				<h2>Revenue by room type</h2>
+				<p>A horizontal bar chart shows accommodation revenue broken down by room type, so you can see which room categories generate the most income.</p>
+				<h2>Top guests</h2>
+				<p>The top 5 guests (by number of stays in the period) are listed. Useful for identifying repeat customers.</p>
+				<h2>Channel &amp; status breakdown</h2>
+				<p>Side-by-side cards show bookings by channel (Direct, Booking.com, etc.) and by status (confirmed, checked in, checked out).</p>
+				<h2>Export</h2>
+				<p>Click the <strong>CSV</strong> button to download a spreadsheet of all bookings for the period.</p>
 			</div>
 
 		{:else if activeId === 'adr-revpar'}
@@ -1029,7 +1061,7 @@
 							<!-- Guests -->
 							<tr class="section-row"><td colspan="3">Guest Management</td></tr>
 							<tr><td>Guest profiles with stay history</td><td class="yes">✅</td><td class="yes">✅</td></tr>
-							<tr><td>Self check-in with digital waiver</td><td class="yes">✅</td><td class="partial">🔶</td></tr>
+							<tr><td>Self check-in with digital waiver</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Pre-arrival email with door code</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 							<tr><td>Post-checkout receipt email</td><td class="yes">✅</td><td class="yes">✅</td></tr>
 						<tr><td>Guest deduplication / merge</td><td class="yes">✅</td><td class="yes">✅</td></tr>
